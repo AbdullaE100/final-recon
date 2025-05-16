@@ -377,42 +377,59 @@ const StreakCalendar = () => {
         
         // Scan journal entries for mentions of relapses and fresh starts
         if (journalEntries && journalEntries.length) {
-          journalEntries.forEach((entry: any) => {
+          // Sort entries by date to ensure chronological processing
+          const sortedEntries = [...journalEntries].sort((a: any, b: any) => 
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          );
+
+          sortedEntries.forEach((entry: any) => {
             if (entry.content && entry.timestamp) {
               const entryDate = new Date(entry.timestamp);
               const lowerContent = entry.content.toLowerCase();
               
               // Check for relapse mentions
-              if (lowerContent.includes('relapse') || 
+              const hasRelapseKeywords = lowerContent.includes('relapse') || 
                   lowerContent.includes('failed') ||
-                  lowerContent.includes('reset')) {
-                
-                detectedRelapses.push(entryDate);
-                
-                // Add to history with context from journal
-                historyEvents.push({
-                  type: 'relapse',
-                  date: entryDate,
-                  notes: entry.content.substring(0, 100) + (entry.content.length > 100 ? '...' : ''),
-                  id: `history-relapse-${entry.timestamp}-${Math.random().toString(36).substring(2, 9)}`
-                });
+                  lowerContent.includes('reset') ||
+                  lowerContent.includes('broke streak') ||
+                  lowerContent.includes('gave in');
+              
+              if (hasRelapseKeywords) {
+                // Only add if this date isn't already recorded as a relapse
+                if (!detectedRelapses.some(d => isSameDay(d.getTime(), entryDate.getTime()))) {
+                  detectedRelapses.push(new Date(entryDate));
+                  
+                  // Add to history with context from journal
+                  historyEvents.push({
+                    type: 'relapse',
+                    date: new Date(entryDate),
+                    notes: entry.content.substring(0, 100) + (entry.content.length > 100 ? '...' : ''),
+                    id: `history-relapse-${entry.timestamp}-${Math.random().toString(36).substring(2, 9)}`
+                  });
+                }
               }
               
               // Check for fresh start mentions
-              if (lowerContent.includes('fresh start') || 
+              const hasFreshStartKeywords = lowerContent.includes('fresh start') || 
                   lowerContent.includes('new beginning') ||
                   lowerContent.includes('starting again') ||
-                  lowerContent.includes('day 1')) {
-                
-                detectedStarts.push(entryDate);
-                
-                // Add to history with context from journal
-                historyEvents.push({
-                  type: 'start',
-                  date: entryDate,
-                  notes: entry.content.substring(0, 100) + (entry.content.length > 100 ? '...' : ''),
-                  id: `history-start-${entry.timestamp}-${Math.random().toString(36).substring(2, 9)}`
-                });
+                  lowerContent.includes('day 1') ||
+                  lowerContent.includes('restart') ||
+                  lowerContent.includes('starting over');
+              
+              if (hasFreshStartKeywords) {
+                // Only add if this date isn't already recorded as a start
+                if (!detectedStarts.some(d => isSameDay(d.getTime(), entryDate.getTime()))) {
+                  detectedStarts.push(new Date(entryDate));
+                  
+                  // Add to history with context from journal
+                  historyEvents.push({
+                    type: 'start',
+                    date: new Date(entryDate),
+                    notes: entry.content.substring(0, 100) + (entry.content.length > 100 ? '...' : ''),
+                    id: `history-start-${entry.timestamp}-${Math.random().toString(36).substring(2, 9)}`
+                  });
+                }
               }
             }
           });
@@ -640,67 +657,103 @@ const StreakCalendar = () => {
   // Check if a date is within the current streak
   const isStreakDay = (date: Date | null) => {
     // Use the persistent streak to ensure consistency
-    if (!date || !streakStartDate || persistentStreak === 0) return false;
-    
-    // To properly determine if a date is part of the current streak:
-    // 1. It must be on or after the streak start date
-    // 2. It must be on or before today
+    if (!date) return false;
     
     // Reset hours/minutes/seconds for proper date comparison
     const normalizedDate = new Date(date);
     normalizedDate.setHours(0, 0, 0, 0);
     
-    const normalizedStartDate = new Date(streakStartDate);
-    normalizedStartDate.setHours(0, 0, 0, 0);
-    
     const normalizedToday = new Date();
     normalizedToday.setHours(0, 0, 0, 0);
     
-    // For debugging
-    if (
-      date.getDate() === new Date().getDate() && 
-      date.getMonth() === new Date().getMonth() && 
-      date.getFullYear() === new Date().getFullYear()
-    ) {
-      console.log(`Checking today in streak: 
-        Today: ${normalizedToday.toDateString()}
-        Start date: ${normalizedStartDate.toDateString()}
-        Current streak: ${persistentStreak} days`);
+    // Case 1: Part of the current active streak
+    if (persistentStreak > 0 && streakStartDate) {
+      const normalizedStartDate = new Date(streakStartDate);
+      normalizedStartDate.setHours(0, 0, 0, 0);
+      
+      if (normalizedDate >= normalizedStartDate && normalizedDate <= normalizedToday) {
+        return true;
+      }
     }
     
-    return normalizedDate >= normalizedStartDate && normalizedDate <= normalizedToday;
+    // Case 2: Part of any historical streak between a fresh start and relapse
+    // Find the most recent fresh start date that's before or equal to this date
+    const relevantStartDate = streakStartDates.find(startDate => {
+      const normalizedStartDate = new Date(startDate);
+      normalizedStartDate.setHours(0, 0, 0, 0);
+      return normalizedStartDate <= normalizedDate && !isSameDay(normalizedStartDate.getTime(), normalizedDate.getTime());
+    });
+    
+    // If there's a relevant start date, check if there's a relapse after this date
+    if (relevantStartDate) {
+      // Find the earliest relapse date after the fresh start
+      const relevantRelapse = relapseDates.find(relapseDate => {
+        const normalizedRelapseDate = new Date(relapseDate);
+        normalizedRelapseDate.setHours(0, 0, 0, 0);
+        
+        return normalizedRelapseDate > normalizedDate;
+      });
+      
+      // If no relapse after this date, and this date is after a fresh start, it's a streak day
+      // Unless this date is a fresh start day itself (which has its own color)
+      const isFreshStartDay = streakStartDates.some(startDate => 
+        isSameDay(startDate.getTime(), date.getTime())
+      );
+      
+      if (!isFreshStartDay) {
+        // Check if this date is after a start date but before a relapse
+        const normalizedRelevantStart = new Date(relevantStartDate);
+        normalizedRelevantStart.setHours(0, 0, 0, 0);
+        
+        if (!relevantRelapse) {
+          // No relapse after this date, so it's part of an ongoing streak
+          // But only if it's not after today
+          return normalizedDate <= normalizedToday;
+        } else {
+          // There's a relapse after this date
+          const normalizedRelevantRelapse = new Date(relevantRelapse);
+          normalizedRelevantRelapse.setHours(0, 0, 0, 0);
+          
+          // It's a streak day if it's after a start but before a relapse
+          return normalizedDate > normalizedRelevantStart && normalizedDate < normalizedRelevantRelapse;
+        }
+      }
+    }
+    
+    return false;
   };
   
   // Check if a date is a relapse day
   const isRelapseDay = (date: Date | null) => {
     if (!date) return false;
     
-    // Check if this date exists in our relapse dates array
-    const found = relapseDates.some(relapseDate => {
-      // Make sure we're comparing only the date part (not time)
-      const sameDay = isSameDay(relapseDate.getTime(), date.getTime());
-      
-      // For debugging
-      if (
-        date.getDate() === new Date().getDate() &&
-        date.getMonth() === new Date().getMonth()
-      ) {
-        console.log(`Checking today against relapse: ${relapseDate.toDateString()}, result: ${sameDay}`);
-      }
-      
-      return sameDay;
-    });
+    // Reset hours/minutes/seconds for proper date comparison
+    const normalizedDate = new Date(date);
+    normalizedDate.setHours(0, 0, 0, 0);
     
-    return found;
+    // Check if this date exists in our relapse dates array
+    return relapseDates.some(relapseDate => {
+      const normalizedRelapseDate = new Date(relapseDate);
+      normalizedRelapseDate.setHours(0, 0, 0, 0);
+      
+      return isSameDay(normalizedRelapseDate.getTime(), normalizedDate.getTime());
+    });
   };
   
   // Check if a date is a streak start day
   const isStreakStartDay = (date: Date | null) => {
     if (!date) return false;
     
-    return streakStartDates.some(startDate => 
-      isSameDay(startDate.getTime(), date.getTime())
-    );
+    // Reset hours/minutes/seconds for proper date comparison
+    const normalizedDate = new Date(date);
+    normalizedDate.setHours(0, 0, 0, 0);
+    
+    return streakStartDates.some(startDate => {
+      const normalizedStartDate = new Date(startDate);
+      normalizedStartDate.setHours(0, 0, 0, 0);
+      
+      return isSameDay(normalizedStartDate.getTime(), normalizedDate.getTime());
+    });
   };
   
   // Handle day cell press
@@ -823,12 +876,13 @@ const StreakCalendar = () => {
             // Choose appropriate gradient colors based on day type
             let gradientColors: [string, string] = ['transparent', 'transparent']; // Default is transparent
             
-            if (isStreak) {
-              gradientColors = ['rgba(74, 222, 128, 0.9)', 'rgba(74, 222, 128, 0.7)'];
-            } else if (isRelapse) {
-              gradientColors = ['rgba(248, 113, 113, 0.9)', 'rgba(248, 113, 113, 0.7)'];
+            // Priority of colors: Relapse > Fresh Start > Streak Day
+            if (isRelapse) {
+              gradientColors = ['rgba(248, 113, 113, 0.9)', 'rgba(248, 113, 113, 0.7)']; // Red for relapse
             } else if (isStreakStart) {
-              gradientColors = ['rgba(96, 165, 250, 0.9)', 'rgba(96, 165, 250, 0.7)'];
+              gradientColors = ['rgba(96, 165, 250, 0.9)', 'rgba(96, 165, 250, 0.7)']; // Blue for fresh start
+            } else if (isStreak) {
+              gradientColors = ['rgba(74, 222, 128, 0.9)', 'rgba(74, 222, 128, 0.7)']; // Green for streak days
             }
             
             return (
