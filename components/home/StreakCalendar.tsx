@@ -329,6 +329,14 @@ const StreakCalendar = () => {
     };
   }, [persistentStreak]); // Add persistent streak as dependency to update when streak changes
   
+  // Add a helper function to generate truly unique IDs
+  const generateUniqueId = (prefix: string) => {
+    const timestamp = Date.now();
+    const random = Math.floor(Math.random() * 1000000);
+    const uniqueStr = Math.random().toString(36).substring(2, 10);
+    return `${prefix}-${timestamp}-${random}-${uniqueStr}`;
+  };
+  
   // Load streak history
   useEffect(() => {
     const loadStreakHistory = async () => {
@@ -352,12 +360,12 @@ const StreakCalendar = () => {
           const startDate = new Date(streakData.startDate);
           detectedStarts.push(startDate);
           
-          // Add to history events
+          // Add to history events with unique ID
           historyEvents.push({
             type: 'start',
             date: startDate,
             notes: 'Current streak started',
-            id: `history-start-current-${Date.now()}`
+            id: generateUniqueId('history-start-current')
           });
           
           // The day before streak start might be a relapse day
@@ -365,13 +373,13 @@ const StreakCalendar = () => {
           relapseDayBefore.setDate(relapseDayBefore.getDate() - 1);
           detectedRelapses.push(relapseDayBefore);
           
-          // Add to history events
+          // Add to history events with unique ID
           historyEvents.push({
             type: 'relapse',
             date: relapseDayBefore,
             streakDays: 0, // We don't know the previous streak length
             notes: 'Relapse before current streak',
-            id: `history-relapse-before-current-${Date.now()}`
+            id: generateUniqueId('history-relapse-before-current')
           });
         }
         
@@ -399,12 +407,12 @@ const StreakCalendar = () => {
                 if (!detectedRelapses.some(d => isSameDay(d.getTime(), entryDate.getTime()))) {
                   detectedRelapses.push(new Date(entryDate));
                   
-                  // Add to history with context from journal
+                  // Add to history with context from journal and guaranteed unique ID
                   historyEvents.push({
                     type: 'relapse',
                     date: new Date(entryDate),
                     notes: entry.content.substring(0, 100) + (entry.content.length > 100 ? '...' : ''),
-                    id: `history-relapse-${entry.timestamp}-${Math.random().toString(36).substring(2, 9)}`
+                    id: generateUniqueId(`journal-relapse-${entry.timestamp}`)
                   });
                 }
               }
@@ -422,12 +430,12 @@ const StreakCalendar = () => {
                 if (!detectedStarts.some(d => isSameDay(d.getTime(), entryDate.getTime()))) {
                   detectedStarts.push(new Date(entryDate));
                   
-                  // Add to history with context from journal
+                  // Add to history with context from journal and guaranteed unique ID
                   historyEvents.push({
                     type: 'start',
                     date: new Date(entryDate),
                     notes: entry.content.substring(0, 100) + (entry.content.length > 100 ? '...' : ''),
-                    id: `history-start-${entry.timestamp}-${Math.random().toString(36).substring(2, 9)}`
+                    id: generateUniqueId(`journal-start-${entry.timestamp}`)
                   });
                 }
               }
@@ -457,7 +465,7 @@ const StreakCalendar = () => {
             date: syntheticRelapse,
             streakDays: 20, // Example streak length
             notes: 'Lost a 20-day streak',
-            id: `history-synthetic-relapse-${i}-${Date.now()}`
+            id: generateUniqueId(`history-synthetic-relapse-${i}`)
           });
           
           // Create synthetic restart 1-2 days after relapse
@@ -476,7 +484,7 @@ const StreakCalendar = () => {
             type: 'start',
             date: syntheticRestart,
             notes: 'Fresh start after relapse',
-            id: `history-synthetic-start-${i}-${Date.now()}`
+            id: generateUniqueId(`history-synthetic-start-${i}`)
           });
         }
         
@@ -492,18 +500,34 @@ const StreakCalendar = () => {
             date: thisMonth,
             streakDays: 5,
             notes: 'Recent relapse for testing',
-            id: `history-recent-relapse-${Date.now()}`
+            id: generateUniqueId('history-recent-relapse')
           });
         }
         
         // Sort history events by date
         historyEvents.sort((a, b) => b.date.getTime() - a.date.getTime());
         
+        // Deduplicate history events - keep only one event of each type per day
+        const uniqueEvents: StreakHistoryEvent[] = [];
+        const processed = new Set<string>();
+        
+        historyEvents.forEach(event => {
+          // Create a date-based key for deduplication using just the date part
+          const dateStr = event.date.toDateString();
+          const dayKey = `${dateStr}-${event.type}`;
+          
+          // Only add the event if we haven't seen this date-type combination yet
+          if (!processed.has(dayKey)) {
+            uniqueEvents.push(event);
+            processed.add(dayKey);
+          }
+        });
+        
         console.log('Loaded relapse dates:', detectedRelapses.map(d => d.toDateString()).join(', '));
         
         setRelapseDates(detectedRelapses);
         setStreakStartDates(detectedStarts);
-        setStreakHistory(historyEvents);
+        setStreakHistory(uniqueEvents); // Use deduplicated list
       } catch (error) {
         console.error('Error loading streak history:', error);
         setRelapseDates([]);
