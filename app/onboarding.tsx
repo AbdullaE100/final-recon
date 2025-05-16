@@ -6,7 +6,16 @@ import WelcomeScreen from '@/components/onboarding/WelcomeScreen';
 import QuizScreen from '@/components/onboarding/QuizScreen';
 import CommitmentScreen from '@/components/onboarding/CommitmentScreen';
 import CompanionSelectionScreen, { CompanionChoice } from '@/components/onboarding/CompanionSelectionScreen';
-import { storeData, STORAGE_KEYS } from '@/utils/storage';
+import { storeData, STORAGE_KEYS, getData } from '@/utils/storage';
+
+// Define the user preferences interface
+interface UserPreferences {
+  signature?: string;
+  pledgeDate?: number;
+  quizAnswers?: Record<string, any>;
+  companion?: CompanionChoice;
+  [key: string]: any; // Allow for other properties
+}
 
 export default function OnboardingScreen() {
   const { colors } = useTheme();
@@ -57,10 +66,23 @@ export default function OnboardingScreen() {
     }
     // Save user preferences and onboarding status
     await storeData(STORAGE_KEYS.ONBOARDING_COMPLETED, true);
-    await storeData(STORAGE_KEYS.USER_PREFERENCES, {
+    
+    // Get existing preferences (including signature if present)
+    const existingPreferences = await getData<UserPreferences>(STORAGE_KEYS.USER_PREFERENCES, {});
+    console.log('Retrieved existing preferences:', Object.keys(existingPreferences));
+    
+    // Ensure we don't overwrite signature data
+    const updatedPreferences: UserPreferences = {
+      ...existingPreferences,
       quizAnswers,
-      companion: selectedCompanion,
-    });
+      companion: selectedCompanion || undefined,
+      // Make sure we don't overwrite signature or pledgeDate if they exist
+      signature: existingPreferences.signature || undefined,
+      pledgeDate: existingPreferences.pledgeDate || undefined,
+    };
+    
+    console.log('Saving updated preferences with keys:', Object.keys(updatedPreferences));
+    await storeData(STORAGE_KEYS.USER_PREFERENCES, updatedPreferences);
     
     // Navigate to the main app
     router.replace('/(tabs)' as any);

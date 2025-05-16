@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { storeData, getData, STORAGE_KEYS, clearAllData } from '@/utils/storage';
 import {
   UserProgress,
@@ -9,8 +9,9 @@ import {
 } from '@/types/gamification';
 import { getStartOfDay, isToday } from '@/utils/dateUtils';
 import { Alert, Platform } from 'react-native';
-import { loadStreakData, updateStreak, performCheckIn as serviceCheckIn } from '@/utils/streakService';
+import { loadStreakData, updateStreak, performCheckIn as serviceCheckIn, DEFAULT_USER_ID } from '@/utils/streakService';
 import { Companion, CompanionType, UserCompanion, EVOLUTION_THRESHOLDS, BOND_THRESHOLDS, XpActionType, FeedingAction } from '@/types/companion';
+import useAchievementNotification, { AchievementProps } from '@/hooks/useAchievementNotification';
 
 // Initial challenges
 const initialChallenges: Challenge[] = [
@@ -84,12 +85,45 @@ const initialChallenges: Challenge[] = [
 
 // Initial achievements/badges
 const initialAchievements: Achievement[] = [
+  // Streak-based achievements (starting with easier ones)
+  {
+    id: 'badge-streak-1day',
+    name: 'First Step',
+    description: 'Maintained a clean streak for 1 day',
+    category: 'streak',
+    unlockCriteria: 'Maintain a 1-day streak',
+    unlocked: false,
+  },
+  {
+    id: 'badge-streak-3days',
+    name: 'Three Day Milestone',
+    description: 'Maintained a clean streak for 3 days',
+    category: 'streak',
+    unlockCriteria: 'Maintain a 3-day streak',
+    unlocked: false,
+  },
+  {
+    id: 'badge-streak-5days',
+    name: 'Five Day Champion',
+    description: 'Maintained a clean streak for 5 days',
+    category: 'streak',
+    unlockCriteria: 'Maintain a 5-day streak',
+    unlocked: false,
+  },
   {
     id: 'badge-streak-1',
     name: '1 Week Milestone',
     description: 'Maintained a clean streak for 7 days',
     category: 'streak',
     unlockCriteria: 'Maintain a 7-day streak',
+    unlocked: false,
+  },
+  {
+    id: 'badge-streak-2weeks',
+    name: 'Two Week Warrior',
+    description: 'Maintained a clean streak for 14 days',
+    category: 'streak',
+    unlockCriteria: 'Maintain a 14-day streak',
     unlocked: false,
   },
   {
@@ -101,11 +135,85 @@ const initialAchievements: Achievement[] = [
     unlocked: false,
   },
   {
+    id: 'badge-streak-45days',
+    name: '45 Day Achiever',
+    description: 'Maintained a clean streak for 45 days',
+    category: 'streak',
+    unlockCriteria: 'Maintain a 45-day streak',
+    unlocked: false,
+  },
+  {
+    id: 'badge-streak-60days',
+    name: '60 Day Warrior',
+    description: 'Maintained a clean streak for 60 days',
+    category: 'streak',
+    unlockCriteria: 'Maintain a 60-day streak',
+    unlocked: false,
+  },
+  {
+    id: 'badge-streak-75days',
+    name: '75 Day Conqueror',
+    description: 'Maintained a clean streak for 75 days',
+    category: 'streak',
+    unlockCriteria: 'Maintain a 75-day streak',
+    unlocked: false,
+  },
+  {
     id: 'badge-streak-3',
     name: '90 Day Champion',
     description: 'Maintained a clean streak for 90 days',
     category: 'streak',
     unlockCriteria: 'Maintain a 90-day streak',
+    unlocked: false,
+  },
+  {
+    id: 'badge-streak-120days',
+    name: '120 Day Legend',
+    description: 'Maintained a clean streak for 120 days',
+    category: 'streak',
+    unlockCriteria: 'Maintain a 120-day streak',
+    unlocked: false,
+  },
+  {
+    id: 'badge-streak-6months',
+    name: 'Half Year Hero',
+    description: 'Maintained a clean streak for 180 days',
+    category: 'streak',
+    unlockCriteria: 'Maintain a 180-day streak',
+    unlocked: false,
+  },
+  {
+    id: 'badge-streak-9months',
+    name: 'Nine Month Nemesis',
+    description: 'Maintained a clean streak for 270 days',
+    category: 'streak',
+    unlockCriteria: 'Maintain a 270-day streak',
+    unlocked: false,
+  },
+  {
+    id: 'badge-streak-1year',
+    name: 'One Year Transformation',
+    description: 'Maintained a clean streak for 365 days',
+    category: 'streak',
+    unlockCriteria: 'Maintain a 365-day streak',
+    unlocked: false,
+  },
+  
+  // Journal-related achievements
+  {
+    id: 'badge-journal-first',
+    name: 'First Reflection',
+    description: 'Created your first journal entry',
+    category: 'journal',
+    unlockCriteria: 'Create your first journal entry',
+    unlocked: false,
+  },
+  {
+    id: 'badge-journal-3',
+    name: 'Regular Writer',
+    description: 'Created 3 journal entries',
+    category: 'journal',
+    unlockCriteria: 'Create 3 journal entries',
     unlocked: false,
   },
   {
@@ -125,6 +233,72 @@ const initialAchievements: Achievement[] = [
     unlocked: false,
   },
   {
+    id: 'badge-journal-master',
+    name: 'Master Journaler',
+    description: 'Created 20 journal entries',
+    category: 'journal',
+    unlockCriteria: 'Create 20 journal entries',
+    unlocked: false,
+  },
+  {
+    id: 'badge-journal-5days',
+    name: 'Journal Week',
+    description: 'Journal for 5 consecutive days',
+    category: 'journal',
+    unlockCriteria: 'Journal for 5 consecutive days',
+    unlocked: false,
+  },
+  {
+    id: 'badge-journal-emotions',
+    name: 'Emotion Tracker',
+    description: 'Track your emotions in 7 journal entries',
+    category: 'journal',
+    unlockCriteria: 'Track emotions in journal entries',
+    unlocked: false,
+  },
+  {
+    id: 'badge-journal-gratitude',
+    name: 'Gratitude Master',
+    description: 'Write 5 gratitude journal entries',
+    category: 'journal',
+    unlockCriteria: 'Write gratitude journal entries',
+    unlocked: false,
+  },
+  {
+    id: 'badge-journal-expert',
+    name: 'Journaling Expert',
+    description: 'Created 50 journal entries',
+    category: 'journal',
+    unlockCriteria: 'Create 50 journal entries',
+    unlocked: false,
+  },
+  {
+    id: 'badge-journal-weekly',
+    name: 'Weekly Reflection',
+    description: 'Created journal entries for 4 consecutive weeks',
+    category: 'journal',
+    unlockCriteria: 'Create journal entries for 4 consecutive weeks',
+    unlocked: false,
+  },
+  {
+    id: 'badge-journal-detailed',
+    name: 'Detailed Analyst',
+    description: 'Created a journal entry with more than 200 words',
+    category: 'journal',
+    unlockCriteria: 'Create a detailed journal entry',
+    unlocked: false,
+  },
+  
+  // Challenge-related achievements
+  {
+    id: 'badge-challenge-first',
+    name: 'Challenger',
+    description: 'Started your first challenge',
+    category: 'challenge',
+    unlockCriteria: 'Start your first challenge',
+    unlocked: false,
+  },
+  {
     id: 'badge-habit-1',
     name: 'Habit Master',
     description: 'Completed the Habit Replacement challenge',
@@ -140,6 +314,474 @@ const initialAchievements: Achievement[] = [
     unlockCriteria: 'Complete 5 challenges',
     unlocked: false,
   },
+  {
+    id: 'badge-challenge-daily-three',
+    name: 'Daily Challenger',
+    description: 'Completed a daily challenge for 3 consecutive days',
+    category: 'challenge',
+    unlockCriteria: 'Complete daily challenges for 3 consecutive days',
+    unlocked: false,
+  },
+  {
+    id: 'badge-challenge-first-active',
+    name: 'Active Challenger',
+    description: 'Have 3 challenges active at once',
+    category: 'challenge',
+    unlockCriteria: 'Have 3 challenges active simultaneously',
+    unlocked: false,
+  },
+  {
+    id: 'badge-challenge-expert',
+    name: 'Challenge Expert',
+    description: 'Completed 10 challenges',
+    category: 'challenge',
+    unlockCriteria: 'Complete 10 challenges',
+    unlocked: false,
+  },
+  {
+    id: 'badge-challenge-daily',
+    name: 'Challenge Veteran',
+    description: 'Completed a daily challenge for 5 consecutive days',
+    category: 'challenge',
+    unlockCriteria: 'Complete daily challenges for 5 consecutive days',
+    unlocked: false,
+  },
+  {
+    id: 'badge-challenge-variety',
+    name: 'Versatile Challenger',
+    description: 'Completed at least one challenge from 3 different categories',
+    category: 'challenge',
+    unlockCriteria: 'Complete challenges from 3 different categories',
+    unlocked: false,
+  },
+  
+  // Meditation achievements
+  {
+    id: 'badge-meditation-first',
+    name: 'Mindful Moment',
+    description: 'Completed your first meditation session',
+    category: 'meditation',
+    unlockCriteria: 'Complete your first meditation session',
+    unlocked: false,
+  },
+  {
+    id: 'badge-meditation-3',
+    name: 'Meditation Student',
+    description: 'Completed 3 meditation sessions',
+    category: 'meditation',
+    unlockCriteria: 'Complete 3 meditation sessions',
+    unlocked: false,
+  },
+  {
+    id: 'badge-meditation-streak-3',
+    name: 'Meditation Streak',
+    description: 'Meditated for 3 consecutive days',
+    category: 'meditation',
+    unlockCriteria: 'Meditate for 3 consecutive days',
+    unlocked: false,
+  },
+  {
+    id: 'badge-meditation-master',
+    name: 'Meditation Master',
+    description: 'Completed 10 meditation sessions',
+    category: 'meditation',
+    unlockCriteria: 'Complete 10 meditation sessions',
+    unlocked: false,
+  },
+  {
+    id: 'badge-meditation-morning',
+    name: 'Morning Meditator',
+    description: 'Complete 5 morning meditation sessions',
+    category: 'meditation',
+    unlockCriteria: 'Complete 5 morning meditations',
+    unlocked: false,
+  },
+  {
+    id: 'badge-meditation-urge',
+    name: 'Urge Surfer',
+    description: 'Use meditation to overcome 3 urges',
+    category: 'meditation',
+    unlockCriteria: 'Use meditation to overcome urges',
+    unlocked: false,
+  },
+  {
+    id: 'badge-meditation-daily',
+    name: 'Daily Meditator',
+    description: 'Meditated for 7 consecutive days',
+    category: 'meditation',
+    unlockCriteria: 'Meditate for 7 consecutive days',
+    unlocked: false,
+  },
+  {
+    id: 'badge-meditation-duration',
+    name: 'Deep Meditator',
+    description: 'Completed a 20+ minute meditation session',
+    category: 'meditation',
+    unlockCriteria: 'Complete a 20+ minute meditation session',
+    unlocked: false,
+  },
+  {
+    id: 'badge-meditation-total',
+    name: 'Zen Master',
+    description: 'Accumulated 5 hours of meditation time',
+    category: 'meditation',
+    unlockCriteria: 'Accumulate 5 hours of meditation time',
+    unlocked: false,
+  },
+  
+  // Workout achievements
+  {
+    id: 'badge-workout-first',
+    name: 'First Workout',
+    description: 'Completed your first workout session',
+    category: 'workout',
+    unlockCriteria: 'Complete your first workout session',
+    unlocked: false,
+  },
+  {
+    id: 'badge-workout-3',
+    name: 'Fitness Enthusiast',
+    description: 'Completed 3 workout sessions',
+    category: 'workout',
+    unlockCriteria: 'Complete 3 workout sessions',
+    unlocked: false,
+  },
+  {
+    id: 'badge-workout-streak-3',
+    name: 'Exercise Streak',
+    description: 'Worked out for 3 consecutive days',
+    category: 'workout',
+    unlockCriteria: 'Work out for 3 consecutive days',
+    unlocked: false,
+  },
+  {
+    id: 'badge-workout-master',
+    name: 'Fitness Champion',
+    description: 'Completed 10 workout sessions',
+    category: 'workout',
+    unlockCriteria: 'Complete 10 workout sessions',
+    unlocked: false,
+  },
+  {
+    id: 'badge-workout-morning',
+    name: 'Morning Warrior',
+    description: 'Complete 5 morning workout sessions',
+    category: 'workout',
+    unlockCriteria: 'Complete 5 morning workouts',
+    unlocked: false,
+  },
+  {
+    id: 'badge-workout-streak',
+    name: 'Consistent Athlete',
+    description: 'Worked out for 5 consecutive days',
+    category: 'workout',
+    unlockCriteria: 'Work out for 5 consecutive days',
+    unlocked: false,
+  },
+  {
+    id: 'badge-workout-long',
+    name: 'Endurance Builder',
+    description: 'Completed a 60+ minute workout session',
+    category: 'workout',
+    unlockCriteria: 'Complete a 60+ minute workout session',
+    unlocked: false,
+  },
+  {
+    id: 'badge-workout-variety',
+    name: 'Cross-Trainer',
+    description: 'Logged 3 different types of workouts',
+    category: 'workout',
+    unlockCriteria: 'Log 3 different types of workouts',
+    unlocked: false,
+  },
+  {
+    id: 'badge-workout-total',
+    name: 'Fitness Devotee',
+    description: 'Accumulated 24 hours of workout time',
+    category: 'workout',
+    unlockCriteria: 'Accumulate 24 hours of workout time',
+    unlocked: false,
+  },
+  
+  // App usage achievements (new)
+  {
+    id: 'badge-usage-first',
+    name: 'Journey Begins',
+    description: 'Used the app for the first time',
+    category: 'app',
+    unlockCriteria: 'Open the app for the first time',
+    unlocked: true, // Auto-unlocked on first use
+  },
+  {
+    id: 'badge-usage-checkin',
+    name: 'Daily Check-in',
+    description: 'Checked in to the app',
+    category: 'app',
+    unlockCriteria: 'Complete your first daily check-in',
+    unlocked: false,
+  },
+  {
+    id: 'badge-usage-checkin-3',
+    name: 'Regular Check-ins',
+    description: 'Checked in 3 days in a row',
+    category: 'app',
+    unlockCriteria: 'Check in 3 days in a row',
+    unlocked: false,
+  },
+  {
+    id: 'badge-usage-streak',
+    name: 'Consistent User',
+    description: 'Used the app for 3 consecutive days',
+    category: 'app',
+    unlockCriteria: 'Use the app for 3 consecutive days',
+    unlocked: false,
+  },
+  {
+    id: 'badge-usage-profile',
+    name: 'Profile Completionist',
+    description: 'Completed your user profile',
+    category: 'app',
+    unlockCriteria: 'Complete your user profile',
+    unlocked: false,
+  },
+  {
+    id: 'badge-usage-week',
+    name: 'Weekly Loyalist',
+    description: 'Used the app every day for a week',
+    category: 'app',
+    unlockCriteria: 'Use the app every day for 7 consecutive days',
+    unlocked: false,
+  },
+  {
+    id: 'badge-usage-month',
+    name: 'Monthly Devotee',
+    description: 'Used the app every day for a month',
+    category: 'app',
+    unlockCriteria: 'Use the app every day for 30 consecutive days',
+    unlocked: false,
+  },
+  {
+    id: 'badge-usage-features',
+    name: 'App Explorer',
+    description: 'Used all main features of the app',
+    category: 'app',
+    unlockCriteria: 'Use all main features of the app',
+    unlocked: false,
+  },
+  
+  // Recovery achievements (new)
+  {
+    id: 'badge-recovery-reset',
+    name: 'Fresh Start',
+    description: 'Started a new recovery journey',
+    category: 'recovery',
+    unlockCriteria: 'Begin a new recovery journey',
+    unlocked: true, // Auto-unlocked on first use
+  },
+  {
+    id: 'badge-recovery-urge',
+    name: 'Urge Surfer',
+    description: 'Successfully resisted an urge',
+    category: 'recovery',
+    unlockCriteria: 'Log your first resisted urge',
+    unlocked: false,
+  },
+  {
+    id: 'badge-recovery-urge-3',
+    name: 'Urge Controller',
+    description: 'Successfully resisted 3 urges',
+    category: 'recovery',
+    unlockCriteria: 'Log 3 resisted urges',
+    unlocked: false,
+  },
+  {
+    id: 'badge-recovery-strategy',
+    name: 'Strategic Warrior',
+    description: 'Created a recovery strategy',
+    category: 'recovery',
+    unlockCriteria: 'Create your first recovery strategy',
+    unlocked: false,
+  },
+  {
+    id: 'badge-recovery-trigger-log',
+    name: 'Trigger Logger',
+    description: 'Logged your first trigger',
+    category: 'recovery',
+    unlockCriteria: 'Log your first trigger',
+    unlocked: false,
+  },
+  {
+    id: 'badge-recovery-urge-master',
+    name: 'Urge Master',
+    description: 'Successfully resisted 10 urges',
+    category: 'recovery',
+    unlockCriteria: 'Log 10 resisted urges',
+    unlocked: false,
+  },
+  {
+    id: 'badge-recovery-accountability',
+    name: 'Accountability Partner',
+    description: 'Added an accountability connection',
+    category: 'recovery',
+    unlockCriteria: 'Add an accountability partner',
+    unlocked: false,
+  },
+  {
+    id: 'badge-recovery-triggers',
+    name: 'Trigger Analyst',
+    description: 'Identified and documented 5 personal triggers',
+    category: 'recovery',
+    unlockCriteria: 'Identify 5 personal triggers',
+    unlocked: false,
+  },
+  {
+    id: 'badge-recovery-milestone',
+    name: 'Recovery Milestone',
+    description: 'Reached a significant personal recovery goal',
+    category: 'recovery',
+    unlockCriteria: 'Reach a personal recovery goal',
+    unlocked: false,
+  },
+  
+  // Companion achievements (new)
+  {
+    id: 'badge-companion-selected',
+    name: 'Found a Friend',
+    description: 'Selected your first companion',
+    category: 'companion',
+    unlockCriteria: 'Select your first companion',
+    unlocked: false,
+  },
+  {
+    id: 'badge-companion-evolution',
+    name: 'Growth Together',
+    description: 'Evolved your companion for the first time',
+    category: 'companion',
+    unlockCriteria: 'Evolve your companion',
+    unlocked: false,
+  },
+  {
+    id: 'badge-companion-feed',
+    name: 'Caretaker',
+    description: 'Fed your companion for the first time',
+    category: 'companion',
+    unlockCriteria: 'Feed your companion',
+    unlocked: false,
+  },
+  {
+    id: 'badge-companion-feed-streak',
+    name: 'Reliable Caretaker',
+    description: 'Fed your companion 3 days in a row',
+    category: 'companion',
+    unlockCriteria: 'Feed your companion for 3 consecutive days',
+    unlocked: false,
+  },
+  {
+    id: 'badge-companion-interaction',
+    name: 'Best Friend',
+    description: 'Interact with your companion 10 times',
+    category: 'companion',
+    unlockCriteria: 'Interact with your companion 10 times',
+    unlocked: false,
+  },
+  {
+    id: 'badge-companion-bond-level',
+    name: 'Strong Bond',
+    description: 'Reached Bond Level 3 with your companion',
+    category: 'companion',
+    unlockCriteria: 'Reach Bond Level 3 with your companion',
+    unlocked: false,
+  },
+  {
+    id: 'badge-companion-max-evolution',
+    name: 'Ultimate Evolution',
+    description: 'Evolved your companion to its final form',
+    category: 'companion',
+    unlockCriteria: 'Evolve your companion to its final form',
+    unlocked: false,
+  },
+  {
+    id: 'badge-companion-daily',
+    name: 'Loyal Friend',
+    description: 'Interacted with your companion for 7 consecutive days',
+    category: 'companion',
+    unlockCriteria: 'Interact with your companion for 7 consecutive days',
+    unlocked: false,
+  },
+  {
+    id: 'badge-companion-feeder',
+    name: 'Generous Feeder',
+    description: 'Fed your companion 20 times',
+    category: 'companion',
+    unlockCriteria: 'Feed your companion 20 times',
+    unlocked: false,
+  },
+  
+  // Milestone achievements (new)
+  {
+    id: 'badge-milestone-first',
+    name: 'Beginning the Journey',
+    description: 'Made your first meaningful step towards recovery',
+    category: 'milestone',
+    unlockCriteria: 'Unlock your first badge',
+    unlocked: false,
+  },
+  {
+    id: 'badge-milestone-three',
+    name: 'Getting Started',
+    description: 'Made progress in your recovery journey',
+    category: 'milestone',
+    unlockCriteria: 'Unlock 3 badges',
+    unlocked: false,
+  },
+  {
+    id: 'badge-milestone-five',
+    name: 'Building Momentum',
+    description: 'Made significant progress in your recovery journey',
+    category: 'milestone',
+    unlockCriteria: 'Unlock 5 badges',
+    unlocked: false,
+  },
+  {
+    id: 'badge-milestone-ten',
+    name: 'Transformation Underway',
+    description: 'Undergoing a significant transformation in your life',
+    category: 'milestone',
+    unlockCriteria: 'Unlock 10 badges',
+    unlocked: false,
+  },
+  {
+    id: 'badge-milestone-twenty',
+    name: 'Major Progress',
+    description: 'Achieved major progress in your recovery journey',
+    category: 'milestone',
+    unlockCriteria: 'Unlock 20 badges',
+    unlocked: false,
+  },
+  {
+    id: 'badge-milestone-thirty',
+    name: 'Dedicated Recoverer',
+    description: 'Shown exceptional dedication to your recovery',
+    category: 'milestone',
+    unlockCriteria: 'Unlock 30 badges',
+    unlocked: false,
+  },
+  {
+    id: 'badge-milestone-fifty',
+    name: 'Life Transformer',
+    description: 'Completely transformed your lifestyle and habits',
+    category: 'milestone',
+    unlockCriteria: 'Unlock 50 badges',
+    unlocked: false,
+  },
+  {
+    id: 'badge-milestone-social',
+    name: 'Community Supporter',
+    description: 'Actively engaged with the recovery community',
+    category: 'milestone',
+    unlockCriteria: 'Engage with the community features',
+    unlocked: false,
+  }
 ];
 
 // Level requirements
@@ -166,6 +808,8 @@ const defaultUserProgress: UserProgress = {
   challengesCompleted: [],
   challengesActive: [],
   companionId: undefined,
+  achievements: initialAchievements,
+  dailyCheckedIn: false,
 };
 
 interface GamificationContextType {
@@ -186,16 +830,20 @@ interface GamificationContextType {
   availableChallenges: Challenge[];
   startChallenge: (id: string) => void;
   completeChallenge: (id: string) => void;
+  logHabitReplacement: (description: string) => boolean;
+  logWorkout: (durationMinutes: number) => boolean;
+  logMeditation: (durationMinutes: number) => boolean;
   
   // Achievements
   achievements: Achievement[];
+  forceCheckStreakAchievements: () => Promise<boolean>;
   
   // Actions
   checkIn: () => void;
   resetData: () => void;
   exportData: () => void;
   importData: () => void;
-  setStreak: (days: number) => void;
+  setStreak: (days: number, startDate?: number) => void;
   
   // Helpers
   getLevelProgress: () => number;
@@ -228,7 +876,7 @@ const GamificationContext = createContext<GamificationContextType>({
   availableChallenges: [],
   startChallenge: () => {},
   completeChallenge: () => {},
-  achievements: [],
+  achievements: [], // Initialize with empty array
   checkIn: () => {},
   resetData: () => {},
   exportData: () => {},
@@ -244,16 +892,30 @@ const GamificationContext = createContext<GamificationContextType>({
   getCompanionStage: () => 1,
   getBondLevel: () => 0,
   resetCompanion: () => Promise.resolve(),
+  logHabitReplacement: () => false,
+  logWorkout: () => false,
+  logMeditation: () => false,
+  forceCheckStreakAchievements: () => Promise.resolve(false),
 });
 
 export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ children }) => {
   // State
-  const [userProgress, setUserProgress] = useState<UserProgress>(defaultUserProgress);
+  const [userProgress, setUserProgress] = useState<UserProgress>({
+    ...defaultUserProgress,
+    achievements: [...initialAchievements] // Ensure deep copy
+  });
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
   const [challenges, setChallenges] = useState<Challenge[]>(initialChallenges);
-  const [achievements, setAchievements] = useState<Achievement[]>(initialAchievements);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [companion, setCompanionState] = useState<UserCompanion | null>(null);
+  const [manualStreakSet, setManualStreakSet] = useState(false);
+
+  // Initialize achievement notification system
+  const { 
+    showAchievement, 
+    hideAchievement, 
+    AchievementNotificationComponent 
+  } = useAchievementNotification();
 
   // Computed values
   const activeChallenges = challenges.filter(c => 
@@ -271,62 +933,140 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   useEffect(() => {
     const loadData = async () => {
       try {
-        // Load streak data from the streak service (Supabase with local fallback)
-        const streakData = await loadStreakData();
+        setDataLoaded(false);
         
-        // Load other user progress data
-        const storedUserProgress = await getData<UserProgress>(
-          STORAGE_KEYS.USER_DATA, 
-          defaultUserProgress
-        );
+        console.log('Loading user data...');
         
-        // Merge streak data with other user progress
-        const mergedUserProgress = {
-          ...storedUserProgress,
+        // First check if there's a streak coming from our streak service
+        // This incorporates all the failsafe mechanisms
+        try {
+          const streakData = await loadStreakData();
+          console.log('Loaded streak data:', streakData);
+          
+          // Pre-emptively set streak in UI for immediate feedback
+          setUserProgress(prev => ({
+            ...prev,
           streak: streakData.streak,
-          lastCheckIn: streakData.lastCheckIn,
-        };
+            lastCheckIn: streakData.lastCheckIn
+          }));
+        } catch (streakError) {
+          console.error('Error loading streak data:', streakError);
+        }
         
-        setUserProgress(mergedUserProgress);
+        // Load user progress data (level, points, etc.)
+        const savedUserProgress = await getData(STORAGE_KEYS.USER_DATA, defaultUserProgress);
+        
+        // Safety check: ensure we have valid data
+        if (!savedUserProgress || typeof savedUserProgress !== 'object') {
+          console.warn('Invalid user progress data found, resetting to default');
+          await storeData(STORAGE_KEYS.USER_DATA, defaultUserProgress);
+          setUserProgress(defaultUserProgress);
+        } else {
+          // Important: When loading user progress, prioritize streak service data for streak value
+          // This ensures that any manually set streak values are preserved
+          const currentStreak = userProgress.streak; // Get the streak we already set from streak service
+          setUserProgress({
+            ...savedUserProgress,
+            streak: currentStreak > savedUserProgress.streak ? currentStreak : savedUserProgress.streak
+          });
+        }
+        
+        // Load achievements
+        const savedAchievements = await getData(STORAGE_KEYS.ACHIEVEMENTS, initialAchievements);
+        setUserProgress(prev => ({
+          ...prev,
+          achievements: savedAchievements || initialAchievements
+        }));
         
         // Load journal entries
-        const storedJournalEntries = await getData<JournalEntry[]>(
-          STORAGE_KEYS.JOURNAL_ENTRIES, 
-          []
-        );
-        setJournalEntries(storedJournalEntries);
+        const savedJournalEntries = await getData(STORAGE_KEYS.JOURNAL_ENTRIES, []);
+        setJournalEntries(savedJournalEntries || []);
         
-        // Load challenges and achievements if available
-        const storedChallenges = await getData<Challenge[]>(
-          STORAGE_KEYS.CHALLENGES, 
-          initialChallenges
-        );
-        setChallenges(storedChallenges);
-        
-        const storedAchievements = await getData<Achievement[]>(
-          STORAGE_KEYS.ACHIEVEMENTS, 
-          initialAchievements
-        );
-        setAchievements(storedAchievements);
+        // Load challenges
+        const savedChallenges = await getData(STORAGE_KEYS.CHALLENGES, initialChallenges);
+        setChallenges(savedChallenges || initialChallenges);
         
         // Load companion data if it exists
-        if (userProgress.companionId) {
-          const companionData = await getData(STORAGE_KEYS.COMPANION_DATA, null);
-          if (companionData) {
-            setCompanionState(companionData);
+        try {
+          const savedCompanion = await getData<UserCompanion | null>(STORAGE_KEYS.COMPANION_DATA, null);
+          if (savedCompanion && typeof savedCompanion === 'object' && 'id' in savedCompanion) {
+            setCompanionState(savedCompanion);
+          } else if (userProgress.companionId) {
+            // If user has a companion ID but no companion data, create a default one
+            await createDefaultCompanion();
+          }
+        } catch (companionError) {
+          console.error('Error loading companion data:', companionError);
+        }
+        
+        // Double-check streak value after all data is loaded
+        // This ensures a user-set streak is never overwritten
+        try {
+          const manualStreakValue = await getManualStreakValue();
+          if (manualStreakValue !== null && manualStreakValue > userProgress.streak) {
+            console.log(`Found manual streak value (${manualStreakValue}) higher than loaded value (${userProgress.streak}), using manual value`);
+            setUserProgress(prev => ({
+              ...prev,
+              streak: manualStreakValue
+            }));
+          }
+        } catch (manualStreakError) {
+          console.error('Error checking for manual streak:', manualStreakError);
+        }
+        
+        // Initialize availability of daily check-in
+        const currentDate = new Date().setHours(0, 0, 0, 0);
+        const lastCheckDate = savedUserProgress?.lastCheckIn 
+          ? new Date(savedUserProgress.lastCheckIn).setHours(0, 0, 0, 0)
+          : 0;
+        
+        // Update daily checked in state through userProgress
+        const hasDailyCheckIn = currentDate === lastCheckDate;
+        if (hasDailyCheckIn !== dailyCheckedIn) {
+          // This is a computed property from isToday(userProgress.lastCheckIn),
+          // which should update automatically when userProgress changes
+          console.log('Daily check-in status:', hasDailyCheckIn);
+        }
+        
+        console.log('Data loading complete!');
+        setDataLoaded(true);
+      } catch (error) {
+        console.error('Error loading data:', error);
+        setDataLoaded(true); // Set to true even on error so the app is usable
+      }
+    };
+    
+    // Helper function to check for manually set streak values
+    const getManualStreakValue = async (): Promise<number | null> => {
+      try {
+        // Try window localStorage if available
+        if (typeof window !== 'undefined' && window.localStorage) {
+          const manualStreak = window.localStorage.getItem('STREAK_FORCE_VALUE');
+          if (manualStreak) {
+            return parseInt(manualStreak, 10);
           }
         }
         
-        setDataLoaded(true);
+        // Try AsyncStorage if available
+        try {
+          const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+          const manualStreak = await AsyncStorage.getItem('MANUAL_STREAK_KEY');
+          if (manualStreak) {
+            return parseInt(manualStreak, 10);
+          }
+        } catch (asyncError) {
+          console.error('AsyncStorage check failed:', asyncError);
+        }
+        
+        return null;
       } catch (error) {
-        console.error('Error loading gamification data:', error);
-        // Use defaults if data can't be loaded
-        setDataLoaded(true);
+        console.error('Error in getManualStreakValue:', error);
+        return null;
       }
     };
 
     loadData();
-  }, []);
+  }, [manualStreakSet]);
   
   // Save data when it changes
   useEffect(() => {
@@ -349,9 +1089,9 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   
   useEffect(() => {
     if (dataLoaded) {
-      storeData(STORAGE_KEYS.ACHIEVEMENTS, achievements);
+      storeData(STORAGE_KEYS.ACHIEVEMENTS, userProgress.achievements);
     }
-  }, [achievements, dataLoaded]);
+  }, [userProgress.achievements, dataLoaded]);
   
   useEffect(() => {
     if (dataLoaded) {
@@ -364,157 +1104,345 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     if (!dataLoaded) return;
     
     const checkStreakAchievements = async () => {
-      // Skip achievement checks for brand new users (first session)
-      const isFirstSession = userProgress.lastCheckIn === 0;
-      if (isFirstSession) {
-        console.log('First session detected, skipping achievement checks');
-        return;
-      }
+      if (!dataLoaded) return;
       
-      // Skip achievement checks if streak is unreasonably high for a new installation
-      // Catches edge cases where testing values might be accidentally left in
-      const isFirstDay = (Date.now() - userProgress.lastCheckIn) < 24 * 60 * 60 * 1000;
-      const isPossiblyTestingData = userProgress.streak > 10 && isFirstDay;
+      let updated = false;
       
-      if (isPossiblyTestingData) {
-        console.warn('Detected possibly invalid streak data, skipping achievement check', {
-          streak: userProgress.streak,
-          lastCheckIn: new Date(userProgress.lastCheckIn).toISOString()
-        });
+      // Get current streak
+      const currentStreak = userProgress.streak;
+      
+      // Check streak-related badges
+      const checkAndUpdateBadge = (badgeId: string, requiredStreak: number) => {
+        const badge = userProgress.achievements.find(a => a.id === badgeId);
+        if (badge && !badge.unlocked && currentStreak >= requiredStreak) {
+          badge.unlocked = true;
+        updated = true;
         
-        // Fix potentially incorrect streak data
-        if (userProgress.streak >= 90) {
-          console.warn('Resetting abnormally high streak for new user');
-          await updateStreak(0);
+          showAchievement({
+            title: badge.name,
+            description: badge.description,
+            buttonText: 'Nice!',
+          });
           
-          // Update local state
-          setUserProgress(prev => ({
-            ...prev,
-            streak: 0,
-            lastCheckIn: Date.now()
-          }));
+          // Also add points for unlocking a badge
+          addPoints(50);
+        }
+      };
+      
+      // Check all streak badges
+      checkAndUpdateBadge('badge-streak-1day', 1);
+      checkAndUpdateBadge('badge-streak-3days', 3);
+      checkAndUpdateBadge('badge-streak-5days', 5);
+      checkAndUpdateBadge('badge-streak-1', 7);
+      checkAndUpdateBadge('badge-streak-2weeks', 14);
+      checkAndUpdateBadge('badge-streak-2', 30);
+      checkAndUpdateBadge('badge-streak-45days', 45);
+      checkAndUpdateBadge('badge-streak-60days', 60);
+      checkAndUpdateBadge('badge-streak-75days', 75);
+      checkAndUpdateBadge('badge-streak-3', 90);
+      checkAndUpdateBadge('badge-streak-120days', 120);
+      checkAndUpdateBadge('badge-streak-6months', 180);
+      checkAndUpdateBadge('badge-streak-9months', 270);
+      checkAndUpdateBadge('badge-streak-1year', 365);
+      
+      // Check usage streak badge
+      const usageStreakBadge = userProgress.achievements.find(a => a.id === 'badge-usage-streak');
+      if (usageStreakBadge && !usageStreakBadge.unlocked) {
+        // For simplicity, if they have a 3-day streak, we'll assume they've used the app for 3 consecutive days
+        if (currentStreak >= 3) {
+          usageStreakBadge.unlocked = true;
+        updated = true;
+        
+          showAchievement({
+            title: usageStreakBadge.name,
+            description: usageStreakBadge.description,
+            buttonText: 'Nice!',
+          });
           
-          return;
+          addPoints(25);
         }
       }
       
-      const updatedAchievements = [...achievements];
-      let updated = false;
+      // Check for first use badge and daily check-in badge
+      const firstUseBadge = userProgress.achievements.find(a => a.id === 'badge-usage-first');
+      const dailyCheckInBadge = userProgress.achievements.find(a => a.id === 'badge-usage-checkin');
       
-      // 7-day streak achievement
-      const streakAchievement7 = updatedAchievements.find(a => a.id === 'badge-streak-1');
-      if (streakAchievement7 && !streakAchievement7.unlocked && userProgress.streak >= 7) {
-        streakAchievement7.unlocked = true;
-        streakAchievement7.unlockedDate = Date.now();
+      if (firstUseBadge && !firstUseBadge.unlocked) {
+        firstUseBadge.unlocked = true;
         updated = true;
-        
-        // Show achievement notification
-        Alert.alert(
-          "Achievement Unlocked!",
-          `${streakAchievement7.name}: ${streakAchievement7.description}`,
-          [{ text: "Awesome!" }]
-        );
       }
       
-      // 30-day streak achievement
-      const streakAchievement30 = updatedAchievements.find(a => a.id === 'badge-streak-2');
-      if (streakAchievement30 && !streakAchievement30.unlocked && userProgress.streak >= 30) {
-        streakAchievement30.unlocked = true;
-        streakAchievement30.unlockedDate = Date.now();
+      if (dailyCheckInBadge && !dailyCheckInBadge.unlocked && userProgress.dailyCheckedIn) {
+        dailyCheckInBadge.unlocked = true;
         updated = true;
         
-        // Show achievement notification
-        Alert.alert(
-          "Achievement Unlocked!",
-          `${streakAchievement30.name}: ${streakAchievement30.description}`,
-          [{ text: "Amazing!" }]
-        );
+        showAchievement({
+          title: dailyCheckInBadge.name,
+          description: dailyCheckInBadge.description,
+          buttonText: 'Nice!',
+        });
+        
+        addPoints(25);
       }
       
-      // 90-day streak achievement
-      const streakAchievement90 = updatedAchievements.find(a => a.id === 'badge-streak-3');
-      if (streakAchievement90 && !streakAchievement90.unlocked && userProgress.streak >= 90) {
-        streakAchievement90.unlocked = true;
-        streakAchievement90.unlockedDate = Date.now();
+      // Check for companion-related badges
+      if (companion) {
+        const companionSelectedBadge = userProgress.achievements.find(a => a.id === 'badge-companion-selected');
+        if (companionSelectedBadge && !companionSelectedBadge.unlocked) {
+          companionSelectedBadge.unlocked = true;
+          updated = true;
+          
+          showAchievement({
+            title: companionSelectedBadge.name,
+            description: companionSelectedBadge.description,
+            buttonText: 'Nice!',
+          });
+          
+          addPoints(25);
+        }
+        
+        // Check if companion has been fed
+        const companionFeedBadge = userProgress.achievements.find(a => a.id === 'badge-companion-feed');
+        if (companionFeedBadge && !companionFeedBadge.unlocked && companion.feedingHistory && companion.feedingHistory.length > 0) {
+          companionFeedBadge.unlocked = true;
+          updated = true;
+          
+          showAchievement({
+            title: companionFeedBadge.name,
+            description: companionFeedBadge.description,
+            buttonText: 'Nice!',
+          });
+          
+          addPoints(25);
+        }
+      }
+      
+      // Check for milestone badges based on total unlocked badges
+      const unlockedBadgesCount = userProgress.achievements.filter(badge => badge.unlocked).length;
+      
+      const firstMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-first');
+      if (firstMilestoneBadge && !firstMilestoneBadge.unlocked && unlockedBadgesCount >= 1) {
+        firstMilestoneBadge.unlocked = true;
         updated = true;
         
-        // Show achievement notification
-        Alert.alert(
-          "Achievement Unlocked!",
-          `${streakAchievement90.name}: ${streakAchievement90.description}`,
-          [{ text: "Incredible!" }]
-        );
+        showAchievement({
+          title: firstMilestoneBadge.name,
+          description: firstMilestoneBadge.description,
+          buttonText: 'Nice!',
+        });
+        
+        addPoints(25);
+      }
+      
+      const threeMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-three');
+      if (threeMilestoneBadge && !threeMilestoneBadge.unlocked && unlockedBadgesCount >= 3) {
+        threeMilestoneBadge.unlocked = true;
+        updated = true;
+        
+        showAchievement({
+          title: threeMilestoneBadge.name,
+          description: threeMilestoneBadge.description,
+          buttonText: 'Keep Going!',
+        });
+        
+        addPoints(40);
+      }
+      
+      const fiveMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-five');
+      if (fiveMilestoneBadge && !fiveMilestoneBadge.unlocked && unlockedBadgesCount >= 5) {
+        fiveMilestoneBadge.unlocked = true;
+        updated = true;
+        
+        showAchievement({
+          title: fiveMilestoneBadge.name,
+          description: fiveMilestoneBadge.description,
+          buttonText: 'Amazing!',
+        });
+        
+        addPoints(50);
+      }
+      
+      const tenMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-ten');
+      if (tenMilestoneBadge && !tenMilestoneBadge.unlocked && unlockedBadgesCount >= 10) {
+        tenMilestoneBadge.unlocked = true;
+        updated = true;
+        
+        showAchievement({
+          title: tenMilestoneBadge.name,
+          description: tenMilestoneBadge.description,
+          buttonText: 'Incredible!',
+        });
+        
+        addPoints(100);
+      }
+      
+      const twentyMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-twenty');
+      if (twentyMilestoneBadge && !twentyMilestoneBadge.unlocked && unlockedBadgesCount >= 20) {
+        twentyMilestoneBadge.unlocked = true;
+        updated = true;
+        
+        showAchievement({
+          title: twentyMilestoneBadge.name,
+          description: twentyMilestoneBadge.description,
+          buttonText: 'Outstanding!',
+        });
+        
+        addPoints(150);
+      }
+      
+      const thirtyMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-thirty');
+      if (thirtyMilestoneBadge && !thirtyMilestoneBadge.unlocked && unlockedBadgesCount >= 30) {
+        thirtyMilestoneBadge.unlocked = true;
+        updated = true;
+        
+        showAchievement({
+          title: thirtyMilestoneBadge.name,
+          description: thirtyMilestoneBadge.description,
+          buttonText: 'Master Level!',
+        });
+        
+        addPoints(200);
+      }
+      
+      const fiftyMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-fifty');
+      if (fiftyMilestoneBadge && !fiftyMilestoneBadge.unlocked && unlockedBadgesCount >= 50) {
+        fiftyMilestoneBadge.unlocked = true;
+        updated = true;
+        
+        showAchievement({
+          title: fiftyMilestoneBadge.name,
+          description: fiftyMilestoneBadge.description,
+          buttonText: 'Legendary!',
+        });
+        
+        addPoints(200);
       }
       
       if (updated) {
-        setAchievements(updatedAchievements);
-        await storeData(STORAGE_KEYS.ACHIEVEMENTS, updatedAchievements);
+        setUserProgress({...userProgress});
+        await storeData(STORAGE_KEYS.USER_DATA, userProgress);
+        
+        // Also check if the companion should evolve based on new badges
+        await checkAndEvolveCompanion();
       }
+      
+      return updated;
     };
     
     checkStreakAchievements();
-  }, [userProgress.streak, dataLoaded, achievements]);
+  }, [dataLoaded, userProgress.streak, userProgress.achievements, companion]);
+  
+  // Check for companion evolution when achievements change
+  useEffect(() => {
+    if (!dataLoaded) return;
+    
+    // Only check evolution if we have a companion
+    if (companion) {
+      console.log("Checking companion evolution due to achievement changes");
+      checkAndEvolveCompanion().catch(e => 
+        console.error('Error checking for evolution after achievement change:', e)
+      );
+    }
+  }, [dataLoaded, userProgress.streak, userProgress.achievements, companion]);
   
   // Extract checkAndEvolveCompanion as a reusable function
   const checkAndEvolveCompanion = async () => {
-    if (!companion || companion.type !== 'water') {
-      console.log("Cannot evolve: companion is null or not water type", companion?.type);
-      return;
+    if (!companion) {
+      console.log("Cannot evolve: companion is null");
+      return false;
     }
+    
+    // Get unlocked badges count
+    const unlockedBadgesCount = userProgress.achievements.filter(badge => badge.unlocked).length;
     
     console.log("----------------------------");
     console.log("EVOLUTION CHECK:");
-    console.log("Current streak:", userProgress.streak);
+    console.log("Current badges unlocked:", unlockedBadgesCount);
     console.log("Current companion level:", companion.currentLevel);
     console.log("Companion type:", companion.type);
-    console.log("Should evolve to level 2:", userProgress.streak >= 30 && companion.currentLevel < 2);
-    console.log("Should evolve to level 3:", userProgress.streak >= 60 && companion.currentLevel < 3);
+    console.log("Should evolve to level 2:", unlockedBadgesCount >= 5 && companion.currentLevel < 2);
+    console.log("Should evolve to level 3:", unlockedBadgesCount >= 10 && companion.currentLevel < 3);
     console.log("----------------------------");
     
-    // 60-day streak: Evolve to level 3
-    if (userProgress.streak >= 60 && companion.currentLevel < 3) {
-      console.log("Automatically evolving to level 3 (60-day streak)");
+    // Get the companion's type for evolution name selection
+    const companionType = companion.type || 'water'; // Default to water if no type
+    
+    // 10+ badges: Evolve to level 3
+    if (unlockedBadgesCount >= 10 && companion.currentLevel < 3) {
+      console.log(`Automatically evolving to level 3 (10+ badges) for ${companionType} type`);
+      
+      // Choose the appropriate name based on companion type
+      let evolvedName = 'Unknown';
+      switch (companionType) {
+        case 'fire':
+          evolvedName = 'Infernix';
+          break;
+        case 'water':
+          evolvedName = 'Aquadrake';
+          break;
+        case 'plant':
+          evolvedName = 'Floravine';
+          break;
+        default:
+          evolvedName = companion.name || 'Companion';
+      }
       
       const updatedCompanion: UserCompanion = {
         ...companion,
         currentLevel: 3,
-        name: 'Stripes',
+        name: evolvedName,
         isEvolutionReady: false,
         experience: 0,
         lastInteraction: Date.now(),
         happinessLevel: 100,
       };
       
-      // Update state
+      // Update state immediately for UI responsiveness
       setCompanionState(updatedCompanion);
       
       // Save to storage
       await storeData(STORAGE_KEYS.COMPANION_DATA, updatedCompanion);
       
-      // Show notification
-      Alert.alert(
-        "Companion Evolved!",
-        "Your companion has evolved to its final form after 60 days of dedication!",
-        [{ text: "Awesome!" }]
-      );
+      // Show notification with custom component instead of Alert
+      showAchievement({
+        title: "Companion Evolved!",
+        description: `Your ${evolvedName} has evolved to its final form after unlocking 10+ badges!`,
+        buttonText: "Awesome!"
+      });
       
       return true;
     }
-    // 30-day streak: Evolve to level 2
-    else if (userProgress.streak >= 30 && companion.currentLevel < 2) {
-      console.log("Automatically evolving to level 2 (30-day streak)");
+    // 5+ badges: Evolve to level 2
+    else if (unlockedBadgesCount >= 5 && companion.currentLevel < 2) {
+      console.log(`Automatically evolving to level 2 (5+ badges) for ${companionType} type`);
+      
+      // Choose the appropriate name based on companion type
+      let evolvedName = 'Unknown';
+      switch (companionType) {
+        case 'fire':
+          evolvedName = 'Emberclaw';
+          break;
+        case 'water':
+          evolvedName = 'Bubblescale';
+          break;
+        case 'plant':
+          evolvedName = 'Vinesprout';
+          break;
+        default:
+          evolvedName = companion.name || 'Companion';
+      }
       
       const updatedCompanion: UserCompanion = {
         ...companion,
         currentLevel: 2,
-        name: 'Stripes',
+        name: evolvedName,
         isEvolutionReady: false,
         experience: 0,
         lastInteraction: Date.now(),
         happinessLevel: 100,
       };
       
-      // Update state
+      // Update state immediately for UI responsiveness
       setCompanionState(updatedCompanion);
       
       // Log the state update
@@ -524,12 +1452,12 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       await storeData(STORAGE_KEYS.COMPANION_DATA, updatedCompanion);
       console.log("Saved evolved companion to storage");
       
-      // Show notification
-      Alert.alert(
-        "Companion Evolved!",
-        "Your companion has evolved to stage 2 after maintaining a 30-day streak!",
-        [{ text: "Great!" }]
-      );
+      // Show notification with custom component instead of Alert
+      showAchievement({
+        title: "Companion Evolved!",
+        description: `Your ${evolvedName} has evolved to stage 2 after unlocking 5 badges!`,
+        buttonText: "Great!"
+      });
       
       return true;
     } else {
@@ -543,36 +1471,42 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     if (!dataLoaded) return;
     
     const checkJournalAchievements = async () => {
-      if (journalEntries.length >= 10 && !achievements.find(a => a.id === 'badge-journal-2')?.unlocked) {
-        setAchievements(prev => prev.map(a => 
+      if (journalEntries.length >= 10 && !userProgress.achievements.find(a => a.id === 'badge-journal-2')?.unlocked) {
+        setUserProgress(prev => ({
+          ...prev,
+          achievements: prev.achievements.map(a => 
           a.id === 'badge-journal-2' 
             ? { ...a, unlocked: true, unlockedDate: Date.now() } 
             : a
-        ));
+          )
+        }));
         addPoints(200);
       }
     };
     
     checkJournalAchievements();
-  }, [journalEntries.length, dataLoaded, achievements]);
+  }, [journalEntries.length, dataLoaded, userProgress.achievements]);
   
   // Check for challenge achievements
   useEffect(() => {
     if (!dataLoaded) return;
     
     const checkChallengeAchievements = async () => {
-      if (userProgress.challengesCompleted.length >= 5 && !achievements.find(a => a.id === 'badge-challenge-1')?.unlocked) {
-        setAchievements(prev => prev.map(a => 
+      if (userProgress.challengesCompleted.length >= 5 && !userProgress.achievements.find(a => a.id === 'badge-challenge-1')?.unlocked) {
+        setUserProgress(prev => ({
+          ...prev,
+          achievements: prev.achievements.map(a => 
           a.id === 'badge-challenge-1' 
             ? { ...a, unlocked: true, unlockedDate: Date.now() } 
             : a
-        ));
+          )
+        }));
         addPoints(250);
       }
     };
     
     checkChallengeAchievements();
-  }, [userProgress.challengesCompleted.length, dataLoaded, achievements]);
+  }, [userProgress.challengesCompleted.length, dataLoaded, userProgress.achievements]);
   
   // Helper function to add points and update level
   const addPoints = (newPoints: number) => {
@@ -621,7 +1555,7 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       addPoints(10);
       
       // Check for streak-based achievements
-      const updatedAchievements = [...achievements];
+      const updatedAchievements = [...userProgress.achievements];
       
       // Check if any streak-based achievements were unlocked
       if (streakData.streak >= 7) {
@@ -630,6 +1564,13 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
           weekBadge.unlocked = true;
           weekBadge.unlockedDate = Date.now();
           addPoints(50);
+          
+          // Show achievement notification with custom component instead of Alert
+          showAchievement({
+            title: "Achievement Unlocked!",
+            description: `${weekBadge.name}: ${weekBadge.description}`,
+            buttonText: "Awesome!"
+          });
         }
       }
       
@@ -639,6 +1580,13 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
           monthBadge.unlocked = true;
           monthBadge.unlockedDate = Date.now();
           addPoints(200);
+          
+          // Show achievement notification with custom component instead of Alert
+          showAchievement({
+            title: "Achievement Unlocked!",
+            description: `${monthBadge.name}: ${monthBadge.description}`,
+            buttonText: "Amazing!"
+          });
         }
       }
       
@@ -648,19 +1596,31 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
           ninetyDayBadge.unlocked = true;
           ninetyDayBadge.unlockedDate = Date.now();
           addPoints(500);
+          
+          // Show achievement notification with custom component instead of Alert
+          showAchievement({
+            title: "Achievement Unlocked!",
+            description: `${ninetyDayBadge.name}: ${ninetyDayBadge.description}`,
+            buttonText: "Incredible!"
+          });
         }
       }
       
-      setAchievements(updatedAchievements);
-      await storeData(STORAGE_KEYS.ACHIEVEMENTS, updatedAchievements);
+      setUserProgress(prev => ({
+        ...prev,
+        achievements: updatedAchievements,
+      }));
       
       // Give companion XP for daily check-in if the user has a companion
       if (companion) {
         await updateCompanionExperience(25, XpActionType.DAILY_CHECK_IN);
       }
       
-      // Check if companion should evolve based on the updated streak
-      await checkAndEvolveCompanion();
+      // Important: Check if companion should evolve based on the updated streak
+      // This needs to happen AFTER the streak is updated
+      console.log(`Checking for evolution with streak ${streakData.streak}`);
+      const evolved = await checkAndEvolveCompanion();
+      console.log(`Evolution check result: ${evolved ? 'Evolved' : 'No evolution'}`);
     } catch (error) {
       console.error('Failed to check in:', error);
     }
@@ -671,7 +1631,7 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     if (!content.trim()) return;
     
     const newEntry: JournalEntry = {
-      id: `journal-${Date.now()}`,
+      id: `journal-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       content,
       timestamp: Date.now(),
     };
@@ -767,11 +1727,14 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     
     // Unlock achievement if associated with this challenge
     if (challenge.rewards?.badgeId) {
-      setAchievements(prev => prev.map(a => 
+      setUserProgress(prev => ({
+        ...prev,
+        achievements: prev.achievements.map(a => 
         a.id === challenge.rewards?.badgeId 
           ? { ...a, unlocked: true, unlockedDate: Date.now() } 
           : a
-      ));
+        )
+      }));
     }
     
     // Update challenges and user progress
@@ -789,6 +1752,200 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     if (companion) {
       updateCompanionExperience(50, XpActionType.CHALLENGE_COMPLETION);
     }
+  };
+  
+  // New function to log habit replacement activities
+  const logHabitReplacement = (description: string) => {
+    // Find the habit replacement challenge
+    const habitChallenge = challenges.find(c => c.id === 'challenge-4');
+    if (!habitChallenge || !habitChallenge.steps) return false;
+    
+    // Only allow logging if the challenge is active
+    if (!userProgress.challengesActive.includes('challenge-4')) {
+      showAchievement({
+        title: "Challenge Not Active",
+        description: "Start the Habit Replacement challenge first!",
+        buttonText: "OK"
+      });
+      return false;
+    }
+    
+    // Find the next incomplete step
+    const nextIncompleteStep = habitChallenge.steps.findIndex(step => !step.completed);
+    if (nextIncompleteStep === -1) return false; // All steps are already completed
+    
+    // Update the step
+    setChallenges(prev => prev.map(c => {
+      if (c.id === 'challenge-4') {
+        const updatedSteps = c.steps?.map((step, index) => {
+          if (index === nextIncompleteStep) {
+            return { ...step, completed: true };
+          }
+          return step;
+        });
+        
+        const newCompletedCount = updatedSteps?.filter(s => s.completed).length || 0;
+        const totalSteps = updatedSteps?.length || 1;
+        const newProgress = Math.floor((newCompletedCount / totalSteps) * 100);
+        
+        return {
+          ...c,
+          steps: updatedSteps,
+          progress: newProgress,
+        };
+      }
+      return c;
+    }));
+    
+    // Save the updated challenges
+    storeData(STORAGE_KEYS.CHALLENGES, challenges);
+    
+    // Give some points for logging a replacement
+    addPoints(10);
+    
+    // Small XP boost for companion
+    if (companion) {
+      updateCompanionExperience(5, XpActionType.HABIT_REPLACEMENT);
+    }
+    
+    // Check if all steps are completed after this update
+    const updatedChallenge = challenges.find(c => c.id === 'challenge-4');
+    if (updatedChallenge && updatedChallenge.steps && 
+        updatedChallenge.steps.every(step => step.completed)) {
+      // Automatically complete the challenge
+      completeChallenge('challenge-4');
+    }
+    
+    return true;
+  };
+  
+  // New function to log workout sessions
+  const logWorkout = (durationMinutes: number) => {
+    // Verify the workout is at least 30 minutes
+    if (durationMinutes < 30) {
+      showAchievement({
+        title: "Workout Too Short",
+        description: "Workouts need to be at least 30 minutes to count for this challenge.",
+        buttonText: "OK"
+      });
+      return false;
+    }
+    
+    // Find the workout challenge
+    const workoutChallenge = challenges.find(c => c.id === 'challenge-5');
+    if (!workoutChallenge || !workoutChallenge.steps) return false;
+    
+    // Only allow logging if the challenge is active
+    if (!userProgress.challengesActive.includes('challenge-5')) {
+      showAchievement({
+        title: "Challenge Not Active",
+        description: "Start the Weekly Exercise challenge first!",
+        buttonText: "OK"
+      });
+      return false;
+    }
+    
+    // Find the next incomplete step
+    const nextIncompleteStep = workoutChallenge.steps.findIndex(step => !step.completed);
+    if (nextIncompleteStep === -1) return false; // All steps are already completed
+    
+    // Update the step
+    setChallenges(prev => prev.map(c => {
+      if (c.id === 'challenge-5') {
+        const updatedSteps = c.steps?.map((step, index) => {
+          if (index === nextIncompleteStep) {
+            return { ...step, completed: true };
+          }
+          return step;
+        });
+        
+        const newCompletedCount = updatedSteps?.filter(s => s.completed).length || 0;
+        const totalSteps = updatedSteps?.length || 1;
+        const newProgress = Math.floor((newCompletedCount / totalSteps) * 100);
+        
+        return {
+          ...c,
+          steps: updatedSteps,
+          progress: newProgress,
+        };
+      }
+      return c;
+    }));
+    
+    // Save the updated challenges
+    storeData(STORAGE_KEYS.CHALLENGES, challenges);
+    
+    // Give some points for logging a workout
+    addPoints(15);
+    
+    // Medium XP boost for companion
+    if (companion) {
+      updateCompanionExperience(10, XpActionType.WORKOUT_COMPLETION);
+    }
+    
+    // Check if all steps are completed after this update
+    const updatedChallenge = challenges.find(c => c.id === 'challenge-5');
+    if (updatedChallenge && updatedChallenge.steps && 
+        updatedChallenge.steps.every(step => step.completed)) {
+      // Automatically complete the challenge
+      completeChallenge('challenge-5');
+    }
+    
+    return true;
+  };
+  
+  // New function to log meditation sessions
+  const logMeditation = (durationMinutes: number) => {
+    // Verify the meditation is at least 5 minutes
+    if (durationMinutes < 5) {
+      showAchievement({
+        title: "Meditation Too Short",
+        description: "Meditations need to be at least 5 minutes to count for this challenge.",
+        buttonText: "OK"
+      });
+      return false;
+    }
+    
+    // Find the meditation challenge
+    const meditationChallenge = challenges.find(c => c.id === 'challenge-2');
+    if (!meditationChallenge) return false;
+    
+    // Only allow logging if the challenge is active
+    if (!userProgress.challengesActive.includes('challenge-2')) {
+      showAchievement({
+        title: "Challenge Not Active",
+        description: "Start the Morning Meditation challenge first!",
+        buttonText: "OK"
+      });
+      return false;
+    }
+    
+    // Update the progress directly since this is a daily challenge without steps
+    setChallenges(prev => prev.map(c => {
+      if (c.id === 'challenge-2') {
+        return {
+          ...c,
+          progress: 100, // Set to 100% since it's a one-time daily action
+        };
+      }
+      return c;
+    }));
+    
+    // Save the updated challenges
+    storeData(STORAGE_KEYS.CHALLENGES, challenges);
+    
+    // Give some points for meditation
+    addPoints(15);
+    
+    // Small XP boost for companion
+    if (companion) {
+      updateCompanionExperience(10, XpActionType.MEDITATION);
+    }
+    
+    // Auto-complete the challenge
+    completeChallenge('challenge-2');
+    
+    return true;
   };
   
   // Calculate level progress (0-1)
@@ -827,10 +1984,12 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   const resetData = async () => {
     await clearAllData();
     
-    setUserProgress(defaultUserProgress);
+    setUserProgress({
+      ...defaultUserProgress,
+      achievements: initialAchievements.map(a => ({ ...a, unlocked: false }))
+    });
     setJournalEntries([]);
     setChallenges(initialChallenges);
-    setAchievements(initialAchievements);
   };
   
   // Export data
@@ -839,16 +1998,16 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       userProgress,
       journalEntries,
       challenges,
-      achievements
+      achievements: userProgress.achievements
     };
     
     // In a real app, we would create a file and prompt the user to share/save it
-    // For this simulation, we'll just show an alert
-    Alert.alert(
-      "Data Export",
-      "In a real app, this would create an encrypted file with your data that you could save.",
-      [{ text: "OK" }]
-    );
+    // For this simulation, we'll just show an achievement notification
+    showAchievement({
+      title: "Data Export",
+      description: "In a real app, this would create an encrypted file with your data that you could save.",
+      buttonText: "OK"
+    });
     
     if (Platform.OS === 'web') {
       console.log('Export data:', JSON.stringify(data, null, 2));
@@ -858,74 +2017,127 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   // Import data
   const importData = () => {
     // In a real app, we would prompt the user to select a file
-    // For this simulation, we'll just show an alert
-    Alert.alert(
-      "Data Import",
-      "In a real app, this would let you select a previously exported file to restore your data.",
-      [{ text: "OK" }]
-    );
+    // For this simulation, we'll just show an achievement notification
+    showAchievement({
+      title: "Data Import",
+      description: "In a real app, this would let you select a previously exported file to restore your data.",
+      buttonText: "OK"
+    });
   };
 
-  // Updated setStreak method to use the streak service
-  const setStreak = async (days: number) => {
+  // Updated setStreak method to reliably handle dates in any year
+  const setStreak = async (days: number, startDate?: number) => {
     try {
-      // Update streak using the service (syncs with Supabase)
-      await updateStreak(days);
+      console.log(`Setting streak to ${days} days in GamificationContext${startDate ? ' with specified start date: ' + new Date(startDate).toISOString() : ''}`);
       
-      // Reload the updated streak data
-      const streakData = await loadStreakData();
-      
-      // Update local state
-      setUserProgress(prev => ({
-        ...prev,
-        streak: streakData.streak,
-        lastCheckIn: streakData.lastCheckIn,
-      }));
-      
-      // Check for streak-based achievements
-      const updatedAchievements = [...achievements];
-      
-      // Check if any streak-based achievements were unlocked
-      if (days >= 7) {
-        const weekBadge = updatedAchievements.find(a => a.id === 'badge-streak-1');
-        if (weekBadge && !weekBadge.unlocked) {
-          weekBadge.unlocked = true;
-          weekBadge.unlockedDate = Date.now();
-          addPoints(50);
-        }
+      // CRITICAL: Prevent accidental streak resets if days is invalid
+      if (days === undefined || days === null || isNaN(days)) {
+        console.error('Invalid streak value, aborting update:', days);
+        return userProgress.streak; // Return current streak instead of invalid value
       }
       
-      if (days >= 30) {
-        const monthBadge = updatedAchievements.find(a => a.id === 'badge-streak-2');
-        if (monthBadge && !monthBadge.unlocked) {
-          monthBadge.unlocked = true;
-          monthBadge.unlockedDate = Date.now();
-          addPoints(200);
-        }
+      // NEW SAFEGUARD: Prevent resetting a large streak value to 0 accidentally
+      // But allow it if it's explicitly a relapse (when user confirms)
+      const isRelapse = days === 0;
+      
+      if (isRelapse && userProgress.streak > 20) {
+        console.log(`Relapse recorded: Reset from ${userProgress.streak} days to 0`);
       }
       
-      if (days >= 90) {
-        const ninetyDayBadge = updatedAchievements.find(a => a.id === 'badge-streak-3');
-        if (ninetyDayBadge && !ninetyDayBadge.unlocked) {
-          ninetyDayBadge.unlocked = true;
-          ninetyDayBadge.unlockedDate = Date.now();
-          addPoints(500);
-        }
-      }
+      // CRITICAL: Store the current streak value before updating for potential recovery
+      const previousStreak = userProgress.streak;
+      console.log(`Previous streak value: ${previousStreak}, updating to: ${days}`);
       
-      setAchievements(updatedAchievements);
-      await storeData(STORAGE_KEYS.ACHIEVEMENTS, updatedAchievements);
+      // CRITICAL: Calculate normalized start date if one wasn't provided
+      const calculatedStartDate = startDate || (() => {
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        // Calculate what the start date should be based on current date minus (days-1)
+        return now.getTime() - ((days - 1) * 24 * 60 * 60 * 1000);
+      })();
       
-      // Store updated user progress
-      await storeData(STORAGE_KEYS.USER_DATA, {
-        ...userProgress,
-        streak: days,
+      // Create a persistent ref to track streak value across function calls
+      const streakRef = { current: days };
+      
+      // CRITICAL: Immediately update the UI state
+      // Using a function form of the state update to ensure it's based on the latest state
+      setUserProgress(currentProgress => {
+        const updatedProgress = {
+          ...currentProgress,
+          streak: days,
+          lastCheckIn: Date.now(),
+        };
+        console.log(`Updated user progress with streak: ${days}`);
+        return updatedProgress;
       });
       
-      // Check if companion should evolve based on the updated streak
-      await checkAndEvolveCompanion();
+      // Force immediate re-render by setting a flag
+      setManualStreakSet(prev => !prev);
+      
+      // Store streak value in all possible storage mechanisms
+      try {
+        // Try updating the streak data in our service - pass the startDate to ensure it's correctly stored
+        await updateStreak(days, DEFAULT_USER_ID, calculatedStartDate);
+        
+        // Add direct fallback - update the user progress in storage directly
+        const updatedProgress = {
+        ...userProgress,
+        streak: days,
+          lastCheckIn: Date.now(),
+        };
+        
+        await storeData(STORAGE_KEYS.USER_DATA, updatedProgress);
+        
+        // Also update the streak data in storage with the correct start date
+        await storeData(STORAGE_KEYS.STREAK_DATA, {
+          streak: days,
+          lastCheckIn: Date.now(),
+          startDate: calculatedStartDate
+        });
+        
+        // If this is a relapse, we need to update companion data (reduce happiness)
+        if (isRelapse && companion) {
+          const updatedCompanion: UserCompanion = {
+            ...companion,
+            happinessLevel: Math.max(10, (companion.happinessLevel || 100) - 30),
+            lastInteraction: Date.now(),
+          };
+          
+          // Update state
+          setCompanionState(updatedCompanion);
+          
+          // Save to storage
+          await storeData(STORAGE_KEYS.COMPANION_DATA, updatedCompanion);
+          
+          console.log('Updated companion happiness due to relapse');
+        }
+        
+        // Just to be extra safe, update again after storage operations
+        setUserProgress(currentProgress => {
+          const finalProgress = {
+            ...currentProgress,
+            streak: days,
+            lastCheckIn: Date.now(),
+          };
+          console.log(`Final streak update to ${days} days`);
+          return finalProgress;
+        });
+        
+      } catch (storageError) {
+        console.error('Error saving streak data:', storageError);
+        // Even if we hit an error here, we've already updated the UI state
+      }
+      
+      console.log(`Successfully set streak to ${days} days in context`);
+      return days; // Return the new streak value for confirmation
     } catch (error) {
       console.error('Failed to set streak:', error);
+      // If there was an error, make sure the UI still shows the correct value
+      setUserProgress(prev => ({
+        ...prev,
+        streak: days,
+      }));
+      return days; // Still return the intended value
     }
   };
 
@@ -993,6 +2205,22 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       if (dataLoaded && userProgress.companionId && !companion) {
         console.log("Companion missing or corrupted. Creating default companion...");
         await createDefaultCompanion();
+      } else if (dataLoaded && companion) {
+        // Fix companion level if it doesn't match badge count
+        const unlockedBadgesCount = userProgress.achievements.filter(badge => badge.unlocked).length;
+        let correctLevel = companion.currentLevel;
+        
+        if (unlockedBadgesCount >= 10 && companion.currentLevel < 3) {
+          correctLevel = 3;
+        } else if (unlockedBadgesCount >= 5 && companion.currentLevel < 2) {
+          correctLevel = 2;
+        }
+        
+        // If level needs correction, trigger companion evolution
+        if (correctLevel > companion.currentLevel) {
+          console.log(`Fixing companion level: should be ${correctLevel} based on ${unlockedBadgesCount} badges`);
+          await checkAndEvolveCompanion();
+        }
       }
     };
     
@@ -1113,11 +2341,12 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   const getCompanionStage = () => {
     if (!companion) return 1;
     
-    // Calculate total XP
-    const totalXp = (companion.currentLevel - 1) * companion.nextLevelExperience + companion.experience;
+    // Get unlocked badges count
+    const unlockedBadgesCount = userProgress.achievements.filter(badge => badge.unlocked).length;
     
-    if (totalXp >= EVOLUTION_THRESHOLDS.STAGE_3) return 3;
-    if (totalXp >= EVOLUTION_THRESHOLDS.STAGE_2) return 2;
+    // Determine stage based on badges unlocked instead of XP/streak
+    if (unlockedBadgesCount >= 10) return 3;
+    if (unlockedBadgesCount >= 5) return 2;
     return 1;
   };
   
@@ -1135,32 +2364,91 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     if (!companion) return false;
     
     try {
-      // Always allow evolution for testing purposes
-      // Determine the new stage
-      const newStage = getCompanionStage();
+      // Get number of unlocked badges to determine potential evolution
+      const unlockedBadgesCount = userProgress.achievements.filter(badge => badge.unlocked).length;
       const currentLevel = companion.currentLevel;
+      const companionType = companion.type || 'water';
       
-      console.log('Evolving companion from context. Current level:', currentLevel);
+      console.log('Evolving companion. Current level:', currentLevel, 'Badges unlocked:', unlockedBadgesCount);
       
-      // Find the evolution name based on type and stage
+      // Determine if we should evolve and to what level
+      let shouldEvolve = false;
+      let targetLevel = currentLevel;
       let newName = companion.name;
       
-      switch (companion.type) {
+      // 10+ badges: Should be at level 3
+      if (unlockedBadgesCount >= 10 && currentLevel < 3) {
+        targetLevel = 3;
+        shouldEvolve = true;
+        
+        // Choose the appropriate name based on companion type
+        switch (companionType) {
         case 'fire':
-          newName = 'Snuglur';
+            newName = 'Infernix';
           break;
         case 'water':
-          newName = 'Stripes';
+            newName = 'Aquadrake';
           break;
         case 'plant':
-          newName = 'Drowsi';
+            newName = 'Floravine';
           break;
+          default:
+            newName = companion.name || 'Companion';
+        }
+      } 
+      // 5+ badges: Should be at least level 2
+      else if (unlockedBadgesCount >= 5 && currentLevel < 2) {
+        targetLevel = 2;
+        shouldEvolve = true;
+        
+        // Choose the appropriate name based on companion type
+        switch (companionType) {
+          case 'fire':
+            newName = 'Emberclaw';
+            break;
+          case 'water':
+            newName = 'Bubblescale';
+            break;
+          case 'plant':
+            newName = 'Vinesprout';
+            break;
+          default:
+            newName = companion.name || 'Companion';
+        }
+      }
+      // Manual evolution (this happens outside of badge checks)
+      else if (companion.isEvolutionReady) {
+        targetLevel = currentLevel + 1;
+        shouldEvolve = true;
+        
+        // Find the evolution name based on type and new level
+        switch (companionType) {
+          case 'fire':
+            newName = targetLevel === 3 ? 'Infernix' : 'Emberclaw';
+            break;
+          case 'water':
+            newName = targetLevel === 3 ? 'Aquadrake' : 'Bubblescale';
+            break;
+          case 'plant':
+            newName = targetLevel === 3 ? 'Floravine' : 'Vinesprout';
+            break;
+          default:
+            newName = companion.name || 'Companion';
+        }
       }
       
-      // Update the companion data - always increment level on evolution
+      // If no evolution conditions met, return false
+      if (!shouldEvolve) {
+        console.log('No evolution conditions met in evolveCompanion');
+        return false;
+      }
+      
+      console.log(`Evolving ${companionType} companion to level ${targetLevel} with name ${newName}`);
+      
+      // Update the companion data with the new level and name
       const updatedCompanion: UserCompanion = {
         ...companion,
-        currentLevel: currentLevel + 1,
+        currentLevel: targetLevel,
         name: newName,
         isEvolutionReady: false,
         experience: 0,
@@ -1171,6 +2459,13 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       // Update the state BEFORE saving to storage for immediate feedback
       setCompanionState(updatedCompanion);
       console.log('Updated companion state in context to level:', updatedCompanion.currentLevel);
+      
+      // Show notification with custom component instead of Alert
+      showAchievement({
+        title: "Companion Evolved!",
+        description: `Your ${newName} has evolved to level ${targetLevel}!`,
+        buttonText: "Awesome!"
+      });
       
       // We'll save asynchronously, but return immediately
       storeData(STORAGE_KEYS.COMPANION_DATA, updatedCompanion)
@@ -1200,6 +2495,234 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     }
   };
 
+  // Add a new function to force-check all streak achievements
+  const forceCheckStreakAchievements = async () => {
+    console.log('Force checking streak achievements for streak:', userProgress.streak);
+    
+    const updatedAchievements = [...userProgress.achievements];
+    let updated = false;
+    
+    // Get current streak
+    const currentStreak = userProgress.streak;
+    
+    // Check streak-related badges
+    const checkAndUpdateBadge = (badgeId: string, requiredStreak: number) => {
+      const badge = userProgress.achievements.find(a => a.id === badgeId);
+      if (badge && !badge.unlocked && currentStreak >= requiredStreak) {
+        badge.unlocked = true;
+        updated = true;
+        
+        showAchievement({
+          title: badge.name,
+          description: badge.description,
+          buttonText: 'Nice!',
+        });
+        
+        // Also add points for unlocking a badge
+        addPoints(50);
+      }
+    };
+    
+    // Check all streak badges
+    checkAndUpdateBadge('badge-streak-1day', 1);
+    checkAndUpdateBadge('badge-streak-3days', 3);
+    checkAndUpdateBadge('badge-streak-5days', 5);
+    checkAndUpdateBadge('badge-streak-1', 7);
+    checkAndUpdateBadge('badge-streak-2weeks', 14);
+    checkAndUpdateBadge('badge-streak-2', 30);
+    checkAndUpdateBadge('badge-streak-45days', 45);
+    checkAndUpdateBadge('badge-streak-60days', 60);
+    checkAndUpdateBadge('badge-streak-75days', 75);
+    checkAndUpdateBadge('badge-streak-3', 90);
+    checkAndUpdateBadge('badge-streak-120days', 120);
+    checkAndUpdateBadge('badge-streak-6months', 180);
+    checkAndUpdateBadge('badge-streak-9months', 270);
+    checkAndUpdateBadge('badge-streak-1year', 365);
+    
+    // Check usage streak badge
+    const usageStreakBadge = userProgress.achievements.find(a => a.id === 'badge-usage-streak');
+    if (usageStreakBadge && !usageStreakBadge.unlocked) {
+      // For simplicity, if they have a 3-day streak, we'll assume they've used the app for 3 consecutive days
+      if (currentStreak >= 3) {
+        usageStreakBadge.unlocked = true;
+        updated = true;
+        
+        showAchievement({
+          title: usageStreakBadge.name,
+          description: usageStreakBadge.description,
+          buttonText: 'Nice!',
+        });
+        
+        addPoints(25);
+      }
+    }
+    
+    // Check for first use badge and daily check-in badge
+    const firstUseBadge = userProgress.achievements.find(a => a.id === 'badge-usage-first');
+    const dailyCheckInBadge = userProgress.achievements.find(a => a.id === 'badge-usage-checkin');
+    
+    if (firstUseBadge && !firstUseBadge.unlocked) {
+      firstUseBadge.unlocked = true;
+      updated = true;
+    }
+    
+    if (dailyCheckInBadge && !dailyCheckInBadge.unlocked && userProgress.dailyCheckedIn) {
+      dailyCheckInBadge.unlocked = true;
+      updated = true;
+      
+      showAchievement({
+        title: dailyCheckInBadge.name,
+        description: dailyCheckInBadge.description,
+        buttonText: 'Nice!',
+      });
+      
+      addPoints(25);
+    }
+    
+    // Check for companion-related badges
+    if (companion) {
+      const companionSelectedBadge = userProgress.achievements.find(a => a.id === 'badge-companion-selected');
+      if (companionSelectedBadge && !companionSelectedBadge.unlocked) {
+        companionSelectedBadge.unlocked = true;
+        updated = true;
+        
+        showAchievement({
+          title: companionSelectedBadge.name,
+          description: companionSelectedBadge.description,
+          buttonText: 'Nice!',
+        });
+        
+        addPoints(25);
+      }
+      
+      // Check if companion has been fed
+      const companionFeedBadge = userProgress.achievements.find(a => a.id === 'badge-companion-feed');
+      if (companionFeedBadge && !companionFeedBadge.unlocked && companion.feedingHistory && companion.feedingHistory.length > 0) {
+        companionFeedBadge.unlocked = true;
+        updated = true;
+        
+        showAchievement({
+          title: companionFeedBadge.name,
+          description: companionFeedBadge.description,
+          buttonText: 'Nice!',
+        });
+        
+        addPoints(25);
+      }
+    }
+    
+    // Check for milestone badges based on total unlocked badges
+    const unlockedBadgesCount = userProgress.achievements.filter(badge => badge.unlocked).length;
+    
+    const firstMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-first');
+    if (firstMilestoneBadge && !firstMilestoneBadge.unlocked && unlockedBadgesCount >= 1) {
+      firstMilestoneBadge.unlocked = true;
+      updated = true;
+      
+      showAchievement({
+        title: firstMilestoneBadge.name,
+        description: firstMilestoneBadge.description,
+        buttonText: 'Nice!',
+      });
+      
+      addPoints(25);
+    }
+    
+    const threeMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-three');
+    if (threeMilestoneBadge && !threeMilestoneBadge.unlocked && unlockedBadgesCount >= 3) {
+      threeMilestoneBadge.unlocked = true;
+      updated = true;
+      
+      showAchievement({
+        title: threeMilestoneBadge.name,
+        description: threeMilestoneBadge.description,
+        buttonText: 'Keep Going!',
+      });
+      
+      addPoints(40);
+    }
+    
+    const fiveMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-five');
+    if (fiveMilestoneBadge && !fiveMilestoneBadge.unlocked && unlockedBadgesCount >= 5) {
+      fiveMilestoneBadge.unlocked = true;
+      updated = true;
+      
+      showAchievement({
+        title: fiveMilestoneBadge.name,
+        description: fiveMilestoneBadge.description,
+        buttonText: 'Amazing!',
+      });
+      
+      addPoints(50);
+    }
+    
+    const tenMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-ten');
+    if (tenMilestoneBadge && !tenMilestoneBadge.unlocked && unlockedBadgesCount >= 10) {
+      tenMilestoneBadge.unlocked = true;
+      updated = true;
+      
+      showAchievement({
+        title: tenMilestoneBadge.name,
+        description: tenMilestoneBadge.description,
+        buttonText: 'Incredible!',
+      });
+      
+      addPoints(100);
+    }
+    
+    const twentyMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-twenty');
+    if (twentyMilestoneBadge && !twentyMilestoneBadge.unlocked && unlockedBadgesCount >= 20) {
+      twentyMilestoneBadge.unlocked = true;
+      updated = true;
+      
+      showAchievement({
+        title: twentyMilestoneBadge.name,
+        description: twentyMilestoneBadge.description,
+        buttonText: 'Outstanding!',
+      });
+      
+      addPoints(150);
+    }
+    
+    const thirtyMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-thirty');
+    if (thirtyMilestoneBadge && !thirtyMilestoneBadge.unlocked && unlockedBadgesCount >= 30) {
+      thirtyMilestoneBadge.unlocked = true;
+      updated = true;
+      
+      showAchievement({
+        title: thirtyMilestoneBadge.name,
+        description: thirtyMilestoneBadge.description,
+        buttonText: 'Master Level!',
+      });
+      
+      addPoints(200);
+    }
+    
+    const fiftyMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-fifty');
+    if (fiftyMilestoneBadge && !fiftyMilestoneBadge.unlocked && unlockedBadgesCount >= 50) {
+      fiftyMilestoneBadge.unlocked = true;
+      updated = true;
+      
+      showAchievement({
+        title: fiftyMilestoneBadge.name,
+        description: fiftyMilestoneBadge.description,
+        buttonText: 'Legendary!',
+      });
+      
+      addPoints(200);
+    }
+    
+    if (updated) {
+      setUserProgress({...userProgress});
+      await storeData(STORAGE_KEYS.USER_DATA, userProgress);
+      
+      // Also check if the companion should evolve based on new badges
+      await checkAndEvolveCompanion();
+    }
+    
+    return updated;
+  };
+
   return (
     <GamificationContext.Provider
       value={{
@@ -1215,7 +2738,7 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
         availableChallenges,
         startChallenge,
         completeChallenge,
-        achievements,
+        achievements: userProgress.achievements,
         checkIn,
         resetData,
         exportData,
@@ -1231,9 +2754,14 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
         getCompanionStage,
         getBondLevel,
         resetCompanion,
+        logHabitReplacement,
+        logWorkout,
+        logMeditation,
+        forceCheckStreakAchievements,
       }}
     >
       {children}
+      <AchievementNotificationComponent />
     </GamificationContext.Provider>
   );
 };

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Pressable, Platform } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Pressable, Platform, ColorValue } from 'react-native';
 import { useGamification } from '@/context/GamificationContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -16,6 +16,7 @@ import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'react-native';
 import LottieView from 'lottie-react-native';
+import { Achievement } from '@/types/gamification';
 
 // Define types
 interface BadgeItemProps {
@@ -24,6 +25,7 @@ interface BadgeItemProps {
   locked?: boolean;
   days?: number | null;
   onPress: () => void;
+  delay?: number;
 }
 
 interface RewardItem {
@@ -39,42 +41,72 @@ const BadgeItem: React.FC<BadgeItemProps> = ({
   description, 
   locked = true, 
   days = null, 
-  onPress 
+  onPress,
+  delay = 0
 }) => {
+  // Determine badge color based on days (for streak badges)
+  let badgeColors: [string, string] = ['#6772FF', '#9265FF'];
+  if (days) {
+    if (days >= 90) {
+      badgeColors = ['#FFD700', '#FFA500']; // Gold for 90+ days
+    } else if (days >= 30) {
+      badgeColors = ['#C0C0C0', '#A9A9A9']; // Silver for 30+ days
+    } else if (days >= 7) {
+      badgeColors = ['#CD7F32', '#8B4513']; // Bronze for 7+ days
+    }
+  }
+
   return (
-    <Pressable 
-      style={styles.badgeItem} 
-      onPress={onPress}
-      android_ripple={{ color: 'rgba(255,255,255,0.1)', borderless: true }}
+    <Animated.View
+      entering={FadeInDown.delay(delay).duration(400)}
+      style={styles.badgeItemWrapper}
     >
-      <View style={styles.badgeIconContainer}>
-        {locked ? (
-          <View style={styles.lockedBadge}>
-            <Ionicons name="lock-closed" size={24} color="rgba(255,255,255,0.5)" />
-          </View>
-        ) : (
-          <LinearGradient
-            colors={['#6772FF', '#9265FF']}
-            style={styles.unlockedBadge}
-          >
-            <MaterialCommunityIcons name="medal" size={32} color="#FFFFFF" />
-          </LinearGradient>
-        )}
-      </View>
-      <Text style={styles.badgeTitle}>
-        {days ? `${days} Day Streak` : title}
-      </Text>
-      <Text style={styles.badgeDescription}>
-        {days ? `Maintain a ${days}-day clean streak` : description}
-      </Text>
-    </Pressable>
+      <Pressable 
+        style={styles.badgeItem} 
+        onPress={onPress}
+        android_ripple={{ color: 'rgba(255,255,255,0.1)', borderless: true }}
+      >
+        <View style={styles.badgeIconContainer}>
+          {locked ? (
+            <View style={styles.lockedBadge}>
+              <Ionicons name="lock-closed" size={24} color="rgba(255,255,255,0.5)" />
+            </View>
+          ) : (
+            <LinearGradient
+              colors={badgeColors}
+              style={styles.unlockedBadge}
+            >
+              <MaterialCommunityIcons name="medal" size={32} color="#FFFFFF" />
+            </LinearGradient>
+          )}
+        </View>
+        <View style={styles.badgeTextContainer}>
+          <Text style={styles.badgeTitle}>
+            {days ? `${days} Day${days > 1 ? 's' : ''}` : title}
+          </Text>
+          <Text style={styles.badgeDescription}>
+            {days ? `Maintain a ${days}-day clean streak` : description}
+          </Text>
+        </View>
+      </Pressable>
+    </Animated.View>
   );
 };
 
 export default function AchievementsScreen() {
-  const { streak, level, points, totalPoints, achievements, companion, getCompanionStage } = useGamification();
+  const { 
+    streak, 
+    level, 
+    points, 
+    totalPoints, 
+    achievements, 
+    companion, 
+    getCompanionStage,
+    forceCheckStreakAchievements 
+  } = useGamification();
   const insets = useSafeAreaInsets();
-  const [activeTab, setActiveTab] = useState<'badges' | 'companion'>('companion'); // Set initial tab to companion for testing
+  const [activeTab, setActiveTab] = useState<'badges' | 'companion'>('badges');
+  const [isCheckingAchievements, setIsCheckingAchievements] = useState(false);
   
   // Calculate progress percentage
   const progressPercentage = (points / totalPoints) * 100;
@@ -83,26 +115,170 @@ export default function AchievementsScreen() {
   // Count unlocked badges
   const unlockedBadgesCount = achievements ? achievements.filter(badge => badge.unlocked).length : 0;
   
-  // TESTING: Force companion to be at stage 3 (tiger companion - Stripes)
-  // In production, use: const companionStage = companion ? getCompanionStage() : (unlockedBadgesCount >= 10 ? 3 : unlockedBadgesCount >= 5 ? 2 : 1);
-  const companionStage: number = 2; // Changed to stage 2 for testing tiger's middle evolution
+  // Get specific badges
+  const sevenDayBadge = achievements?.find(badge => badge.id === 'badge-streak-1');
+  const thirtyDayBadge = achievements?.find(badge => badge.id === 'badge-streak-2');
+  const ninetyDayBadge = achievements?.find(badge => badge.id === 'badge-streak-3');
+  const journalBadge = achievements?.find(badge => badge.id === 'badge-journal-1');
+  const journalStreakBadge = achievements?.find(badge => badge.id === 'badge-journal-2');
+  const challengeBadge = achievements?.find(badge => badge.id === 'badge-challenge-1');
   
-  // Get companion animation source based on stage - using tiger animations
-  const getCompanionSource = () => {
-    switch (companionStage) {
-      case 3:
-        return require('../../baby tiger stage 3.json');
-      case 2:
-        return require('../../baby tiger stage 2.json');
-      default:
-        return require('../../baby tiger stage 1.json');
+  // Function to force-check achievements
+  const handleForceCheckAchievements = async () => {
+    setIsCheckingAchievements(true);
+    try {
+      const updated = await forceCheckStreakAchievements();
+      console.log('Force checked achievements, updated:', updated);
+    } catch (error) {
+      console.error('Error force-checking achievements:', error);
+    } finally {
+      setIsCheckingAchievements(false);
     }
   };
   
-  const renderBadgesTab = () => (
+  // Check if any streak badges should be unlocked but aren't
+  const hasStreakBadgeDiscrepancy = 
+    (streak >= 7 && sevenDayBadge && !sevenDayBadge.unlocked) ||
+    (streak >= 30 && thirtyDayBadge && !thirtyDayBadge.unlocked) ||
+    (streak >= 90 && ninetyDayBadge && !ninetyDayBadge.unlocked);
+  
+  // Get the proper companion stage based on the user's actual companion data or badge count
+  const companionStage = companion ? getCompanionStage() : (unlockedBadgesCount >= 10 ? 3 : unlockedBadgesCount >= 5 ? 2 : 1);
+  
+  // Get companion animation source based on stage and type
+  const getCompanionSource = () => {
+    // The companion's type determines which companion to show
+    const companionType = companion?.type || 'water';
+    
+    if (companionType === 'plant') {
+      // Drowsi (Panda) animations
+      switch (companionStage) {
+        case 3:
+          return require('@/assets/lottie/panda/panda_stage3.json');
+        case 2:
+          return require('@/assets/lottie/panda/panda_stage2.json');
+        default:
+          return require('@/assets/lottie/baby_panda_stage1.json');
+      }
+    } else if (companionType === 'fire') {
+      // Snuglur animations
+      switch (companionStage) {
+        case 3:
+          return require('../../baby monster stage 3.json');
+        case 2:
+          return require('../../baby monster stage 2.json');
+        default:
+          return require('../../baby monster stage 1.json');
+      }
+    } else {
+      // Stripes (Tiger) animations
+      switch (companionStage) {
+        case 3:
+          return require('../../baby tiger stage 3.json');
+        case 2:
+          return require('../../baby tiger stage 2.json');
+        default:
+          return require('../../baby tiger stage 1.json');
+      }
+    }
+  };
+  
+  // Get companion name and description based on type and stage
+  const getCompanionInfo = () => {
+    const companionType = companion?.type || 'water';
+    
+    if (companionType === 'plant') {
+      return {
+        name: 'Drowsi',
+        descriptions: [
+          "Falls asleep faster than your urges — let him nap, so you don't relapse.",
+          "Growing stronger from your consistency, Drowsi now enjoys mindful eating. His noodle ritual brings focus and patience.",
+          "Fully evolved, Drowsi has mastered meditation. His calm presence gives you the inner peace to overcome any challenge."
+        ]
+      };
+    } else if (companionType === 'fire') {
+      return {
+        name: 'Snuglur',
+        descriptions: [
+          "Warm and playful, this little creature is your constant reminder to stay strong and focused.",
+          "As your discipline grows, so does Snuglur's fiery spirit, burning away temptations with newfound intensity.",
+          "In its final form, Snuglur radiates powerful energy that helps you transform urges into creative passion."
+        ]
+      };
+    } else {
+      return {
+        name: 'Stripes',
+        descriptions: [
+          "Half tiger, half therapist — growls when you're about to mess up.",
+          "Tiger shark of sobriety — all the bite of willpower with the wet nose of accountability.",
+          "A powerful guardian of serenity and emotional control, Stripes has evolved along with your ability to channel desires into positive energy."
+        ]
+      };
+    }
+  };
+  
+  const companionInfo = getCompanionInfo();
+  
+  const renderBadgesTab = () => {
+    // Group badges by category
+    const badgesByCategory = achievements ? achievements.reduce((acc: any, badge) => {
+      if (!acc[badge.category]) {
+        acc[badge.category] = [];
+      }
+      acc[badge.category].push(badge);
+      return acc;
+    }, {}) : {};
+
+    // Custom order for categories
+    const categoryOrder = [
+      'streak', 
+      'journal', 
+      'challenge', 
+      'meditation', 
+      'workout', 
+      'app', 
+      'recovery', 
+      'companion', 
+      'milestone'
+    ];
+    
+    // Sort categories
+    const sortedCategories = Object.keys(badgesByCategory).sort(
+      (a, b) => categoryOrder.indexOf(a) - categoryOrder.indexOf(b)
+    );
+
+    // Limit to 4 badges per category for better display
+    const limitBadges = (badges: Achievement[], limit = 4) => {
+      // Sort by unlocked status and then by numerical order for streak badges
+      let processedBadges = [...badges].sort((a, b) => {
+        // Show unlocked badges first
+        if (a.unlocked && !b.unlocked) return -1;
+        if (!a.unlocked && b.unlocked) return 1;
+        
+        // For streak badges, sort by required days
+        if (a.category === 'streak' && b.category === 'streak') {
+          const daysA = extractNumberFromString(a.name) || 0;
+          const daysB = extractNumberFromString(b.name) || 0;
+          return daysA - daysB;
+        }
+        
+        return 0;
+      });
+      
+      // Ensure we have exactly 4 badges per category
+      if (processedBadges.length > limit) {
+        return processedBadges.slice(0, limit);
+      } else if (processedBadges.length < limit) {
+        return [...processedBadges, ...createAdditionalBadges(badges[0]?.category || 'unknown', limit - processedBadges.length)];
+      }
+      
+      return processedBadges;
+    };
+
+    return (
     <>
         {/* Level and Progress Section */}
-        <View style={styles.levelContainer}>
+        <Animated.View entering={FadeInDown.duration(500)} style={styles.levelContainer}>
           <View style={styles.levelBadgeContainer}>
             <LinearGradient
               colors={['rgba(255,255,255,0.1)', 'rgba(255,255,255,0.05)']}
@@ -131,56 +307,138 @@ export default function AchievementsScreen() {
           <Text style={styles.nextLevelText}>
             {pointsToNextLevel} points to Level {level + 1}
           </Text>
-        </View>
+          
+          {/* Manual Achievement Check Button - only show if there's a discrepancy */}
+          {hasStreakBadgeDiscrepancy && (
+            <TouchableOpacity 
+              style={styles.checkAchievementsButton}
+              onPress={handleForceCheckAchievements}
+              disabled={isCheckingAchievements}
+            >
+              <Text style={styles.checkAchievementsButtonText}>
+                {isCheckingAchievements ? 'Checking...' : 'Verify Badge Progress'}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </Animated.View>
         
         {/* Badges Section */}
-        <View style={styles.badgesHeader}>
-          <Text style={styles.sectionTitle}>Badges to Unlock ({6})</Text>
-        </View>
+        <Animated.View entering={FadeInDown.delay(200).duration(500)} style={styles.badgesHeader}>
+          <Text style={styles.sectionTitle}>
+            Badges ({achievements ? achievements.filter(a => a.unlocked).length : 0}/{achievements ? achievements.length : 0})
+          </Text>
+        </Animated.View>
         
-        <View style={styles.badgesGrid}>
-          <BadgeItem
-            title="7 Day Streak"
-            description="Maintain a 7-day clean streak"
-            locked={streak < 7}
-            days={7}
-            onPress={() => {}}
-          />
-          <BadgeItem
-            title="30 Day Streak"
-            description="Maintain a 30-day clean streak"
-            locked={streak < 30}
-            days={30}
-            onPress={() => {}}
-          />
-          <BadgeItem
-            title="90 Day Streak"
-            description="Maintain a 90-day clean streak"
-            locked={streak < 90}
-            days={90}
-            onPress={() => {}}
-          />
-          <BadgeItem
-            title="Journal Enthusiast"
-            description="Write 5 journal entries"
-            locked={true}
-            onPress={() => {}}
-          />
-          <BadgeItem
-            title="Journal Streak"
-            description="Write journal entries for 3 consecutive days"
-            locked={true}
-            onPress={() => {}}
-          />
-          <BadgeItem
-            title="Challenge Accepted"
-            description="Complete 5 challenges"
-            locked={true}
-            onPress={() => {}}
-          />
-        </View>
+        {/* Display badges by category */}
+        {sortedCategories.map((category, categoryIndex) => {
+          // Get an appropriate color for this category
+          let categoryGradient: [string, string] = ['rgba(103, 114, 255, 0.15)', 'rgba(103, 114, 255, 0.05)'];
+          
+          if (category === 'streak') {
+            categoryGradient = ['rgba(255, 215, 0, 0.15)', 'rgba(255, 215, 0, 0.05)']; // Gold tint for streak
+          } else if (category === 'journal') {
+            categoryGradient = ['rgba(102, 204, 153, 0.15)', 'rgba(102, 204, 153, 0.05)']; // Green tint
+          } else if (category === 'challenge') {
+            categoryGradient = ['rgba(255, 102, 102, 0.15)', 'rgba(255, 102, 102, 0.05)']; // Red tint
+          } else if (category === 'meditation') {
+            categoryGradient = ['rgba(147, 112, 219, 0.15)', 'rgba(147, 112, 219, 0.05)']; // Purple tint for meditation
+          } else if (category === 'workout') {
+            categoryGradient = ['rgba(70, 130, 180, 0.15)', 'rgba(70, 130, 180, 0.05)']; // Steel blue for workout
+          }
+          
+          // For streak category, use our predefined streak badges
+          let categoryBadges: Achievement[];
+          
+          if (category === 'streak') {
+            // Create exactly the 4 streak badges we want with no duplicates
+            categoryBadges = [
+              {
+                id: 'badge-streak-7',
+                name: '7 Days',
+                description: 'Maintain a 7-day clean streak',
+                category: 'streak',
+                unlockCriteria: 'Maintain a 7-day streak',
+                unlocked: streak >= 7
+              },
+              {
+                id: 'badge-streak-14',
+                name: '14 Days',
+                description: 'Maintain a 14-day clean streak',
+                category: 'streak',
+                unlockCriteria: 'Maintain a 14-day streak',
+                unlocked: streak >= 14
+              },
+              {
+                id: 'badge-streak-30',
+                name: '30 Days',
+                description: 'Maintain a 30-day clean streak',
+                category: 'streak',
+                unlockCriteria: 'Maintain a 30-day streak',
+                unlocked: streak >= 30
+              },
+              {
+                id: 'badge-streak-90',
+                name: '90 Days',
+                description: 'Maintain a 90-day clean streak',
+                category: 'streak',
+                unlockCriteria: 'Maintain a 90-day streak',
+                unlocked: streak >= 90
+              }
+            ];
+          } else {
+            // For other categories, use the existing logic
+            categoryBadges = badgesByCategory[category] && badgesByCategory[category].length > 0 ? 
+              limitBadges(badgesByCategory[category], 4) : 
+              createAdditionalBadges(category, 4);
+              
+            // Ensure we have exactly 4 badges
+            if (categoryBadges.length < 4) {
+              categoryBadges = [...categoryBadges, ...createAdditionalBadges(category, 4 - categoryBadges.length)];
+            }
+          }
+          
+          const unlockedCount = categoryBadges.filter((b: Achievement) => b.unlocked).length;
+          
+          return (
+            <Animated.View 
+              key={category} 
+              entering={FadeInDown.delay(300 + (categoryIndex * 100)).duration(400)} 
+              style={styles.categoryContainer}
+            >
+              <LinearGradient
+                colors={categoryGradient}
+                start={{x: 0, y: 0}}
+                end={{x: 1, y: 0}}
+                style={styles.categoryHeader}
+              >
+                <Text style={styles.categoryTitle}>
+                  {category.charAt(0).toUpperCase() + category.slice(1)} Badges
+                </Text>
+                <View style={styles.categoryBadgeCount}>
+                  <Text style={styles.categoryCountText}>
+                    {unlockedCount}/{categoryBadges.length}
+                  </Text>
+                </View>
+              </LinearGradient>
+              <View style={styles.badgesGrid}>
+                {categoryBadges.map((badge: Achievement, badgeIndex: number) => (
+                  <BadgeItem
+                    key={badge.id}
+                    title={badge.name}
+                    description={badge.description}
+                    locked={!badge.unlocked}
+                    days={category === 'streak' ? extractNumberFromString(badge.name) : null}
+                    delay={badgeIndex * 50}
+                    onPress={() => {}}
+                  />
+                ))}
+              </View>
+            </Animated.View>
+          );
+        })}
     </>
   );
+  };
   
   const renderCompanionTab = () => (
     <View style={styles.companionContainer}>
@@ -198,16 +456,18 @@ export default function AchievementsScreen() {
         </View>
         
         <View style={styles.companionInfo}>
-          <Text style={styles.companionName}>
-            Stripes
-          </Text>
+          <View style={styles.companionNameContainer}>
+            <Text style={styles.companionName}>
+              {companionInfo.name}
+            </Text>
+            
+            <Text style={styles.companionStageText}>
+              Stage {companionStage}
+            </Text>
+          </View>
           
           <Text style={styles.companionDescription}>
-            {companionStage === 1
-              ? "Half tiger, half therapist — growls when you're about to mess up."
-              : companionStage === 2
-                ? "Flowing like water around obstacles, Stripes teaches adaptability and patience, washing away impulsive urges."
-                : "A powerful guardian of serenity and emotional control, Stripes has evolved along with your ability to channel desires into positive energy."}
+            {companionInfo.descriptions[companionStage - 1]}
           </Text>
           
           <View style={styles.progressInfo}>
@@ -221,8 +481,8 @@ export default function AchievementsScreen() {
                       width: companionStage === 3 
                         ? '100%' 
                         : companionStage === 2 
-                          ? '60%' // Hardcoded progress for stage 2 (showing 6/10 badges)
-                          : `${(unlockedBadgesCount % 5) * 20}%` 
+                          ? `${(unlockedBadgesCount - 5) * 20}%` // Progress from 5-10 badges
+                          : `${unlockedBadgesCount * 20}%` // Progress from 0-5 badges
                     }
                   ]} 
                 />
@@ -232,7 +492,7 @@ export default function AchievementsScreen() {
               {companionStage === 3 
                 ? 'Final evolution reached!'
                 : companionStage === 2
-                  ? '6/10 badges (4 more for final evolution)' // Hardcoded count for testing
+                  ? `${unlockedBadgesCount}/10 badges (${10 - unlockedBadgesCount} more for final evolution)`
                   : `${unlockedBadgesCount}/5 badges (${5 - unlockedBadgesCount} more for evolution)`}
             </Text>
           </View>
@@ -299,7 +559,7 @@ export default function AchievementsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: '#121212',
   },
   background: {
     position: 'absolute',
@@ -309,35 +569,36 @@ const styles = StyleSheet.create({
     bottom: 0,
   },
   header: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
   },
   headerTitle: {
-    fontSize: 28,
-    fontWeight: '700',
+    fontSize: 24,
+    fontWeight: 'bold',
     color: '#FFFFFF',
   },
   tabsContainer: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: 'rgba(30,30,30,0.8)',
+    marginHorizontal: 16,
+    marginTop: 16,
     borderRadius: 12,
     padding: 4,
-    marginHorizontal: 20,
-    marginTop: 10,
   },
   tab: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 10,
     alignItems: 'center',
-    borderRadius: 10,
+    borderRadius: 8,
   },
   activeTab: {
-    backgroundColor: 'rgba(103, 114, 255, 0.6)',
+    backgroundColor: '#6772FF',
   },
   tabText: {
     fontSize: 16,
     fontWeight: '600',
-    color: 'rgba(255, 255, 255, 0.6)',
+    color: 'rgba(255,255,255,0.7)',
   },
   activeTabText: {
     color: '#FFFFFF',
@@ -346,56 +607,61 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 20,
+    padding: 16,
     paddingBottom: 40,
   },
   levelContainer: {
-    marginVertical: 20,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   levelBadgeContainer: {
-    marginBottom: 10,
+    alignItems: 'center',
+    marginBottom: 16,
   },
   levelBadge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 15,
-    paddingVertical: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
   levelText: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: 'bold',
     color: '#FFFFFF',
   },
   pointsContainer: {
-    marginBottom: 10,
+    alignItems: 'center',
+    marginBottom: 16,
   },
   pointsText: {
     fontSize: 16,
-    fontWeight: '500',
     color: 'rgba(255,255,255,0.8)',
-    textAlign: 'right',
   },
   progressBarContainer: {
-    height: 8,
+    height: 10,
     backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 4,
+    borderRadius: 5,
     overflow: 'hidden',
-    marginBottom: 10,
+    marginBottom: 16,
   },
   progressBarBackground: {
     flex: 1,
-    borderRadius: 4,
+    borderRadius: 5,
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 4,
+    backgroundColor: '#6772FF',
+    borderRadius: 5,
   },
   nextLevelText: {
     fontSize: 14,
-    fontWeight: '500',
     color: 'rgba(255,255,255,0.6)',
+    textAlign: 'center',
   },
   badgesHeader: {
     flexDirection: 'row',
@@ -407,55 +673,83 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: '#FFFFFF',
-    marginBottom: 16,
+    marginBottom: 8,
   },
   badgesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
+    marginTop: 8,
+    padding: 12,
+  },
+  badgeItemWrapper: {
+    width: '48%',
+    marginBottom: 16,
   },
   badgeItem: {
-    width: '48%',
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    width: '100%',
+    backgroundColor: 'rgba(30, 30, 40, 0.6)',
     borderRadius: 16,
     padding: 16,
-    marginBottom: 16,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 8,
+    minHeight: 160,
+    justifyContent: 'center',
+    aspectRatio: 1, // Ensure all badges have the same aspect ratio
   },
   badgeIconContainer: {
     marginBottom: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  lockedBadge: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+  badgeTextContainer: {
+    width: '100%',
     alignItems: 'center',
+    flex: 1,
     justifyContent: 'center',
   },
-  unlockedBadge: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+  lockedBadge: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(50, 50, 60, 0.7)',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  unlockedBadge: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#6772FF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 8,
+    elevation: 10,
   },
   badgeTitle: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#FFFFFF',
     textAlign: 'center',
-    marginBottom: 6,
+    marginBottom: 8,
   },
   badgeDescription: {
     fontSize: 12,
     fontWeight: '400',
-    color: 'rgba(255,255,255,0.6)',
+    color: 'rgba(255,255,255,0.7)',
     textAlign: 'center',
+    lineHeight: 18,
+    flexWrap: 'wrap',
   },
   companionContainer: {
     marginTop: 20,
@@ -480,12 +774,17 @@ const styles = StyleSheet.create({
     padding: 20,
     backgroundColor: 'rgba(0,0,0,0.5)',
   },
+  companionNameContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
   companionName: {
     fontSize: 24,
     fontWeight: '700',
     color: '#FFFFFF',
-    textAlign: 'center',
-    marginBottom: 10,
+    textAlign: 'left',
   },
   companionDescription: {
     fontSize: 16,
@@ -526,4 +825,291 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.8)',
     textAlign: 'center',
   },
+  companionStageText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    textAlign: 'right',
+  },
+  checkAchievementsButton: {
+    backgroundColor: '#6772FF',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  checkAchievementsButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  badgeRarityText: {
+    fontSize: 12,
+    color: '#FFD700',
+    marginTop: 2,
+  },
+  badgePercentText: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.6)',
+    textAlign: 'right',
+  },
+  categoryContainer: {
+    marginBottom: 24,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(25, 25, 35, 0.7)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  categoryTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  categoryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  categoryBadgeCount: {
+    backgroundColor: 'rgba(103, 114, 255, 0.4)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  categoryCountText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
 });
+
+// Helper function to extract number from string (e.g. "90 Day Champion" -> 90)
+const extractNumberFromString = (str: string): number | null => {
+  const match = str.match(/(\d+)/);
+  return match ? parseInt(match[0]) : null;
+}
+
+// Create additional well-designed badges for a category when needed
+const createAdditionalBadges = (category: string, count = 4): Achievement[] => {
+  const badges: Achievement[] = [];
+  
+  if (category === 'streak') {
+    const streakBadges: Achievement[] = [
+      {
+        id: 'custom-streak-1',
+        name: '7 Days',
+        description: 'Maintain a clean streak for a full week',
+        category: 'streak',
+        unlockCriteria: 'Maintain a 7-day streak',
+        unlocked: false
+      },
+      {
+        id: 'custom-streak-2',
+        name: '14 Days',
+        description: 'Maintain a clean streak for two weeks',
+        category: 'streak',
+        unlockCriteria: 'Maintain a 14-day streak',
+        unlocked: false
+      },
+      {
+        id: 'custom-streak-3',
+        name: '30 Days',
+        description: 'Maintain a clean streak for a full month',
+        category: 'streak',
+        unlockCriteria: 'Maintain a 30-day streak',
+        unlocked: false
+      },
+      {
+        id: 'custom-streak-4',
+        name: '90 Days',
+        description: 'Complete the standard reboot challenge',
+        category: 'streak',
+        unlockCriteria: 'Maintain a 90-day streak',
+        unlocked: false
+      }
+    ];
+    
+    for (let i = 0; i < count && i < streakBadges.length; i++) {
+      badges.push(streakBadges[i]);
+    }
+  } 
+  else if (category === 'journal') {
+    const journalBadges: Achievement[] = [
+      {
+        id: 'custom-journal-1',
+        name: 'First Entry',
+        description: 'Begin your self-reflection journey',
+        category: 'journal',
+        unlockCriteria: 'Create your first journal entry',
+        unlocked: false
+      },
+      {
+        id: 'custom-journal-2',
+        name: '7-Day Writer',
+        description: 'Journal consistently for a week',
+        category: 'journal',
+        unlockCriteria: 'Create 7 journal entries',
+        unlocked: false
+      },
+      {
+        id: 'custom-journal-3',
+        name: 'Deep Reflector',
+        description: 'Write a detailed entry about your progress',
+        category: 'journal',
+        unlockCriteria: 'Create a journal entry with 200+ words',
+        unlocked: false
+      },
+      {
+        id: 'custom-journal-4',
+        name: 'Gratitude Master',
+        description: 'Practice gratitude in your recovery journey',
+        category: 'journal',
+        unlockCriteria: 'Create 5 gratitude-focused entries',
+        unlocked: false
+      }
+    ];
+    
+    for (let i = 0; i < count && i < journalBadges.length; i++) {
+      badges.push(journalBadges[i]);
+    }
+  }
+  else if (category === 'challenge') {
+    const challengeBadges: Achievement[] = [
+      {
+        id: 'custom-challenge-1',
+        name: 'Challenge Taker',
+        description: 'Begin your first official challenge',
+        category: 'challenge',
+        unlockCriteria: 'Start your first challenge',
+        unlocked: false
+      },
+      {
+        id: 'custom-challenge-2',
+        name: 'Habit Replacer',
+        description: 'Successfully replace urges with healthy habits',
+        category: 'challenge',
+        unlockCriteria: 'Complete the Habit Replacement challenge',
+        unlocked: false
+      },
+      {
+        id: 'custom-challenge-3',
+        name: 'Morning Warrior',
+        description: 'Establish a positive morning routine',
+        category: 'challenge',
+        unlockCriteria: 'Complete 5 morning meditation sessions',
+        unlocked: false
+      },
+      {
+        id: 'custom-challenge-4',
+        name: 'Challenge Master',
+        description: 'Become proficient at completing challenges',
+        category: 'challenge',
+        unlockCriteria: 'Complete 5 different challenges',
+        unlocked: false
+      }
+    ];
+    
+    for (let i = 0; i < count && i < challengeBadges.length; i++) {
+      badges.push(challengeBadges[i]);
+    }
+  }
+  else if (category === 'meditation') {
+    const meditationBadges: Achievement[] = [
+      {
+        id: 'custom-meditation-1',
+        name: 'First Breath',
+        description: 'Begin your meditation practice',
+        category: 'meditation',
+        unlockCriteria: 'Complete your first meditation session',
+        unlocked: false
+      },
+      {
+        id: 'custom-meditation-2',
+        name: 'Mindful Week',
+        description: 'Develop a consistent meditation practice',
+        category: 'meditation',
+        unlockCriteria: 'Meditate for 7 consecutive days',
+        unlocked: false
+      },
+      {
+        id: 'custom-meditation-3',
+        name: 'Urge Surfer',
+        description: 'Use meditation to overcome urges',
+        category: 'meditation',
+        unlockCriteria: 'Use meditation during 3 urge moments',
+        unlocked: false
+      },
+      {
+        id: 'custom-meditation-4',
+        name: 'Zen Master',
+        description: 'Achieve deep focus in meditation',
+        category: 'meditation',
+        unlockCriteria: 'Complete a 20-minute meditation session',
+        unlocked: false
+      }
+    ];
+    
+    for (let i = 0; i < count && i < meditationBadges.length; i++) {
+      badges.push(meditationBadges[i]);
+    }
+  }
+  else if (category === 'workout') {
+    const workoutBadges: Achievement[] = [
+      {
+        id: 'custom-workout-1',
+        name: 'First Sweat',
+        description: 'Begin your fitness journey',
+        category: 'workout',
+        unlockCriteria: 'Complete your first workout session',
+        unlocked: false
+      },
+      {
+        id: 'custom-workout-2',
+        name: 'Consistency King',
+        description: 'Establish a regular workout routine',
+        category: 'workout',
+        unlockCriteria: 'Complete 10 workout sessions',
+        unlocked: false
+      },
+      {
+        id: 'custom-workout-3',
+        name: 'Urge Crusher',
+        description: 'Use exercise to overcome urges',
+        category: 'workout',
+        unlockCriteria: 'Record 5 workouts that helped with urges',
+        unlocked: false
+      },
+      {
+        id: 'custom-workout-4',
+        name: 'Endurance Master',
+        description: 'Push your physical limits',
+        category: 'workout',
+        unlockCriteria: 'Complete a 60-minute workout session',
+        unlocked: false
+      }
+    ];
+    
+    for (let i = 0; i < count && i < workoutBadges.length; i++) {
+      badges.push(workoutBadges[i]);
+    }
+  }
+  else {
+    // For any other category, create generic badges
+    for (let i = 0; i < count; i++) {
+      badges.push({
+        id: `${category}-badge-${i+1}`,
+        name: `${category.charAt(0).toUpperCase() + category.slice(1)} Expert`,
+        description: `Master your ${category} skills`,
+        category,
+        unlockCriteria: `Complete ${category} activities`,
+        unlocked: false
+      });
+    }
+  }
+  
+  return badges;
+};

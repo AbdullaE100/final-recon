@@ -25,6 +25,8 @@ interface ThemeColors {
   white: string;
   placeholder: string;
   inputBackground: string;
+  gradientStart: string;
+  gradientEnd: string;
 }
 
 interface ThemeContextType {
@@ -56,6 +58,8 @@ const darkColors: ThemeColors = {
   white: '#FFFFFF',
   placeholder: '#6B7280',
   inputBackground: '#2A2A2A',
+  gradientStart: '#6366F1',
+  gradientEnd: '#F472B6',
 };
 
 // Light mode colors kept for reference but not used
@@ -82,6 +86,8 @@ const lightColors: ThemeColors = {
   white: '#FFFFFF',
   placeholder: '#9CA3AF',
   inputBackground: '#F3F4F6',
+  gradientStart: '#6366F1',
+  gradientEnd: '#EC4899',
 };
 
 const ThemeContext = createContext<ThemeContextType>({

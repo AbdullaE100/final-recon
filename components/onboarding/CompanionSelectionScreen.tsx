@@ -96,7 +96,7 @@ const CompanionSelectionScreen: React.FC<CompanionSelectionScreenProps> = ({ onS
         evolutions: [
           { 
             level: 2, 
-            name: `${selectedData.name} Jr.`,
+            name: 'Bubblescale',
             xpRequired: EVOLUTION_THRESHOLDS.STAGE_2,
             bondRequired: BOND_THRESHOLDS.LEVEL_2
           },

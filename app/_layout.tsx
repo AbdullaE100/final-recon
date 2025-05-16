@@ -50,14 +50,22 @@ export default function RootLayout() {
             console.log('Successfully connected to Supabase');
             
             // Initialize streak data in Supabase
+            try {
             await initializeStreakData();
+            } catch (streakError) {
+              console.warn('Failed to initialize streak data, continuing anyway:', streakError);
+            }
           }
         } catch (supabaseError) {
           console.warn('Failed to connect to Supabase, will use local storage:', supabaseError);
         }
         
         // Step 3: Verify critical data can be loaded
+        try {
         await verifyAndRecoverData();
+        } catch (verifyError) {
+          console.warn('Error during data verification, continuing with default data:', verifyError);
+        }
         
         // Step 4: Check if onboarding is completed
         const isOnboardingCompleted = await getData(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
@@ -71,7 +79,8 @@ export default function RootLayout() {
         setDataInitialized(true);
         setOnboardingCompleted(false); // Default to showing onboarding
         
-        // Show a friendly error message instead of crashing
+        // Use standard Alert for initialization errors since the GamificationProvider
+        // isn't loaded yet when this error might occur
         Alert.alert(
           "Data Recovery",
           "We encountered an issue loading your data. Some information may have been reset to default values.",
@@ -143,6 +152,7 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
           <Stack.Screen name="companions-demo" options={{ headerShown: false }} />
+          <Stack.Screen name="my-pledge" options={{ headerShown: false }} />
           <Stack.Screen name="lottie-test" options={{ headerShown: false }} />
           <Stack.Screen name="+not-found" options={{ headerShown: false }} />
         </Stack>

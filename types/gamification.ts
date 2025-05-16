@@ -8,6 +8,8 @@ export interface UserProgress {
   challengesCompleted: string[];
   challengesActive: string[];
   companionId?: string; // ID of the selected companion
+  achievements: Achievement[]; // Array of achievements/badges
+  dailyCheckedIn?: boolean; // Whether the user has checked in today
 }
 
 // Journal entry

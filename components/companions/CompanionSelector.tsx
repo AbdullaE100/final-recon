@@ -210,6 +210,8 @@ export const CompanionSelector: React.FC<CompanionSelectorProps> = ({
           <Text style={styles.selectionInfoText}>
             {selectedType === 'fire' && stage === 1 && "Snuglur: The monster under your bed — but this time, he's scaring off your bad habits."}
             {selectedType === 'water' && stage === 1 && "Stripes: Half tiger, half therapist — growls when you're about to mess up."}
+            {selectedType === 'water' && stage === 2 && "Bubblescale: Tiger shark of sobriety — all the bite of willpower with the wet nose of accountability."}
+            {selectedType === 'water' && stage === 3 && "Aquadrake: A powerful guardian of serenity. Stripes has evolved along with your ability to channel desires into positive energy."}
             {selectedType === 'plant' && stage === 1 && "Drowsi: Falls asleep faster than your urges — let him nap, so you don't relapse."}
             {stage === 2 && "At this stage, your companion has evolved to reflect your growing strength."}
             {stage === 3 && "The final form represents mastery and long-term commitment."}

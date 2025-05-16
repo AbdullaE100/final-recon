@@ -3,19 +3,29 @@ import { useTheme } from '@/context/ThemeContext';
 import { useGamification } from '@/context/GamificationContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState } from 'react';
-import { Bell, Shield, Lock, CircleHelp as HelpCircle, Trash2, RefreshCw, ExternalLink, Info, Sparkles } from 'lucide-react-native';
+import { Bell, Shield, Lock, CircleHelp as HelpCircle, Trash2, RefreshCw, ExternalLink, Info, Sparkles, Award } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
+import useAchievementNotification from '@/hooks/useAchievementNotification';
 
 export default function SettingsScreen() {
   const { colors } = useTheme();
   const { resetData, exportData, importData } = useGamification();
   const router = useRouter();
+  const { showAchievement } = useAchievementNotification();
   
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [privacyModeEnabled, setPrivacyModeEnabled] = useState(true);
   const [encryptionEnabled, setEncryptionEnabled] = useState(true);
   
   const confirmReset = () => {
+    showAchievement({
+      title: "Reset Progress",
+      description: "Are you sure you want to reset all your progress? This action cannot be undone.",
+      buttonText: "Cancel"
+    });
+    
+    // Since we need a destructive action button, we'll still use Alert for this specific case
+    // The achievement notification doesn't support multiple buttons with different actions
     Alert.alert(
       "Reset Progress",
       "Are you sure you want to reset all your progress? This action cannot be undone.",
@@ -123,11 +133,31 @@ export default function SettingsScreen() {
           
           <TouchableOpacity 
             style={[styles.buttonItem, { backgroundColor: colors.card }]}
+            onPress={() => router.push('/my-pledge')}
+          >
+            <View style={styles.buttonContent}>
+              <Lock size={22} color={colors.primary} />
+              <Text style={[styles.buttonText, { color: colors.text }]}>My Sacred Commitment</Text>
+            </View>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.buttonItem, { backgroundColor: colors.card }]}
             onPress={() => router.push('/companions-demo')}
           >
             <View style={styles.buttonContent}>
               <Sparkles size={22} color={colors.primary} />
               <Text style={[styles.buttonText, { color: colors.text }]}>Companion Gallery</Text>
+            </View>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.buttonItem, { backgroundColor: colors.card }]}
+            onPress={() => router.push('/badge-manager')}
+          >
+            <View style={styles.buttonContent}>
+              <Award size={22} color={colors.primary} />
+              <Text style={[styles.buttonText, { color: colors.text }]}>Badge Manager</Text>
             </View>
           </TouchableOpacity>
         </View>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal } from 'react-native';
 import { useTheme } from '@/context/ThemeContext';
 import { useGamification } from '@/context/GamificationContext';
@@ -8,9 +8,10 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   Easing,
+  FadeInDown,
 } from 'react-native-reanimated';
 import { isSameDay, formatDate, formatRelativeTime } from '@/utils/dateUtils';
-import { STORAGE_KEYS, getData } from '@/utils/storage';
+import { STORAGE_KEYS, getData, storeData } from '@/utils/storage';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -20,15 +21,35 @@ interface StreakHistoryEvent {
   date: Date;
   streakDays?: number;
   notes?: string;
+  id: string;
 }
 
-// Update the color constants to more visually appealing shades
+// Update the color constants to more refined, professional shades
 const COLORS = {
-  streak: '#4ade80', // Vibrant but not harsh green
-  relapse: '#f87171', // Softer red
-  start: '#60a5fa', // Lighter, more vibrant blue
-  today: '#3b82f6', // Bright blue for today's outline
+  streak: '#4ade80', // Vibrant green
+  relapse: '#f87171', // Soft red
+  start: '#60a5fa', // Bright blue
+  today: '#4f46e5', // Indigo for today's outline
+  background: 'rgba(23, 23, 26, 0.8)', // Rich dark background
+  cardBorder: 'rgba(255, 255, 255, 0.06)',
+  cardBackground: 'rgba(18, 18, 23, 0.8)',
+  navigationBg: 'rgba(40, 40, 45, 0.5)',
+  legendBg: 'rgba(30, 30, 35, 0.6)',
 };
+
+// Collection of inspirational quotes related to self-improvement
+const INSPIRATIONAL_QUOTES = [
+  "The secret of change is to focus all your energy not on fighting the old, but on building the new.",
+  "Discipline is choosing between what you want now and what you want most.",
+  "The only way to achieve the impossible is to believe it is possible.",
+  "Your future is created by what you do today, not tomorrow.",
+  "Success is not final, failure is not fatal: It is the courage to continue that counts.",
+  "Fall seven times, stand up eight.",
+  "Every day is a new beginning. Take a deep breath and start again.",
+  "The best time to plant a tree was 20 years ago. The second best time is now.",
+  "It's not about perfect. It's about effort. When you bring that effort every day, that's where transformation happens.",
+  "Be stronger than your strongest excuse."
+];
 
 // Helper to generate day cells
 const generateCalendarDays = (year: number, month: number) => {
@@ -62,6 +83,132 @@ const StreakCalendar = () => {
   const { streak } = useGamification();
   const today = new Date();
   
+  // Keep track of streak separately from the context to prevent resets
+  const [persistentStreak, setPersistentStreak] = useState(streak);
+  
+  // Create a ref to hold the streak value to prevent losing it during navigation
+  const streakRef = useRef(streak > 0 ? streak : persistentStreak);
+  
+  // Add a recovery flag to help prevent flicker during updates
+  const [isRecovering, setIsRecovering] = useState(false);
+  
+  // Add a last update timestamp to help with race conditions
+  const lastUpdateTime = useRef(Date.now());
+  
+  // Update both state and ref when streak changes in the context
+  useEffect(() => {
+    console.log(`Streak changed in context to: ${streak}, current persistentStreak: ${persistentStreak}, ref value: ${streakRef.current}`);
+    
+    // Don't override a valid streak with 0
+    if (streak === 0 && streakRef.current > 0) {
+      console.log(`Ignoring streak reset from context, keeping ${streakRef.current}`);
+      return;
+    }
+    
+    if (streak !== persistentStreak) {
+      // Only update if the new value is non-zero or if we're legitimately resetting a streak
+      if (streak > 0 || (streak === 0 && persistentStreak === 0)) {
+        setPersistentStreak(streak);
+        streakRef.current = streak;
+        lastUpdateTime.current = Date.now();
+        console.log(`Updated persistent streak to: ${streak}`);
+      } else {
+        console.log(`Ignoring suspicious streak update from ${persistentStreak} to ${streak}`);
+      }
+    }
+  }, [streak, persistentStreak]);
+  
+  // Also update ref when persistent streak changes
+  useEffect(() => {
+    if (persistentStreak > 0 || (persistentStreak === 0 && streakRef.current === 0)) {
+      streakRef.current = persistentStreak;
+      console.log(`Updated streakRef to match persistentStreak: ${persistentStreak}`);
+    }
+  }, [persistentStreak]);
+  
+  // Add recovery mechanism for cases where the persistentStreak is reset unintentionally
+  useEffect(() => {
+    if (persistentStreak === 0 && streakRef.current > 0 && !isRecovering) {
+      console.log(`Detected unintentional streak reset, recovering from ref: ${streakRef.current}`);
+      setIsRecovering(true);
+      
+      // First check storage to see if there's a value there
+      getStreakDataDirectly().then(data => {
+        if (data && data.streak > 0) {
+          console.log(`Recovered streak from storage: ${data.streak}`);
+          setPersistentStreak(data.streak);
+          streakRef.current = data.streak;
+        } else {
+          // Fall back to the ref value if storage doesn't have a valid value
+          console.log(`Fallback to ref value for recovery: ${streakRef.current}`);
+          setPersistentStreak(streakRef.current);
+        }
+        
+        // End recovery mode after a short delay
+        setTimeout(() => setIsRecovering(false), 500);
+      }).catch(error => {
+        console.error('Error during streak recovery:', error);
+        // Still try to recover using the ref value
+        setPersistentStreak(streakRef.current);
+        setTimeout(() => setIsRecovering(false), 500);
+      });
+    }
+  }, [persistentStreak, isRecovering]);
+  
+  // Load the streak from storage periodically to keep it in sync
+  useEffect(() => {
+    let isMounted = true;
+    
+    const checkStreakStorage = async () => {
+      try {
+        const streakData = await getStreakDataDirectly();
+        if (!isMounted) return;
+        
+        if (streakData && typeof streakData.streak === 'number') {
+          // Only update if it's different to avoid unnecessary rerenders
+          if (streakData.streak !== persistentStreak) {
+            // Prioritize non-zero values from storage over zeros
+            if (streakData.streak > 0 || (streakData.streak === 0 && persistentStreak === 0)) {
+              console.log(`Updating persistent streak from storage: ${streakData.streak}`);
+              setPersistentStreak(streakData.streak);
+              streakRef.current = streakData.streak;
+              lastUpdateTime.current = Date.now();
+            } else if (persistentStreak > 0 && streakData.streak === 0) {
+              console.log(`Ignoring streak reset from storage, keeping ${persistentStreak}`);
+              
+              // Write our value back to storage to correct it
+              try {
+                const startDate = new Date();
+                startDate.setDate(startDate.getDate() - persistentStreak + 1);
+                await storeData(STORAGE_KEYS.STREAK_DATA, {
+                  streak: persistentStreak,
+                  lastCheckIn: Date.now(),
+                  startDate: startDate.getTime()
+                });
+                console.log(`Corrected storage with persistent streak: ${persistentStreak}`);
+              } catch (storageError) {
+                console.error('Error correcting streak storage:', storageError);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error checking streak storage:', error);
+      }
+    };
+    
+    // Check immediately on mount
+    checkStreakStorage();
+    
+    // Also check periodically to ensure sync
+    const intervalId = setInterval(checkStreakStorage, 5000);
+    
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
+  }, [persistentStreak]);
+  
   // State for current month view and relapse dates
   const [currentMonth, setCurrentMonth] = useState(today.getMonth());
   const [currentYear, setCurrentYear] = useState(today.getFullYear());
@@ -74,20 +221,113 @@ const StreakCalendar = () => {
   const [isDetailModalVisible, setDetailModalVisible] = useState(false);
   const [selectedEvents, setSelectedEvents] = useState<StreakHistoryEvent[]>([]);
   
-  // Animation value for month change
+  // Enhanced animation values for smoother transitions
   const slideAnim = useSharedValue(0);
+  const opacityAnim = useSharedValue(1);
   
-  // Calculate streak start date based on current streak
+  // Add new animation values for day cells
+  const dayPressAnim = useSharedValue(1);
+  
+  // Calculate streak start date based on persistent streak
   const calculateStreakStartDate = () => {
-    if (streak === 0) return null;
+    // Use the persistentStreak to ensure consistency
+    if (persistentStreak === 0) return null;
     
+    // For immediate rendering, calculate based on streak
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - streak + 1);
+    startDate.setDate(startDate.getDate() - persistentStreak + 1);
+    console.log(`Calculated start date: ${startDate.toDateString()} for streak: ${persistentStreak}`);
+    
     return startDate;
   };
   
-  // Get streak start date
-  const streakStartDate = calculateStreakStartDate();
+  // Get streak start date and update when streak changes
+  const [streakStartDate, setStreakStartDate] = useState(calculateStreakStartDate());
+  
+  // Update streak start date when persistent streak changes
+  useEffect(() => {
+    console.log(`Persistent streak changed to ${persistentStreak} in StreakCalendar, recalculating start date`);
+    
+    // Force immediate recalculation of streak start date when streak changes
+    const newStartDate = calculateStreakStartDate();
+    
+    // Always update the start date when the streak changes
+    setStreakStartDate(newStartDate);
+    
+    // If the start date has changed significantly, refresh streak history data
+    if (newStartDate && (!streakStartDate || 
+        Math.abs(newStartDate.getTime() - (streakStartDate?.getTime() || 0)) > 1000 * 60 * 60)) {
+      console.log('Significant start date change detected, refreshing streak history');
+      setRelapseDates([]);
+      setStreakStartDates([]);
+      setStreakHistory([]);
+    }
+    
+    // Force rerender of calendar cells by updating a timestamp
+    setForceUpdate(Date.now());
+  }, [persistentStreak]);
+  
+  // Add this state for forcing updates
+  const [forceUpdate, setForceUpdate] = useState(Date.now());
+  
+  // Add a specific listener for streak data changes, with a more reasonable polling interval
+  useEffect(() => {
+    let isMounted = true;
+    
+    const checkForStreakDataChanges = async () => {
+      try {
+        const streakData = await getData(STORAGE_KEYS.STREAK_DATA, { 
+          streak: 0, 
+          lastCheckIn: 0,
+          startDate: Date.now()
+        });
+        
+        if (!isMounted) return;
+        
+        // Get stored date to update our display
+        if (streakData && streakData.startDate && persistentStreak > 0) {
+          const storedStartDate = new Date(streakData.startDate);
+          
+          // Get the calculated date we're currently using
+          const calculatedDate = new Date();
+          calculatedDate.setDate(calculatedDate.getDate() - persistentStreak + 1);
+          
+          // Only update if values are significantly different (more than 1 hour)
+          const hoursDiff = Math.abs(storedStartDate.getTime() - calculatedDate.getTime()) / (1000 * 60 * 60);
+          if (hoursDiff > 1) {
+            console.log(`Using stored start date: ${storedStartDate.toDateString()} instead of calculated: ${calculatedDate.toDateString()}`);
+            // This will trigger a reload of the streak history in the next useEffect
+            setRelapseDates([]);
+            setStreakStartDates([]);
+            setStreakHistory([]);
+          }
+        }
+        
+        // If streak in storage doesn't match current streak, refresh the calendar
+        if (streakData.streak !== persistentStreak) {
+          console.log(`Detected streak change in storage: ${streakData.streak} vs UI: ${persistentStreak}`);
+          // Force reload of streak history will happen in the next useEffect
+          setRelapseDates([]);
+          setStreakStartDates([]);
+          setStreakHistory([]);
+        }
+      } catch (error) {
+        console.error('Error checking for streak data changes:', error);
+      }
+    };
+    
+    // Check after a short delay to allow initial render to complete
+    const initialCheckTimeout = setTimeout(checkForStreakDataChanges, 1000);
+    
+    // Then set a longer interval for ongoing checks (every 10 seconds instead of 2)
+    const intervalId = setInterval(checkForStreakDataChanges, 10000);
+    
+    return () => {
+      isMounted = false;
+      clearTimeout(initialCheckTimeout);
+      clearInterval(intervalId);
+    };
+  }, [persistentStreak]); // Add persistent streak as dependency to update when streak changes
   
   // Load streak history
   useEffect(() => {
@@ -108,7 +348,7 @@ const StreakCalendar = () => {
         const historyEvents: StreakHistoryEvent[] = [];
         
         // Add the current streak start if streak > 0
-        if (streak > 0 && streakData.startDate) {
+        if (persistentStreak > 0 && streakData.startDate) {
           const startDate = new Date(streakData.startDate);
           detectedStarts.push(startDate);
           
@@ -116,7 +356,8 @@ const StreakCalendar = () => {
           historyEvents.push({
             type: 'start',
             date: startDate,
-            notes: 'Current streak started'
+            notes: 'Current streak started',
+            id: `history-start-current-${Date.now()}`
           });
           
           // The day before streak start might be a relapse day
@@ -129,7 +370,8 @@ const StreakCalendar = () => {
             type: 'relapse',
             date: relapseDayBefore,
             streakDays: 0, // We don't know the previous streak length
-            notes: 'Relapse before current streak'
+            notes: 'Relapse before current streak',
+            id: `history-relapse-before-current-${Date.now()}`
           });
         }
         
@@ -151,7 +393,8 @@ const StreakCalendar = () => {
                 historyEvents.push({
                   type: 'relapse',
                   date: entryDate,
-                  notes: entry.content.substring(0, 100) + (entry.content.length > 100 ? '...' : '')
+                  notes: entry.content.substring(0, 100) + (entry.content.length > 100 ? '...' : ''),
+                  id: `history-relapse-${entry.timestamp}-${Math.random().toString(36).substring(2, 9)}`
                 });
               }
               
@@ -167,7 +410,8 @@ const StreakCalendar = () => {
                 historyEvents.push({
                   type: 'start',
                   date: entryDate,
-                  notes: entry.content.substring(0, 100) + (entry.content.length > 100 ? '...' : '')
+                  notes: entry.content.substring(0, 100) + (entry.content.length > 100 ? '...' : ''),
+                  id: `history-start-${entry.timestamp}-${Math.random().toString(36).substring(2, 9)}`
                 });
               }
             }
@@ -185,7 +429,7 @@ const StreakCalendar = () => {
           syntheticRelapse.setDate(syntheticRelapse.getDate() + (i * 25));
           
           // Skip if during current streak
-          if (streak > 0 && streakStartDate && 
+          if (persistentStreak > 0 && streakStartDate && 
               syntheticRelapse >= streakStartDate && syntheticRelapse <= today) {
             continue;
           }
@@ -195,7 +439,8 @@ const StreakCalendar = () => {
             type: 'relapse',
             date: syntheticRelapse,
             streakDays: 20, // Example streak length
-            notes: 'Lost a 20-day streak'
+            notes: 'Lost a 20-day streak',
+            id: `history-synthetic-relapse-${i}-${Date.now()}`
           });
           
           // Create synthetic restart 1-2 days after relapse
@@ -204,7 +449,7 @@ const StreakCalendar = () => {
           syntheticRestart.setDate(syntheticRestart.getDate() + daysAfterRelapse);
           
           // Skip if during current streak
-          if (streak > 0 && streakStartDate && 
+          if (persistentStreak > 0 && streakStartDate && 
               syntheticRestart >= streakStartDate && syntheticRestart <= today) {
             continue;
           }
@@ -213,7 +458,8 @@ const StreakCalendar = () => {
           historyEvents.push({
             type: 'start',
             date: syntheticRestart,
-            notes: 'Fresh start after relapse'
+            notes: 'Fresh start after relapse',
+            id: `history-synthetic-start-${i}-${Date.now()}`
           });
         }
         
@@ -222,13 +468,14 @@ const StreakCalendar = () => {
         thisMonth.setDate(10); // 10th of current month
         
         // Only add if it's not in current streak
-        if (!(streak > 0 && streakStartDate && thisMonth >= streakStartDate)) {
+        if (!(persistentStreak > 0 && streakStartDate && thisMonth >= streakStartDate)) {
           detectedRelapses.push(thisMonth);
           historyEvents.push({
             type: 'relapse',
             date: thisMonth,
             streakDays: 5,
-            notes: 'Recent relapse for testing'
+            notes: 'Recent relapse for testing',
+            id: `history-recent-relapse-${Date.now()}`
           });
         }
         
@@ -249,36 +496,115 @@ const StreakCalendar = () => {
     };
     
     loadStreakHistory();
-  }, [streak]); // Recalculate when streak changes
+  }, [persistentStreak]); // Add additional dependencies if needed
   
   // Month name display
   const getMonthName = (month: number) => {
     return new Date(currentYear, month).toLocaleString('default', { month: 'long' });
   };
   
-  // Handle month navigation
-  const goToPreviousMonth = () => {
-    slideAnim.value = -1;
-    slideAnim.value = withTiming(0, { duration: 300, easing: Easing.out(Easing.cubic) });
-    
-    if (currentMonth === 0) {
-      setCurrentMonth(11);
-      setCurrentYear(currentYear - 1);
-    } else {
-      setCurrentMonth(currentMonth - 1);
+  // Add this function to directly get streak data from storage
+  const getStreakDataDirectly = async () => {
+    try {
+      const data = await getData(STORAGE_KEYS.STREAK_DATA, {
+        streak: 0,
+        lastCheckIn: 0,
+        startDate: Date.now()
+      });
+      return data;
+    } catch (error) {
+      console.error('Error getting streak data directly:', error);
+      return null;
     }
   };
   
-  const goToNextMonth = () => {
-    slideAnim.value = 1;
-    slideAnim.value = withTiming(0, { duration: 300, easing: Easing.out(Easing.cubic) });
+  // Update month navigation functions with enhanced animations
+  const goToPreviousMonth = () => {
+    // Save current streak before animation
+    const currentPersistentStreak = persistentStreak;
     
-    if (currentMonth === 11) {
-      setCurrentMonth(0);
-      setCurrentYear(currentYear + 1);
+    // Start a fade out animation
+    opacityAnim.value = withTiming(0.6, { duration: 150, easing: Easing.out(Easing.quad) });
+    
+    // Start the slide animation
+    slideAnim.value = -1;
+    slideAnim.value = withTiming(0, { 
+      duration: 300, 
+      easing: Easing.out(Easing.cubic) 
+    }, () => {
+      // Fade back in when animation completes
+      opacityAnim.value = withTiming(1, { duration: 200 });
+    });
+    
+    // Pre-calculate the days for the previous month to avoid flickering
+    let prevMonth = currentMonth;
+    let prevYear = currentYear;
+    
+    if (prevMonth === 0) {
+      prevMonth = 11;
+      prevYear = prevYear - 1;
     } else {
-      setCurrentMonth(currentMonth + 1);
+      prevMonth = prevMonth - 1;
     }
+    
+    // Update the state after the animation has started
+    setCurrentMonth(prevMonth);
+    setCurrentYear(prevYear);
+    
+    // Force calendar to update with same streak value
+    setTimeout(() => {
+      // Ensure streak value remains the same
+      if (persistentStreak !== currentPersistentStreak) {
+        setPersistentStreak(currentPersistentStreak);
+      }
+      
+      // Update force value to trigger render
+      setForceUpdate(Date.now());
+    }, 10);
+  };
+  
+  const goToNextMonth = () => {
+    // Save current streak before animation
+    const currentPersistentStreak = persistentStreak;
+    
+    // Start a fade out animation
+    opacityAnim.value = withTiming(0.6, { duration: 150, easing: Easing.out(Easing.quad) });
+    
+    // Start the slide animation
+    slideAnim.value = 1;
+    slideAnim.value = withTiming(0, { 
+      duration: 300, 
+      easing: Easing.out(Easing.cubic) 
+    }, () => {
+      // Fade back in when animation completes
+      opacityAnim.value = withTiming(1, { duration: 200 });
+    });
+    
+    // Pre-calculate the days for the next month to avoid flickering
+    let nextMonth = currentMonth;
+    let nextYear = currentYear;
+    
+    if (nextMonth === 11) {
+      nextMonth = 0;
+      nextYear = nextYear + 1;
+    } else {
+      nextMonth = nextMonth + 1;
+    }
+    
+    // Update the state after the animation has started
+    setCurrentMonth(nextMonth);
+    setCurrentYear(nextYear);
+    
+    // Force calendar to update with same streak value
+    setTimeout(() => {
+      // Ensure streak value remains the same
+      if (persistentStreak !== currentPersistentStreak) {
+        setPersistentStreak(currentPersistentStreak);
+      }
+      
+      // Update force value to trigger render
+      setForceUpdate(Date.now());
+    }, 10);
   };
   
   // Animation style for month transition
@@ -288,18 +614,61 @@ const StreakCalendar = () => {
         { translateX: slideAnim.value * 20 },
         { scale: 1 - Math.abs(slideAnim.value) * 0.05 }
       ],
-      opacity: 1 - Math.abs(slideAnim.value) * 0.3
+      opacity: opacityAnim.value
     };
   });
+  
+  // Create a press animation style for day cells
+  const pressDayStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ scale: dayPressAnim.value }]
+    };
+  });
+  
+  // Add a press animation handler
+  const onDayPressIn = () => {
+    dayPressAnim.value = withTiming(0.95, { duration: 100 });
+  };
+  
+  const onDayPressOut = () => {
+    dayPressAnim.value = withTiming(1, { duration: 150 });
+  };
   
   // Generate days for current month
   const calendarDays = generateCalendarDays(currentYear, currentMonth);
   
   // Check if a date is within the current streak
   const isStreakDay = (date: Date | null) => {
-    if (!date || !streakStartDate) return false;
+    // Use the persistent streak to ensure consistency
+    if (!date || !streakStartDate || persistentStreak === 0) return false;
     
-    return date >= streakStartDate && date <= today;
+    // To properly determine if a date is part of the current streak:
+    // 1. It must be on or after the streak start date
+    // 2. It must be on or before today
+    
+    // Reset hours/minutes/seconds for proper date comparison
+    const normalizedDate = new Date(date);
+    normalizedDate.setHours(0, 0, 0, 0);
+    
+    const normalizedStartDate = new Date(streakStartDate);
+    normalizedStartDate.setHours(0, 0, 0, 0);
+    
+    const normalizedToday = new Date();
+    normalizedToday.setHours(0, 0, 0, 0);
+    
+    // For debugging
+    if (
+      date.getDate() === new Date().getDate() && 
+      date.getMonth() === new Date().getMonth() && 
+      date.getFullYear() === new Date().getFullYear()
+    ) {
+      console.log(`Checking today in streak: 
+        Today: ${normalizedToday.toDateString()}
+        Start date: ${normalizedStartDate.toDateString()}
+        Current streak: ${persistentStreak} days`);
+    }
+    
+    return normalizedDate >= normalizedStartDate && normalizedDate <= normalizedToday;
   };
   
   // Check if a date is a relapse day
@@ -360,8 +729,35 @@ const StreakCalendar = () => {
     });
   };
   
+  // Add a random quote selection that changes daily but stays consistent within a day
+  const [quote, setQuote] = useState("");
+  
+  // Select a consistent quote for the day
+  useEffect(() => {
+    // Use the current date as a seed for consistent quote selection
+    const today = new Date();
+    const dateString = `${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`;
+    
+    // Create a simple hash of the date string to get a deterministic number
+    let hash = 0;
+    for (let i = 0; i < dateString.length; i++) {
+      hash = (hash << 5) - hash + dateString.charCodeAt(i);
+      hash |= 0; // Convert to 32bit integer
+    }
+    
+    // Use the hash to select a quote
+    const quoteIndex = Math.abs(hash) % INSPIRATIONAL_QUOTES.length;
+    setQuote(INSPIRATIONAL_QUOTES[quoteIndex]);
+  }, []);
+  
+  // Define a unique key for the current month/year view that includes the persistent streak
+  const calendarGridKey = `grid-${currentMonth}-${currentYear}-${forceUpdate}-${persistentStreak}`;
+  
   return (
-    <View style={[styles.container, { backgroundColor: colors.card }]}>
+    <View style={[styles.container, { 
+      backgroundColor: COLORS.cardBackground,
+      borderColor: COLORS.cardBorder,
+    }]}>
       <View style={styles.header}>
         <Text style={[styles.title, { color: colors.text }]}>
           Streak Calendar
@@ -369,102 +765,170 @@ const StreakCalendar = () => {
         <CalendarIcon size={24} color={colors.primary} />
       </View>
       
-      <View style={styles.calendarHeader}>
-        <TouchableOpacity
-          onPress={goToPreviousMonth}
-          style={styles.navigationButton}
-        >
-          <ChevronLeft size={24} color={colors.primary} />
-        </TouchableOpacity>
-        
-        <Animated.Text style={[styles.monthYearText, { color: colors.text }, slideStyle]}>
-          {getMonthName(currentMonth)} {currentYear}
-        </Animated.Text>
-        
-        <TouchableOpacity
-          onPress={goToNextMonth}
-          style={styles.navigationButton}
-        >
-          <ChevronRight size={24} color={colors.primary} />
-        </TouchableOpacity>
-      </View>
-      
-      {/* Weekday headers */}
-      <View style={styles.weekdayHeader}>
-        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => (
-          <Text key={index} style={[styles.weekdayText, { color: colors.secondaryText }]}>
-            {day}
-          </Text>
-        ))}
-      </View>
-      
-      {/* Calendar grid */}
-      <View style={styles.calendarGrid}>
-        {calendarDays.map((day, index) => (
+      <Animated.View style={[styles.calendarContainer, slideStyle]}>
+        <View style={styles.calendarHeader}>
           <TouchableOpacity
-            key={index}
-            style={[
-              styles.dayCell,
-              day.day === 0 && styles.emptyCell,
-              day.date && isSameDay(day.date.getTime(), new Date().getTime()) && styles.todayCell,
-            ]}
-            onPress={() => day.date && handleDayPress(day.date)}
-            disabled={day.day === 0}
+            onPress={goToPreviousMonth}
+            style={styles.navigationButton}
+            activeOpacity={0.7}
           >
-            {day.day !== 0 && (
-              <>
-                <View 
-                  style={[
-                    styles.dayBackground,
-                    isRelapseDay(day.date) && { backgroundColor: COLORS.relapse },
-                    isStreakDay(day.date) && { backgroundColor: COLORS.streak },
-                    isStreakStartDay(day.date) && { backgroundColor: COLORS.start },
-                  ]}
-                />
-                {isStreakStartDay(day.date) && isRelapseDay(day.date) && (
-                  <View style={styles.splitDayOverlay}>
-                    <View style={[styles.splitDayHalf, { backgroundColor: COLORS.relapse, right: '50%' }]} />
-                    <View style={[styles.splitDayHalf, { backgroundColor: COLORS.start, left: '50%' }]} />
-                  </View>
-                )}
-                <Text 
-                  style={[
-                    styles.dayText, 
-                    { color: isStreakDay(day.date) || isRelapseDay(day.date) || isStreakStartDay(day.date) ? '#FFFFFF' : colors.text }
-                  ]}
-                >
-                  {day.day}
-                </Text>
-                {(isRelapseDay(day.date) || isStreakStartDay(day.date)) && (
-                  <View style={styles.eventIndicator}>
-                    <Info size={12} color="#FFFFFF" />
-                  </View>
-                )}
-              </>
-            )}
+            <LinearGradient
+              colors={['rgba(80, 70, 230, 0.5)', 'rgba(80, 70, 230, 0.2)']}
+              style={styles.navGradient}
+            >
+              <ChevronLeft size={22} color="#ffffff" />
+            </LinearGradient>
           </TouchableOpacity>
-        ))}
-      </View>
+          
+          <Text style={[styles.monthYearText, { color: colors.text }]}>
+            {getMonthName(currentMonth)} {currentYear}
+          </Text>
+          
+          <TouchableOpacity
+            onPress={goToNextMonth}
+            style={styles.navigationButton}
+            activeOpacity={0.7}
+          >
+            <LinearGradient
+              colors={['rgba(80, 70, 230, 0.5)', 'rgba(80, 70, 230, 0.2)']}
+              style={styles.navGradient}
+            >
+              <ChevronRight size={22} color="#ffffff" />
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+        
+        {/* Weekday headers */}
+        <View style={styles.weekdayHeader}>
+          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => (
+            <Text key={index} style={[styles.weekdayText, { color: colors.secondaryText }]}>
+              {day}
+            </Text>
+          ))}
+        </View>
+        
+        {/* Calendar grid - updated with improved key */}
+        <View style={styles.calendarGrid} key={calendarGridKey}>
+          {calendarDays.map((day, index) => {
+            // Calculate cell properties outside JSX for better performance
+            const isEmptyCell = day.day === 0;
+            const isTodayCell = day.date && isSameDay(day.date.getTime(), new Date().getTime());
+            const isStreak = day.date && isStreakDay(day.date);
+            const isRelapse = day.date && isRelapseDay(day.date);
+            const isStreakStart = day.date && isStreakStartDay(day.date);
+            
+            // Define the cell key that includes all relevant data
+            const cellKey = `${index}-${currentMonth}-${currentYear}-${isStreak ? 'streak' : ''}-${forceUpdate}`;
+            
+            // Choose appropriate gradient colors based on day type
+            let gradientColors: [string, string] = ['transparent', 'transparent']; // Default is transparent
+            
+            if (isStreak) {
+              gradientColors = ['rgba(74, 222, 128, 0.9)', 'rgba(74, 222, 128, 0.7)'];
+            } else if (isRelapse) {
+              gradientColors = ['rgba(248, 113, 113, 0.9)', 'rgba(248, 113, 113, 0.7)'];
+            } else if (isStreakStart) {
+              gradientColors = ['rgba(96, 165, 250, 0.9)', 'rgba(96, 165, 250, 0.7)'];
+            }
+            
+            return (
+              <TouchableOpacity
+                key={cellKey}
+                style={[
+                  styles.dayCell,
+                  isEmptyCell && styles.emptyCell,
+                ]}
+                onPress={() => day.date && handleDayPress(day.date)}
+                onPressIn={onDayPressIn}
+                onPressOut={onDayPressOut}
+                activeOpacity={0.8}
+                disabled={isEmptyCell}
+              >
+                {!isEmptyCell && (
+                  <Animated.View 
+                    style={[
+                      styles.dayCellInner,
+                      isTodayCell && styles.todayCell,
+                      pressDayStyle
+                    ]}
+                  >
+                    {(isStreak || isRelapse || isStreakStart) && (
+                      <LinearGradient
+                        colors={gradientColors}
+                        style={styles.dayBackground}
+                      />
+                    )}
+                    
+                    {isStreakStart && isRelapse && (
+                      <View style={styles.splitDayOverlay}>
+                        <LinearGradient
+                          colors={['rgba(248, 113, 113, 0.9)', 'rgba(248, 113, 113, 0.7)']}
+                          style={[styles.splitDayHalf, { right: '50%' }]}
+                        />
+                        <LinearGradient
+                          colors={['rgba(96, 165, 250, 0.9)', 'rgba(96, 165, 250, 0.7)']}
+                          style={[styles.splitDayHalf, { left: '50%' }]}
+                        />
+                      </View>
+                    )}
+                    
+                    <Text 
+                      style={[
+                        styles.dayText, 
+                        { color: isStreak || isRelapse || isStreakStart ? '#FFFFFF' : colors.text }
+                      ]}
+                    >
+                      {day.day}
+                    </Text>
+                    
+                    {(isRelapse || isStreakStart) && (
+                      <View style={styles.eventIndicator}>
+                        <Info size={10} color="#FFFFFF" />
+                      </View>
+                    )}
+                  </Animated.View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </Animated.View>
       
-      {/* Legend */}
-      <View style={styles.legend}>
+      {/* Enhanced Legend with gradient backgrounds */}
+      <View style={[styles.legend, { backgroundColor: COLORS.legendBg }]}>
         <View style={styles.legendItem}>
-          <View style={[styles.legendColor, { backgroundColor: COLORS.streak }]} />
+          <LinearGradient
+            colors={['rgba(74, 222, 128, 0.9)', 'rgba(74, 222, 128, 0.7)']}
+            style={styles.legendColor}
+          />
           <Text style={[styles.legendText, { color: colors.secondaryText }]}>Streak Days</Text>
         </View>
         
         <View style={styles.legendItem}>
-          <View style={[styles.legendColor, { backgroundColor: COLORS.relapse }]} />
+          <LinearGradient
+            colors={['rgba(248, 113, 113, 0.9)', 'rgba(248, 113, 113, 0.7)']}
+            style={styles.legendColor}
+          />
           <Text style={[styles.legendText, { color: colors.secondaryText }]}>Relapse</Text>
         </View>
         
         <View style={styles.legendItem}>
-          <View style={[styles.legendColor, { backgroundColor: COLORS.start }]} />
+          <LinearGradient
+            colors={['rgba(96, 165, 250, 0.9)', 'rgba(96, 165, 250, 0.7)']}
+            style={styles.legendColor}
+          />
           <Text style={[styles.legendText, { color: colors.secondaryText }]}>Fresh Start</Text>
         </View>
       </View>
       
-      {/* Day detail modal */}
+      {/* Inspirational quote section */}
+      {quote && (
+        <View style={styles.quoteContainer}>
+          <Text style={styles.quoteText}>"{quote}"</Text>
+        </View>
+      )}
+      
+      {/* Day detail modal with enhanced styling */}
       <Modal
         transparent
         visible={isDetailModalVisible}
@@ -472,32 +936,42 @@ const StreakCalendar = () => {
         onRequestClose={() => setDetailModalVisible(false)}
       >
         <BlurView intensity={60} style={styles.modalOverlay}>
-          <View style={[styles.detailModalContainer, { backgroundColor: colors.card }]}>
-            <View style={styles.detailModalHeader}>
-              <CalendarIconFull size={20} color={colors.primary} />
-              <Text style={[styles.detailModalTitle, { color: colors.text }]}>
-                {selectedDate && formatDetailDate(selectedDate)}
-              </Text>
-              <TouchableOpacity
-                onPress={() => setDetailModalVisible(false)}
-                hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
-              >
-                <X size={20} color={colors.secondaryText} />
-              </TouchableOpacity>
-            </View>
+          <View style={[styles.detailModalContainer, { backgroundColor: COLORS.cardBackground }]}>
+            <LinearGradient
+              colors={['rgba(80, 70, 230, 0.3)', 'rgba(80, 70, 230, 0.1)']}
+              style={styles.detailModalHeaderGradient}
+            >
+              <View style={styles.detailModalHeader}>
+                <CalendarIconFull size={20} color="#ffffff" />
+                <Text style={[styles.detailModalTitle, { color: colors.text }]}>
+                  {selectedDate && formatDetailDate(selectedDate)}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setDetailModalVisible(false)}
+                  hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+                  style={styles.closeButton}
+                >
+                  <X size={20} color="#ffffff" />
+                </TouchableOpacity>
+              </View>
+            </LinearGradient>
             
             <ScrollView 
               style={styles.detailModalContent}
               contentContainerStyle={{ paddingBottom: 20 }}
               showsVerticalScrollIndicator={false}
             >
-              {selectedEvents.map((event, index) => (
-                <View key={index} style={styles.eventCard}>
+              {selectedEvents.map((event) => (
+                <Animated.View 
+                  key={event.id} 
+                  style={styles.eventCard}
+                  entering={FadeInDown.duration(400).delay(100)}
+                >
                   <LinearGradient
                     colors={
                       event.type === 'relapse' 
-                        ? ['rgba(231, 76, 60, 0.2)', 'rgba(231, 76, 60, 0.05)']
-                        : ['rgba(46, 204, 113, 0.2)', 'rgba(46, 204, 113, 0.05)']
+                        ? ['rgba(231, 76, 60, 0.3)', 'rgba(231, 76, 60, 0.1)']
+                        : ['rgba(46, 204, 113, 0.3)', 'rgba(46, 204, 113, 0.1)']
                     }
                     style={styles.eventCardGradient}
                   >
@@ -531,7 +1005,7 @@ const StreakCalendar = () => {
                       </Text>
                     )}
                   </LinearGradient>
-                </View>
+                </Animated.View>
               ))}
             </ScrollView>
           </View>
@@ -543,108 +1017,116 @@ const StreakCalendar = () => {
 
 const styles = StyleSheet.create({
   container: {
-    marginVertical: 16,
-    borderRadius: 20,
+    marginVertical: 20,
+    borderRadius: 24,
     overflow: 'hidden',
-    padding: 16,
+    padding: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  calendarContainer: {
+    marginTop: 8,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   title: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 24,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   calendarHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 20,
+    paddingHorizontal: 8,
   },
   navigationButton: {
-    padding: 8,
+    width: 50,
+    height: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 25,
+    overflow: 'hidden',
+  },
+  navGradient: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 25,
   },
   monthYearText: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   weekdayHeader: {
     flexDirection: 'row',
-    marginBottom: 8,
+    marginBottom: 15,
+    paddingHorizontal: 10,
   },
   weekdayText: {
     flex: 1,
     textAlign: 'center',
-    fontSize: 12,
-    fontWeight: '500',
+    fontSize: 14,
+    fontWeight: '600',
+    opacity: 0.8,
+    letterSpacing: 0.5,
   },
   calendarGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    marginTop: 5,
   },
   dayCell: {
     width: '14.28%', // 7 days per week
     aspectRatio: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    position: 'relative',
     padding: 4,
+  },
+  dayCellInner: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+    borderRadius: 25,
   },
   dayBackground: {
     position: 'absolute',
-    width: '85%',
-    height: '85%',
-    borderRadius: 50,
+    width: '90%',
+    height: '90%',
+    borderRadius: 25,
     zIndex: -1,
-    opacity: 0.9, // Slightly transparent for a softer look
   },
   dayText: {
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 16,
+    fontWeight: '700',
     zIndex: 1,
   },
   emptyCell: {
     opacity: 0,
   },
   todayCell: {
-    borderWidth: 2,
+    borderWidth: 2.5,
     borderColor: COLORS.today,
-    borderRadius: 50,
-  },
-  streakDay: {
-    backgroundColor: COLORS.streak,
-    shadowColor: COLORS.streak,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  relapseDay: {
-    backgroundColor: COLORS.relapse,
-    shadowColor: COLORS.relapse,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  startDay: {
-    backgroundColor: COLORS.start,
-    shadowColor: COLORS.start,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 3,
-    elevation: 3,
+    borderRadius: 25,
   },
   splitDayOverlay: {
     position: 'absolute',
-    width: '85%',
-    height: '85%',
-    borderRadius: 50,
+    width: '90%',
+    height: '90%',
+    borderRadius: 25,
     overflow: 'hidden',
     zIndex: -1,
   },
@@ -659,26 +1141,29 @@ const styles = StyleSheet.create({
     bottom: 2,
     right: 2,
     zIndex: 2,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    borderRadius: 10,
+    padding: 2,
   },
   legend: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: 20,
+    justifyContent: 'space-around',
+    marginTop: 24,
     flexWrap: 'wrap',
-    gap: 16,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-    padding: 12,
-    borderRadius: 12,
+    gap: 10,
+    padding: 16,
+    borderRadius: 20,
   },
   legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 8,
   },
   legendColor: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    marginRight: 8,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    marginRight: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.3,
@@ -686,8 +1171,22 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   legendText: {
-    fontSize: 12,
-    fontWeight: '500',
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  quoteContainer: {
+    marginTop: 24,
+    alignItems: 'center',
+    paddingHorizontal: 15,
+  },
+  quoteText: {
+    fontSize: 15,
+    fontStyle: 'italic',
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'center',
+    lineHeight: 22,
+    letterSpacing: 0.3,
   },
   
   // Modal styles
@@ -698,64 +1197,84 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.7)',
   },
   detailModalContainer: {
-    width: '85%',
+    width: '90%',
     maxHeight: '70%',
-    borderRadius: 20,
+    borderRadius: 24,
     overflow: 'hidden',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 15 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 15,
+  },
+  detailModalHeaderGradient: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
   },
   detailModalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    padding: 20,
   },
   detailModalTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
+    fontSize: 18,
+    fontWeight: '700',
+    marginLeft: 12,
     flex: 1,
+    letterSpacing: 0.5,
+  },
+  closeButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
   },
   detailModalContent: {
-    padding: 16,
+    padding: 20,
   },
   eventCard: {
     marginBottom: 16,
-    borderRadius: 12,
+    borderRadius: 20,
     overflow: 'hidden',
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 6,
   },
   eventCardGradient: {
-    padding: 16,
-    borderRadius: 12,
+    padding: 20,
+    borderRadius: 20,
   },
   eventCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
   },
   eventCardTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
+    fontSize: 18,
+    fontWeight: '700',
+    marginLeft: 12,
     flex: 1,
+    letterSpacing: 0.5,
   },
   eventCardTime: {
-    fontSize: 12,
+    fontSize: 14,
+    fontWeight: '600',
   },
   eventCardDetail: {
-    fontSize: 14,
-    fontWeight: '500',
-    marginBottom: 8,
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+    marginLeft: 30,
+    letterSpacing: 0.3,
   },
   eventCardNotes: {
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 15,
+    lineHeight: 22,
+    marginLeft: 30,
+    opacity: 0.9,
+    letterSpacing: 0.3,
   },
 });
 

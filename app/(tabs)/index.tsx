@@ -33,6 +33,10 @@ import { useTheme } from '@/context/ThemeContext';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import BrainMetrics from '@/components/home/BrainMetrics';
 import StreakCalendar from '@/components/home/StreakCalendar';
+import { setFailsafeStreakValue } from '@/utils/streakService';
+import { storeData, STORAGE_KEYS, getData } from '@/utils/storage';
+import { loadStreakData } from '@/utils/streakService';
+import useAchievementNotification from '@/hooks/useAchievementNotification';
 
 const { width, height } = Dimensions.get('window');
 
@@ -132,12 +136,80 @@ const StreakCard = () => {
   const { streak, setStreak } = useGamification();
   const [isDatePickerVisible, setDatePickerVisible] = useState(false);
   const [isRelapseModalVisible, setRelapseModalVisible] = useState(false);
-  const animation = useStreakAnimation(streak);
+  const [localStreak, setLocalStreak] = useState(streak);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [intentionalReset, setIntentionalReset] = useState(false);
+  const animation = useStreakAnimation(localStreak);
+  const { showAchievement } = useAchievementNotification();
+  
+  // Create a persistent ref at component level to track streak values
+  const streakValueRef = React.useRef(streak > 0 ? streak : localStreak);
+  
+  // Add a backup timestamp to help detect and prevent race conditions
+  const lastUpdateTimestamp = React.useRef(Date.now());
+  
+  // Force a re-render if needed
+  const [forceRender, setForceRender] = useState(0);
+  
+  // Keep local state in sync with context
+  useEffect(() => {
+    console.log(`Streak changed in context: ${streak}, updating local state, current ref value: ${streakValueRef.current}`);
+    
+    // Prevent streaks of 0 from overriding valid streak values 
+    if (streak === 0 && streakValueRef.current > 0 && !intentionalReset) {
+      console.log(`Preventing context reset from ${streakValueRef.current} to 0`);
+      return;
+    }
+    
+    // Only update if not in the middle of a manual update
+    if (!isUpdating) {
+      // Update state and ref if streak is valid
+      if (streak > 0 || intentionalReset) {
+        setLocalStreak(streak);
+        streakValueRef.current = streak;
+        lastUpdateTimestamp.current = Date.now();
+        
+        // Reset intentional reset flag after it's been applied
+        if (intentionalReset) {
+          setIntentionalReset(false);
+        }
+        
+        // Trigger animation when streak changes
+        animation.value = 0;
+        animation.value = withSequence(
+          withTiming(1.15, { duration: 400, easing: Easing.out(Easing.cubic) }),
+          withTiming(1, { duration: 300, easing: Easing.inOut(Easing.cubic) })
+        );
+      } else if (streakValueRef.current === 0) {
+        // Only update to 0 if the ref is also 0 (legitimate reset)
+        setLocalStreak(0);
+      }
+    }
+  }, [streak, isUpdating, intentionalReset]);
+  
+  // Safety recovery mechanism - if streak gets reset unintentionally, restore from ref
+  useEffect(() => {
+    if (localStreak === 0 && streakValueRef.current > 0 && !intentionalReset) {
+      console.log(`Detected streak reset - recovering from ${streakValueRef.current}`);
+      
+      // Schedule recovery to avoid immediate state conflicts
+      const recoveryTimer = setTimeout(() => {
+        setLocalStreak(streakValueRef.current);
+        
+        // Force a re-render after recovery
+        setForceRender(prev => prev + 1);
+      }, 500);
+      
+      return () => clearTimeout(recoveryTimer);
+    }
+  }, [localStreak, intentionalReset]);
   
   // Calculate the start date based on streak
   const getStreakStartDate = () => {
+    // Use the ref value as the source of truth for calculations
+    const streakToUse = streakValueRef.current > 0 ? streakValueRef.current : localStreak;
     const date = new Date();
-    date.setDate(date.getDate() - streak);
+    date.setDate(date.getDate() - streakToUse);
     return date;
   };
   
@@ -157,40 +229,222 @@ const StreakCard = () => {
     };
   });
   
-  // Handle relapse confirmation
-  const handleRelapseConfirm = () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-    setStreak(0);
-    setRelapseModalVisible(false);
-  };
-  
   // Handle date selection confirm
-  const handleDateConfirm = (date: Date) => {
+  const handleDateConfirm = async (date: Date) => {
     const today = new Date();
-    const diffTime = Math.abs(today.getTime() - date.getTime());
+    
+    // Reset hours/minutes/seconds for proper calculation
+    const normalizedDate = new Date(date);
+    normalizedDate.setHours(0, 0, 0, 0);
+    
+    const normalizedToday = new Date();
+    normalizedToday.setHours(0, 0, 0, 0);
+    
+    // Calculate days between the dates (inclusive of start date)
+    // Ensure we're using the correct calculation for dates across different years
+    const diffTime = Math.abs(normalizedToday.getTime() - normalizedDate.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     
+    // Ensure streak is calculated correctly (can't be negative)
+    const validatedStreakDays = Math.max(0, diffDays);
+    
+    console.log(`User selected date: ${normalizedDate.toISOString()}`);
+    console.log(`Today's date: ${normalizedToday.toISOString()}`);
+    console.log(`Calculated streak: ${validatedStreakDays} days`);
+    
+    try {
+      // Close the date picker first to prevent visual glitches
+      setDatePickerVisible(false);
+      
+      // Set updating flag to prevent UI flickers
+      setIsUpdating(true);
+      
+      // CRITICAL: Update local UI state IMMEDIATELY for instant feedback
+      setLocalStreak(validatedStreakDays);
+      
+      // Store validated streak in our component-level ref as source of truth
+      streakValueRef.current = validatedStreakDays;
+      lastUpdateTimestamp.current = Date.now();
+      
+      // Trigger animation immediately
+      animation.value = 0;
+      animation.value = withSequence(
+        withTiming(1.15, { duration: 400, easing: Easing.out(Easing.cubic) }),
+        withTiming(1, { duration: 300, easing: Easing.inOut(Easing.cubic) })
+      );
+      
+      // Backup the streak value to storage immediately for redundancy
+      try {
+        await storeData(STORAGE_KEYS.STREAK_DATA, {
+          streak: validatedStreakDays,
+          lastCheckIn: Date.now(),
+          startDate: normalizedDate.getTime()
+        });
+      } catch (storageError) {
+        console.error('Error in redundant storage update:', storageError);
+      }
+      
+      // Update the streak in context with the specific start date timestamp
+      await setStreak(validatedStreakDays, normalizedDate.getTime());
+      
+      // Show immediate visual feedback through haptics
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setStreak(diffDays);
-    setDatePickerVisible(false);
+      
+      // Replace the Alert with the custom achievement notification
+      showAchievement({
+        title: 'Streak Updated',
+        description: `Your streak has been updated to ${validatedStreakDays} day${validatedStreakDays !== 1 ? 's' : ''}.`,
+        buttonText: 'OK'
+      });
+      
+      // CRITICAL: Force streak value to stay at validatedStreakDays
+      const streakToRestore = streakValueRef.current;
+      setLocalStreak(streakToRestore);
+      
+      // Force a re-render to ensure UI is updated
+      setForceRender(prev => prev + 1);
+      
+      // Small delay to ensure UI updates after animation completes
+      setTimeout(() => {
+        if (localStreak !== streakToRestore) {
+          console.log(`Streak mismatch detected, forcing restore to ${streakToRestore}`);
+          setLocalStreak(streakToRestore);
+          setForceRender(prev => prev + 1);
+        }
+        console.log(`Final streak update confirmation: ${streakToRestore} days`);
+        // Only turn off updating after everything is stable
+        setIsUpdating(false);
+      }, 300);
+      
+      // Force a reload of streak data to refresh calendar after a short delay
+      // But keep this outside of the alert flow to avoid racing
+      setTimeout(() => {
+        try {
+          loadStreakData().then(() => {
+            console.log('Streak data reloaded successfully after date change');
+            // Only update if we're losing our value - otherwise keep the local value
+            if (isUpdating && streakValueRef.current !== 0) {
+              setLocalStreak(streakValueRef.current);
+              setForceRender(prev => prev + 1);
+            }
+          }).catch(error => {
+            console.error('Error reloading streak data:', error);
+            if (isUpdating) {
+              // Keep streak value consistent
+              setLocalStreak(streakValueRef.current);
+              setForceRender(prev => prev + 1);
+            }
+            // End update mode in case of error
+            setIsUpdating(false);
+          });
+        } catch (error) {
+          console.error('Failed to call loadStreakData:', error);
+          if (isUpdating) {
+            // Keep streak value consistent
+            setLocalStreak(streakValueRef.current);
+            setForceRender(prev => prev + 1);
+          }
+          // End update mode in case of error
+          setIsUpdating(false);
+        }
+      }, 1000); // Increased from 500ms to 1000ms to avoid race conditions
+      
+    } catch (error) {
+      console.error('Error updating streak date:', error);
+      // End update mode in case of error
+      setIsUpdating(false);
+      
+      // Replace error Alert with custom notification
+      showAchievement({
+        title: 'Error',
+        description: 'There was a problem updating your streak. Please try again.',
+        buttonText: 'OK'
+      });
+    }
+  };
+  
+  // Handle relapse confirmation
+  const handleRelapseConfirm = async () => {
+    try {
+      // Immediately close the modal to prevent UI lock
+      setRelapseModalVisible(false);
+      
+      // Haptic feedback
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      }
+      
+      console.log('Starting relapse process...');
+      
+      // Set updating flag to prevent UI flickers
+      setIsUpdating(true);
+      
+      // Set intentional reset flag to prevent auto-recovery
+      setIntentionalReset(true);
+      
+      // Update local streak immediately to prevent flashing
+      setLocalStreak(0);
+      
+      // Update the ref value to 0 to prevent recovery mechanisms
+      streakValueRef.current = 0;
+      
+      console.log('Local state updated, calling setStreak...');
+      
+      // Reset streak in context - wrap in try/catch to ensure UI stays responsive
+      try {
+        await setStreak(0);
+        console.log('Streak reset successful');
+      } catch (streakError) {
+        console.error('Error resetting streak:', streakError);
+      }
+      
+      console.log('Showing feedback notification...');
+      
+      // Show feedback to the user - wrap in try/catch to prevent crashes
+      try {
+        showAchievement({
+          title: "Streak Reset",
+          description: "Your streak has been reset. Today is a new beginning.",
+          buttonText: "Continue"
+        });
+      } catch (notificationError) {
+        console.error('Error showing achievement notification:', notificationError);
+        // Fallback to Alert if achievement notification fails
+        Alert.alert(
+          "Streak Reset",
+          "Your streak has been reset. Today is a new beginning.",
+          [{ text: "Continue" }]
+        );
+      }
+    } catch (error) {
+      console.error('Error in handleRelapseConfirm:', error);
+      // Ensure UI is not stuck if there's an error
+      setRelapseModalVisible(false);
+    } finally {
+      // Always reset updating flag, even if there's an error
+      setTimeout(() => {
+        setIsUpdating(false);
+        console.log('Relapse process complete, UI unlocked');
+      }, 500);
+    }
   };
   
   // Get motivation message based on streak length
   const getMotivationMessage = () => {
-    if (streak === 0) return "Let's start your journey today!";
-    if (streak === 1) return "First day - you've got this!";
-    if (streak < 7) return "Building momentum - keep going!";
-    if (streak < 30) return "Great progress - you're developing new habits!";
-    if (streak < 90) return "Impressive discipline - stay strong!";
+    if (localStreak === 0) return "Let's start your journey today!";
+    if (localStreak === 1) return "First day - you've got this!";
+    if (localStreak < 7) return "Building momentum - keep going!";
+    if (localStreak < 30) return "Great progress - you're developing new habits!";
+    if (localStreak < 90) return "Impressive discipline - stay strong!";
     return "Extraordinary achievement - truly inspiring!";
   };
   
   // Get streak color based on length
   const getStreakColor = () => {
-    if (streak === 0) return colors.text;
-    if (streak < 7) return '#3498db';
-    if (streak < 30) return '#2ecc71';
-    if (streak < 90) return '#f39c12';
+    if (localStreak === 0) return colors.text;
+    if (localStreak < 7) return '#3498db';
+    if (localStreak < 30) return '#2ecc71';
+    if (localStreak < 90) return '#f39c12';
     return '#e74c3c';
   };
   
@@ -269,10 +523,10 @@ const StreakCard = () => {
         {/* Middle section - streak count */}
         <View style={styles.streakCardMiddle}>
           <Animated.Text style={[styles.streakCardNumber, { color: getStreakColor() }, streakNumberStyle]}>
-            {streak}
+            {localStreak}
           </Animated.Text>
           <Text style={[styles.streakCardUnit, { color: colors.secondaryText }]}>
-            {streak === 1 ? 'day' : 'days'}
+            {localStreak === 1 ? 'day' : 'days'}
           </Text>
         </View>
         
@@ -289,7 +543,7 @@ const StreakCard = () => {
             {getMotivationMessage()}
           </Text>
           
-          {streak > 0 && (
+          {localStreak > 0 && (
             <TouchableOpacity
               style={styles.relapseButton}
               onPress={() => setRelapseModalVisible(true)}
@@ -405,6 +659,70 @@ const DailyQuote = () => {
 export default function HomeScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const { streak, setStreak } = useGamification();
+
+  // Add a loading state
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Add this effect to ensure streak data is loaded properly on launch
+  useEffect(() => {
+    // Initialize streak data on component mount
+    const initializeStreakData = async () => {
+      try {
+        setIsLoading(true);
+        console.log('Initializing streak data on app launch');
+        
+        // First try to get the streak data from storage
+        const streakData = await getData(STORAGE_KEYS.STREAK_DATA, { 
+          streak: 0, 
+          lastCheckIn: 0,
+          startDate: Date.now()
+        });
+        
+        console.log(`Loaded initial streak data:`, streakData);
+        
+        // If we have a valid streak, ensure it's set in the context
+        if (streakData && streakData.streak > 0) {
+          if (streakData.streak !== streak) {
+            console.log(`Setting initial streak to ${streakData.streak} from storage`);
+            
+            // Use the startDate from storage if available
+            const startDate = streakData.startDate || (() => {
+              const date = new Date();
+              date.setDate(date.getDate() - streakData.streak);
+              return date.getTime();
+            })();
+            
+            // Set the streak with the correct start date
+            await setStreak(streakData.streak, startDate);
+          }
+        }
+        
+        // Also load streak data from the service as a double-check
+        await loadStreakData();
+        
+        // Additional safety check - if the streak is 0 but should be non-zero
+        // For example if this value was overridden by a race condition
+        if (streak === 0) {
+          const backupData = await getData(STORAGE_KEYS.STREAK_DATA, {
+            streak: 0,
+            lastCheckIn: 0,
+            startDate: Date.now()
+          });
+          if (backupData && backupData.streak > 0) {
+            console.log('Recovery: Found non-zero streak in storage while context has 0');
+            await setStreak(backupData.streak, backupData.startDate);
+          }
+        }
+      } catch (error) {
+        console.error('Error initializing streak data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    initializeStreakData();
+  }, []);
 
   // Determine StatusBar style based on text color (simple heuristic for light/dark background)
   const barStyle = colors.text === '#FFFFFF' || colors.text === '#FFF' || colors.text.toLowerCase() === '#ffffff' ? 'light-content' : 'dark-content';
