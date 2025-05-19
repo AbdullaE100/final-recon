@@ -4,6 +4,9 @@ import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { ThemeProvider } from '@/context/ThemeContext';
 import { GamificationProvider } from '@/context/GamificationContext';
+import { CompanionChatProvider } from '@/context/CompanionChatContext';
+import { AuthProvider } from '@/context/AuthContext';
+import { SubscriptionProvider } from '@/context/SubscriptionContext';
 import { useFonts } from 'expo-font';
 import { Nunito_400Regular, Nunito_600SemiBold, Nunito_700Bold } from '@expo-google-fonts/nunito';
 import { SplashScreen } from 'expo-router';
@@ -24,6 +27,7 @@ export default function RootLayout() {
   const router = useRouter();
   const [dataInitialized, setDataInitialized] = useState(false);
   const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
+  const [showRecoveryOption, setShowRecoveryOption] = useState(false);
 
   const [fontsLoaded, fontError] = useFonts({
     'Nunito-Regular': Nunito_400Regular,
@@ -51,7 +55,7 @@ export default function RootLayout() {
             
             // Initialize streak data in Supabase
             try {
-            await initializeStreakData();
+              await initializeStreakData();
             } catch (streakError) {
               console.warn('Failed to initialize streak data, continuing anyway:', streakError);
             }
@@ -62,7 +66,7 @@ export default function RootLayout() {
         
         // Step 3: Verify critical data can be loaded
         try {
-        await verifyAndRecoverData();
+          await verifyAndRecoverData();
         } catch (verifyError) {
           console.warn('Error during data verification, continuing with default data:', verifyError);
         }
@@ -70,6 +74,24 @@ export default function RootLayout() {
         // Step 4: Check if onboarding is completed
         const isOnboardingCompleted = await getData(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
         setOnboardingCompleted(isOnboardingCompleted);
+        
+        // If onboarding is not completed, check if Supabase is available to 
+        // enable data recovery option
+        if (!isOnboardingCompleted) {
+          try {
+            const { count, error } = await supabase
+              .from('user_profiles')
+              .select('*', { count: 'exact', head: true });
+            
+            // If there are user profiles in the database and no error, 
+            // show the recovery option
+            if (!error && count && count > 0) {
+              setShowRecoveryOption(true);
+            }
+          } catch (error) {
+            console.warn('Error checking for user profiles:', error);
+          }
+        }
         
         setDataInitialized(true);
       } catch (error) {
@@ -126,11 +148,16 @@ export default function RootLayout() {
     if (onboardingCompleted !== null && dataInitialized && (fontsLoaded || fontError)) {
       setTimeout(() => {
         if (!onboardingCompleted) {
-          router.replace('/onboarding');
+          // If recovery option is available, redirect to our recovery screen
+          if (showRecoveryOption) {
+            router.replace('/recover' as any);
+          } else {
+            router.replace('/onboarding');
+          }
         }
       }, 100);
     }
-  }, [onboardingCompleted, dataInitialized, fontsLoaded, fontError, router]);
+  }, [onboardingCompleted, dataInitialized, fontsLoaded, fontError, router, showRecoveryOption]);
 
   // Hide splash screen once fonts are loaded
   useEffect(() => {
@@ -146,17 +173,29 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider>
+      <AuthProvider>
+        <SubscriptionProvider>
       <GamificationProvider>
-        <StatusBar style="light" />
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
-          <Stack.Screen name="companions-demo" options={{ headerShown: false }} />
-          <Stack.Screen name="my-pledge" options={{ headerShown: false }} />
-          <Stack.Screen name="lottie-test" options={{ headerShown: false }} />
-          <Stack.Screen name="+not-found" options={{ headerShown: false }} />
-        </Stack>
+        <CompanionChatProvider>
+          <StatusBar style="light" />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
+            <Stack.Screen name="recover" options={{ headerShown: false, gestureEnabled: false }} />
+            <Stack.Screen name="companion-chat" options={{ headerShown: false }} />
+            <Stack.Screen name="companions-demo" options={{ headerShown: false }} />
+            <Stack.Screen name="my-pledge" options={{ headerShown: false }} />
+            <Stack.Screen name="edit-pledge" options={{ headerShown: false }} />
+                <Stack.Screen name="subscription" options={{ headerShown: false }} />
+                <Stack.Screen name="free-trial" options={{ headerShown: false }} />
+                <Stack.Screen name="stripe-test" options={{ headerShown: false }} />
+            <Stack.Screen name="lottie-test" options={{ headerShown: false }} />
+            <Stack.Screen name="+not-found" options={{ headerShown: false }} />
+          </Stack>
+        </CompanionChatProvider>
       </GamificationProvider>
+        </SubscriptionProvider>
+      </AuthProvider>
     </ThemeProvider>
   );
 }

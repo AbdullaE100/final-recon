@@ -43,6 +43,8 @@ export interface UserCompanion extends Companion {
   bondLevel: number; // 0-100, increases with feeding
   feedingHistory: FeedingAction[];
   unlockedSnacks: number; // snacks available to feed
+  isNewUser?: boolean; // flag to indicate this is a newly created companion
+  creationTime?: number; // timestamp when the companion was created
 }
 
 // Types of actions that can earn XP

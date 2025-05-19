@@ -1,0 +1,4 @@
+Brace count: 0
+Parentheses count: 0
+
+All balanced!

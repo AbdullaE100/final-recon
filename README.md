@@ -77,4 +77,20 @@ The app uses a combination of local storage and Supabase to ensure your data is 
 
 ## License
 
-MIT 
+MIT
+
+## Onboarding Flow Changes
+
+The onboarding flow has been modified to automatically direct users to the Stripe payment gateway immediately after selecting a companion. This change presents the premium subscription option at the optimal moment in the user journey.
+
+The flow now works as follows:
+1. User completes the onboarding steps (username, welcome, quiz, commitment)
+2. User selects their companion
+3. User is automatically directed to the subscription screen
+4. The Stripe payment gateway opens immediately for a seamless checkout experience
+
+If you want to bypass the payment screen during onboarding, modify the navigation in `completeOnboardingAndNavigate` function in `app/onboarding.tsx` to:
+
+```js
+router.replace('/(tabs)' as any);
+``` 

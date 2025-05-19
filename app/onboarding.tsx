@@ -1,15 +1,19 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, SafeAreaView, StatusBar } from 'react-native';
+import { StyleSheet, View, SafeAreaView, StatusBar, Text, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/context/ThemeContext';
 import WelcomeScreen from '@/components/onboarding/WelcomeScreen';
 import QuizScreen from '@/components/onboarding/QuizScreen';
 import CommitmentScreen from '@/components/onboarding/CommitmentScreen';
 import CompanionSelectionScreen, { CompanionChoice } from '@/components/onboarding/CompanionSelectionScreen';
+import UsernameSetupScreen from '@/components/onboarding/UsernameSetupScreen';
 import { storeData, STORAGE_KEYS, getData } from '@/utils/storage';
+import { supabase } from '@/utils/supabaseClient';
+import { useAuth } from '@/context/AuthContext';
 
 // Define the user preferences interface
 interface UserPreferences {
+  username?: string;
   signature?: string;
   pledgeDate?: number;
   quizAnswers?: Record<string, any>;
@@ -20,14 +24,17 @@ interface UserPreferences {
 export default function OnboardingScreen() {
   const { colors } = useTheme();
   const router = useRouter();
+  const { user } = useAuth();
   
   // Onboarding state
   const [step, setStep] = useState(0);
   const [quizAnswers, setQuizAnswers] = useState({});
   const [selectedCompanion, setSelectedCompanion] = useState<CompanionChoice | null>(null);
+  const [username, setUsername] = useState<string>('');
 
   // Steps in the onboarding flow
   const steps = [
+    'username',
     'welcome',
     'quiz',
     'commitment',
@@ -41,6 +48,12 @@ export default function OnboardingScreen() {
     } else {
       completeOnboardingAndNavigate();
     }
+  };
+
+  // Handle saving username
+  const handleUsernameComplete = (name: string) => {
+    setUsername(name);
+    handleNext();
   };
 
   // Handle saving quiz answers
@@ -59,7 +72,7 @@ export default function OnboardingScreen() {
     await completeOnboardingAndNavigate();
   };
 
-  // Complete onboarding and navigate to main app
+  // Complete onboarding and navigate to subscription screen
   const completeOnboardingAndNavigate = async () => {
     if (!selectedCompanion) {
       console.warn("Companion not selected before attempting to complete onboarding.");
@@ -74,6 +87,7 @@ export default function OnboardingScreen() {
     // Ensure we don't overwrite signature data
     const updatedPreferences: UserPreferences = {
       ...existingPreferences,
+      username,
       quizAnswers,
       companion: selectedCompanion || undefined,
       // Make sure we don't overwrite signature or pledgeDate if they exist
@@ -84,13 +98,60 @@ export default function OnboardingScreen() {
     console.log('Saving updated preferences with keys:', Object.keys(updatedPreferences));
     await storeData(STORAGE_KEYS.USER_PREFERENCES, updatedPreferences);
     
-    // Navigate to the main app
-    router.replace('/(tabs)' as any);
+    // Create anonymous user profile in Supabase if we have Supabase connection and not logged in
+    try {
+      if (username && !user) {
+        // Generate a unique anonymous ID
+        const deviceId = `device_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        
+        // Create or update user profile in Supabase
+        const { data, error } = await supabase
+          .from('user_profiles')
+          .upsert({
+            device_id: deviceId,
+            username: username,
+            preferences: updatedPreferences,
+            created_at: new Date().toISOString(),
+            last_sync: new Date().toISOString()
+          })
+          .select();
+          
+        if (error) {
+          console.warn('Failed to save user profile to Supabase:', error.message);
+        } else {
+          console.log('Successfully created user profile in Supabase');
+          
+          // Store the deviceId for future reference
+          await storeData(STORAGE_KEYS.DEVICE_ID, deviceId);
+        }
+      }
+    } catch (error) {
+      console.warn('Error creating user profile:', error);
+      // Continue even if Supabase sync fails - local data is still saved
+    }
+    
+    try {
+      // Navigate to the trial subscription screen with parameters
+      router.replace({
+        pathname: '/free-trial',
+        params: { 
+          from: 'onboarding',
+          price: '3.99',
+          selectedCompanion: selectedCompanion || 'default'
+        }
+      } as any);
+    } catch (error) {
+      console.error('Error navigating to trial subscription:', error);
+      // Fallback to main app if navigation fails
+      router.replace('/(tabs)' as any);
+    }
   };
 
   // Render the current step of the onboarding flow
   const renderStep = () => {
     switch (steps[step]) {
+      case 'username':
+        return <UsernameSetupScreen onComplete={handleUsernameComplete} />;
       case 'welcome':
         return <WelcomeScreen onContinue={handleNext} />;
       case 'quiz':
@@ -121,5 +182,5 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     justifyContent: 'center',
-  },
+  }
 }); 

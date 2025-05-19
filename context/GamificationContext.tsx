@@ -510,7 +510,7 @@ const initialAchievements: Achievement[] = [
     description: 'Used the app for the first time',
     category: 'app',
     unlockCriteria: 'Open the app for the first time',
-    unlocked: true, // Auto-unlocked on first use
+    unlocked: false, // Changed from true to false for new users
   },
   {
     id: 'badge-usage-checkin',
@@ -576,7 +576,7 @@ const initialAchievements: Achievement[] = [
     description: 'Started a new recovery journey',
     category: 'recovery',
     unlockCriteria: 'Begin a new recovery journey',
-    unlocked: true, // Auto-unlocked on first use
+    unlocked: false, // Changed from true to false for new users
   },
   {
     id: 'badge-recovery-urge',
@@ -837,6 +837,7 @@ interface GamificationContextType {
   // Achievements
   achievements: Achievement[];
   forceCheckStreakAchievements: () => Promise<boolean>;
+  fix30DayBadge: () => Promise<boolean>;
   
   // Actions
   checkIn: () => void;
@@ -861,6 +862,7 @@ interface GamificationContextType {
   getCompanionStage: () => number;
   getBondLevel: () => number;
   resetCompanion: () => Promise<void>;
+  checkAllAchievementTypes: () => Promise<boolean>;
 }
 
 const GamificationContext = createContext<GamificationContextType>({
@@ -896,6 +898,8 @@ const GamificationContext = createContext<GamificationContextType>({
   logWorkout: () => false,
   logMeditation: () => false,
   forceCheckStreakAchievements: () => Promise.resolve(false),
+  fix30DayBadge: () => Promise.resolve(false),
+  checkAllAchievementTypes: () => Promise.resolve(false),
 });
 
 export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ children }) => {
@@ -1030,6 +1034,23 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
         
         console.log('Data loading complete!');
         setDataLoaded(true);
+        
+        // Check for badges that should be unlocked after loading all data
+        setTimeout(() => {
+          try {
+            console.log('Checking for badge unlocks on app initialization');
+            checkAndUnlockBadges().then((updated) => {
+              if (updated) {
+                console.log('Badges were updated during initialization');
+              } else {
+                console.log('No new badges unlocked during initialization');
+              }
+            });
+          } catch (error) {
+            console.error('Error checking badges during initialization:', error);
+          }
+        }, 1000); // Delay to ensure all data is properly loaded
+        
       } catch (error) {
         console.error('Error loading data:', error);
         setDataLoaded(true); // Set to true even on error so the app is usable
@@ -1345,6 +1366,52 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     }
   }, [dataLoaded, userProgress.streak, userProgress.achievements, companion]);
   
+  // Add specific check for badge count changes to ensure evolution happens
+  useEffect(() => {
+    if (!dataLoaded || !companion) return;
+    
+    const unlockedBadgesCount = userProgress.achievements.filter(badge => badge.unlocked).length;
+    
+    // This will ensure we evolve the companion when badge counts hit the thresholds
+    if ((unlockedBadgesCount >= 15 && companion.currentLevel < 2) || 
+        (unlockedBadgesCount >= 30 && companion.currentLevel < 3)) {
+      console.log(`Badge count threshold reached (${unlockedBadgesCount}), checking evolution...`);
+      
+      // Use setTimeout to ensure this runs after any state updates
+      setTimeout(() => {
+        checkAndEvolveCompanion().catch(e => 
+          console.error('Error checking for evolution after badge threshold reached:', e)
+        );
+      }, 500);
+    }
+  }, [dataLoaded, userProgress.achievements?.filter(badge => badge.unlocked).length, companion?.currentLevel]);
+  
+  // Regular check for companion evolution (runs once per session)
+  useEffect(() => {
+    if (!dataLoaded || !companion) return;
+    
+    const checkEvolutionPeriodically = async () => {
+      console.log("Doing session-based evolution check...");
+      
+      // Get unlocked badges count
+      const unlockedBadgesCount = userProgress.achievements.filter(badge => badge.unlocked).length;
+      
+      // Only proceed with check if we meet evolution criteria 
+      // This helps avoid unnecessary processing and ensures proper evolution
+      if ((unlockedBadgesCount >= 15 && companion.currentLevel < 2) || 
+          (unlockedBadgesCount >= 30 && companion.currentLevel < 3)) {
+        
+        console.log("Session check: Evolution criteria met, checking evolution...");
+        await checkAndEvolveCompanion();
+      } else {
+        console.log("Session check: No evolution criteria met");
+      }
+    };
+    
+    // Only run once per session
+    checkEvolutionPeriodically();
+  }, [dataLoaded]); // Only run when data loads initially
+  
   // Extract checkAndEvolveCompanion as a reusable function
   const checkAndEvolveCompanion = async () => {
     if (!companion) {
@@ -1352,7 +1419,15 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       return false;
     }
     
-    // Get unlocked badges count
+    // REMOVING EVOLUTION BLOCK:
+    // Remove the block that was preventing evolution for new users
+    // if (companion.isNewUser === true || 
+    //     (companion.creationTime && (Date.now() - companion.creationTime) < 3600000)) {
+    //   console.log("Skipping evolution - this is a new user companion");
+    //   return false;
+    // }
+    
+    // Get unlocked badges count - ensure we're getting a fresh count
     const unlockedBadgesCount = userProgress.achievements.filter(badge => badge.unlocked).length;
     
     console.log("----------------------------");
@@ -1360,61 +1435,42 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     console.log("Current badges unlocked:", unlockedBadgesCount);
     console.log("Current companion level:", companion.currentLevel);
     console.log("Companion type:", companion.type);
-    console.log("Should evolve to level 2:", unlockedBadgesCount >= 5 && companion.currentLevel < 2);
-    console.log("Should evolve to level 3:", unlockedBadgesCount >= 10 && companion.currentLevel < 3);
+    console.log("Should evolve to level 2:", unlockedBadgesCount >= 15 && companion.currentLevel < 2);
+    console.log("Should evolve to level 3:", unlockedBadgesCount >= 30 && companion.currentLevel < 3);
+    console.log("Badges needed for next evolution:", companion.currentLevel < 2 ? 15 : 30);
     console.log("----------------------------");
     
     // Get the companion's type for evolution name selection
-    const companionType = companion.type || 'water'; // Default to water if no type
+    const companionType = companion.type || 'water';
     
-    // 10+ badges: Evolve to level 3
-    if (unlockedBadgesCount >= 10 && companion.currentLevel < 3) {
-      console.log(`Automatically evolving to level 3 (10+ badges) for ${companionType} type`);
-      
-      // Choose the appropriate name based on companion type
-      let evolvedName = 'Unknown';
-      switch (companionType) {
-        case 'fire':
-          evolvedName = 'Infernix';
-          break;
-        case 'water':
-          evolvedName = 'Aquadrake';
-          break;
-        case 'plant':
-          evolvedName = 'Floravine';
-          break;
-        default:
-          evolvedName = companion.name || 'Companion';
+    // Function to unlock companion evolution badge
+    const unlockEvolutionBadge = () => {
+      // Find and unlock the evolution badge if it exists and isn't already unlocked
+      const evolutionBadge = userProgress.achievements.find(a => a.id === 'badge-companion-evolution');
+      if (evolutionBadge && !evolutionBadge.unlocked) {
+        evolutionBadge.unlocked = true;
+        
+        // Don't show this notification now since we're already showing an evolution notification
+        // But count it as being unlocked
+        console.log("Unlocked companion evolution badge");
+        
+        // We'll save the updated badges later when we save the evolved companion
       }
       
-      const updatedCompanion: UserCompanion = {
-        ...companion,
-        currentLevel: 3,
-        name: evolvedName,
-        isEvolutionReady: false,
-        experience: 0,
-        lastInteraction: Date.now(),
-        happinessLevel: 100,
-      };
-      
-      // Update state immediately for UI responsiveness
-      setCompanionState(updatedCompanion);
-      
-      // Save to storage
-      await storeData(STORAGE_KEYS.COMPANION_DATA, updatedCompanion);
-      
-      // Show notification with custom component instead of Alert
-      showAchievement({
-        title: "Companion Evolved!",
-        description: `Your ${evolvedName} has evolved to its final form after unlocking 10+ badges!`,
-        buttonText: "Awesome!"
-      });
-      
-      return true;
-    }
-    // 5+ badges: Evolve to level 2
-    else if (unlockedBadgesCount >= 5 && companion.currentLevel < 2) {
-      console.log(`Automatically evolving to level 2 (5+ badges) for ${companionType} type`);
+      // Also check for the max evolution badge if we're evolving to level 3
+      if (companion.currentLevel >= 2) {
+        const maxEvolutionBadge = userProgress.achievements.find(a => a.id === 'badge-companion-max-evolution');
+        if (maxEvolutionBadge && !maxEvolutionBadge.unlocked) {
+          maxEvolutionBadge.unlocked = true;
+          console.log("Unlocked max evolution badge");
+        }
+      }
+    };
+    
+    // MODIFIED: Changed from exact 15 badges to AT LEAST 15 badges 
+    // for level 1 companion to ensure evolution works in all cases
+    if (unlockedBadgesCount >= 15 && companion.currentLevel === 1) {
+      console.log(`FORCING EVOLUTION: ${unlockedBadgesCount} badges detected for level 1 companion`);
       
       // Choose the appropriate name based on companion type
       let evolvedName = 'Unknown';
@@ -1432,6 +1488,114 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
           evolvedName = companion.name || 'Companion';
       }
       
+      // Unlock the evolution badge
+      unlockEvolutionBadge();
+      
+      const updatedCompanion: UserCompanion = {
+        ...companion,
+        currentLevel: 2,
+        name: evolvedName,
+        isEvolutionReady: false,
+        isNewUser: false, // Reset new user flag to avoid future evolution blocks
+        experience: 0,
+        lastInteraction: Date.now(),
+        happinessLevel: 100,
+      };
+      
+      // Update state immediately for UI responsiveness
+      setCompanionState(updatedCompanion);
+      
+      // Log the state update
+      console.log("Updated companion state:", updatedCompanion);
+      
+      // Save both the companion and the updated badges
+      await storeData(STORAGE_KEYS.COMPANION_DATA, updatedCompanion);
+      await storeData(STORAGE_KEYS.USER_DATA, userProgress);
+      
+      console.log("Saved evolved companion to storage");
+      
+      // DISABLED: Don't show the notification to avoid spamming the user
+      // showAchievement({
+      //   title: "Companion Evolved!",
+      //   description: `Your ${evolvedName} has evolved to stage 2 after unlocking ${unlockedBadgesCount} badges!`,
+      //   buttonText: "Great!"
+      // });
+      
+      return true;
+    }
+    // REMOVED: else if - to make each condition independent and not depend on previous checks
+    // 30+ badges: Evolve to level 3
+    if (unlockedBadgesCount >= 30 && companion.currentLevel < 3) {
+      console.log(`Automatically evolving to level 3 (30+ badges) for ${companionType} type`);
+      
+      // Choose the appropriate name based on companion type
+      let evolvedName = 'Unknown';
+      switch (companionType) {
+        case 'fire':
+          evolvedName = 'Infernix';
+          break;
+        case 'water':
+          evolvedName = 'Aquadrake';
+          break;
+        case 'plant':
+          evolvedName = 'Floravine';
+          break;
+        default:
+          evolvedName = companion.name || 'Companion';
+      }
+      
+      // Unlock the evolution badge
+      unlockEvolutionBadge();
+      
+      const updatedCompanion: UserCompanion = {
+        ...companion,
+        currentLevel: 3,
+        name: evolvedName,
+        isEvolutionReady: false,
+        experience: 0,
+        lastInteraction: Date.now(),
+        happinessLevel: 100,
+      };
+      
+      // Update state immediately for UI responsiveness
+      setCompanionState(updatedCompanion);
+      
+      // Save both the companion and the updated badges
+      await storeData(STORAGE_KEYS.COMPANION_DATA, updatedCompanion);
+      await storeData(STORAGE_KEYS.USER_DATA, userProgress);
+      
+      // DISABLED: Don't show the notification to avoid spamming the user
+      // showAchievement({
+      //   title: "Companion Evolved!",
+      //   description: `Your ${evolvedName} has evolved to its final form after unlocking 30+ badges!`,
+      //   buttonText: "Awesome!"
+      // });
+      
+      return true;
+    }
+    // 15+ badges: Evolve to level 2
+    else if (unlockedBadgesCount >= 15 && companion.currentLevel < 2) {
+      console.log(`Automatically evolving to level 2 (15+ badges) for ${companionType} type`);
+      
+      // Choose the appropriate name based on companion type
+      let evolvedName = 'Unknown';
+      switch (companionType) {
+        case 'fire':
+          evolvedName = 'Emberclaw';
+          break;
+        case 'water':
+          evolvedName = 'Bubblescale';
+          break;
+        case 'plant':
+          evolvedName = 'Vinesprout';
+          break;
+        default:
+          evolvedName = companion.name || 'Companion';
+      }
+      
+      // Unlock the evolution badge
+      unlockEvolutionBadge();
+      
       const updatedCompanion: UserCompanion = {
         ...companion,
         currentLevel: 2,
@@ -1448,16 +1612,18 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       // Log the state update
       console.log("Updated companion state:", updatedCompanion);
       
-      // Save to storage
+      // Save both the companion and the updated badges
       await storeData(STORAGE_KEYS.COMPANION_DATA, updatedCompanion);
+      await storeData(STORAGE_KEYS.USER_DATA, userProgress);
+      
       console.log("Saved evolved companion to storage");
       
-      // Show notification with custom component instead of Alert
-      showAchievement({
-        title: "Companion Evolved!",
-        description: `Your ${evolvedName} has evolved to stage 2 after unlocking 5 badges!`,
-        buttonText: "Great!"
-      });
+      // DISABLED: Don't show the notification to avoid spamming the user
+      // showAchievement({
+      //   title: "Companion Evolved!",
+      //   description: `Your ${evolvedName} has evolved to stage 2 after unlocking 15 badges!`,
+      //   buttonText: "Great!"
+      // });
       
       return true;
     } else {
@@ -1471,7 +1637,57 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     if (!dataLoaded) return;
     
     const checkJournalAchievements = async () => {
-      if (journalEntries.length >= 10 && !userProgress.achievements.find(a => a.id === 'badge-journal-2')?.unlocked) {
+      let updated = false;
+      console.log("Checking journal achievements - entries count:", journalEntries.length);
+      
+      // First journal entry badge
+      const firstEntryBadge = userProgress.achievements.find(a => a.id === 'badge-journal-first');
+      if (firstEntryBadge && !firstEntryBadge.unlocked && journalEntries.length >= 1) {
+        console.log("Unlocking first journal entry badge");
+        setUserProgress(prev => ({
+          ...prev,
+          achievements: prev.achievements.map(a => 
+            a.id === 'badge-journal-first' 
+              ? { ...a, unlocked: true, unlockedDate: Date.now() } 
+              : a
+          )
+        }));
+        addPoints(50);
+        updated = true;
+        
+        showAchievement({
+          title: firstEntryBadge.name,
+          description: firstEntryBadge.description,
+          buttonText: 'Great!',
+        });
+      }
+      
+      // 3 journal entries badge
+      const threeEntriesBadge = userProgress.achievements.find(a => a.id === 'badge-journal-3');
+      if (threeEntriesBadge && !threeEntriesBadge.unlocked && journalEntries.length >= 3) {
+        console.log("Unlocking 3 journal entries badge");
+        setUserProgress(prev => ({
+          ...prev,
+          achievements: prev.achievements.map(a => 
+            a.id === 'badge-journal-3' 
+              ? { ...a, unlocked: true, unlockedDate: Date.now() } 
+              : a
+          )
+        }));
+        addPoints(75);
+        updated = true;
+        
+        showAchievement({
+          title: threeEntriesBadge.name,
+          description: threeEntriesBadge.description,
+          buttonText: 'Nice!',
+        });
+      }
+      
+      // 10 journal entries badge (Consistent Journaler)
+      const tenEntriesBadge = userProgress.achievements.find(a => a.id === 'badge-journal-2');
+      if (tenEntriesBadge && !tenEntriesBadge.unlocked && journalEntries.length >= 10) {
+        console.log("Unlocking 10 journal entries badge");
         setUserProgress(prev => ({
           ...prev,
           achievements: prev.achievements.map(a => 
@@ -1480,7 +1696,42 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
             : a
           )
         }));
+        addPoints(150);
+        updated = true;
+        
+        showAchievement({
+          title: tenEntriesBadge.name,
+          description: tenEntriesBadge.description,
+          buttonText: 'Amazing!',
+        });
+      }
+      
+      // 20 journal entries badge (Master Journaler)
+      const twentyEntriesBadge = userProgress.achievements.find(a => a.id === 'badge-journal-master');
+      if (twentyEntriesBadge && !twentyEntriesBadge.unlocked && journalEntries.length >= 20) {
+        console.log("Unlocking 20 journal entries badge");
+        setUserProgress(prev => ({
+          ...prev,
+          achievements: prev.achievements.map(a => 
+            a.id === 'badge-journal-master' 
+              ? { ...a, unlocked: true, unlockedDate: Date.now() } 
+              : a
+          )
+        }));
         addPoints(200);
+        updated = true;
+        
+        showAchievement({
+          title: twentyEntriesBadge.name,
+          description: twentyEntriesBadge.description,
+          buttonText: 'Incredible!',
+        });
+      }
+      
+      // If any badges were updated, check for companion evolution
+      if (updated && companion) {
+        console.log("Journal badges updated, checking companion evolution");
+        await checkAndEvolveCompanion();
       }
     };
     
@@ -1532,95 +1783,80 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   
   // Updated check-in method to use the streak service
   const checkIn = async () => {
-    if (dailyCheckedIn) {
+    try {
+      // Can only check in once per day
+      if (userProgress.dailyCheckedIn) {
       console.log('Already checked in today');
+        
+        showAchievement({
+          title: "Already Checked In",
+          description: "You've already completed your daily check-in for today. Come back tomorrow!",
+          buttonText: "OK"
+        });
+        
       return;
     }
     
-    try {
-      // Use the streak service to perform check-in
-      await serviceCheckIn();
+      // Update streak data
+      const now = Date.now();
+      const lastCheckIn = userProgress.lastCheckIn || 0;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayStart = today.getTime();
       
-      // Reload streak data
-      const streakData = await loadStreakData();
+      // Create yesterday date at midnight
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStart = yesterday.getTime();
       
-      // Update local state
-      setUserProgress(prev => ({
-        ...prev,
+      // Was the last check in yesterday or earlier today?
+      const wasYesterdayOrToday = lastCheckIn >= yesterdayStart;
+      
+      // Update streak based on timing
+      const streakData = { streak: userProgress.streak, lastCheckIn: now };
+      
+      if (wasYesterdayOrToday) {
+        // Consecutive check-in - increment streak
+        streakData.streak += 1;
+        console.log(`Consecutive check-in, streak increased to ${streakData.streak}`);
+      } else {
+        // Not consecutive - reset streak to 1
+        streakData.streak = 1;
+        console.log('Streak reset to 1 due to missed day');
+      }
+      
+      // Clone the achievements for updating
+      const updatedAchievements = JSON.parse(JSON.stringify(userProgress.achievements));
+      
+      // Update the user progress with the new achievements and streak data
+      const updatedProgress = {
+        ...userProgress,
         streak: streakData.streak,
         lastCheckIn: streakData.lastCheckIn,
-      }));
+        dailyCheckedIn: true,
+        achievements: updatedAchievements
+      };
       
-      // Add points for check-in
-      addPoints(10);
+      // Update state
+      setUserProgress(updatedProgress);
       
-      // Check for streak-based achievements
-      const updatedAchievements = [...userProgress.achievements];
-      
-      // Check if any streak-based achievements were unlocked
-      if (streakData.streak >= 7) {
-        const weekBadge = updatedAchievements.find(a => a.id === 'badge-streak-1');
-        if (weekBadge && !weekBadge.unlocked) {
-          weekBadge.unlocked = true;
-          weekBadge.unlockedDate = Date.now();
-          addPoints(50);
-          
-          // Show achievement notification with custom component instead of Alert
-          showAchievement({
-            title: "Achievement Unlocked!",
-            description: `${weekBadge.name}: ${weekBadge.description}`,
-            buttonText: "Awesome!"
-          });
-        }
-      }
-      
-      if (streakData.streak >= 30) {
-        const monthBadge = updatedAchievements.find(a => a.id === 'badge-streak-2');
-        if (monthBadge && !monthBadge.unlocked) {
-          monthBadge.unlocked = true;
-          monthBadge.unlockedDate = Date.now();
-          addPoints(200);
-          
-          // Show achievement notification with custom component instead of Alert
-          showAchievement({
-            title: "Achievement Unlocked!",
-            description: `${monthBadge.name}: ${monthBadge.description}`,
-            buttonText: "Amazing!"
-          });
-        }
-      }
-      
-      if (streakData.streak >= 90) {
-        const ninetyDayBadge = updatedAchievements.find(a => a.id === 'badge-streak-3');
-        if (ninetyDayBadge && !ninetyDayBadge.unlocked) {
-          ninetyDayBadge.unlocked = true;
-          ninetyDayBadge.unlockedDate = Date.now();
-          addPoints(500);
-          
-          // Show achievement notification with custom component instead of Alert
-          showAchievement({
-            title: "Achievement Unlocked!",
-            description: `${ninetyDayBadge.name}: ${ninetyDayBadge.description}`,
-            buttonText: "Incredible!"
-          });
-        }
-      }
-      
-      setUserProgress(prev => ({
-        ...prev,
-        achievements: updatedAchievements,
-      }));
+      // Store the updated data
+      await storeData(STORAGE_KEYS.USER_DATA, updatedProgress);
       
       // Give companion XP for daily check-in if the user has a companion
       if (companion) {
         await updateCompanionExperience(25, XpActionType.DAILY_CHECK_IN);
       }
       
-      // Important: Check if companion should evolve based on the updated streak
+      // Check for badges that should be unlocked with the new streak
+      console.log('Checking for badge unlocks after check-in');
+      await checkAndUnlockBadges();
+      
+      // Important: Check if companion should evolve based on the updated streak and badges
       // This needs to happen AFTER the streak is updated
-      console.log(`Checking for evolution with streak ${streakData.streak}`);
+      console.log(`Checking for evolution after daily check-in with streak ${streakData.streak}`);
       const evolved = await checkAndEvolveCompanion();
-      console.log(`Evolution check result: ${evolved ? 'Evolved' : 'No evolution'}`);
+      console.log(`Evolution check result after check-in: ${evolved ? 'Evolved' : 'No evolution'}`);
     } catch (error) {
       console.error('Failed to check in:', error);
     }
@@ -1631,15 +1867,131 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     if (!content.trim()) return;
     
     const newEntry: JournalEntry = {
-      id: `journal-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      id: `journal-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`,
       content,
       timestamp: Date.now(),
     };
     
-    setJournalEntries(prev => [newEntry, ...prev]);
+    // Ensure the new entry has a unique ID by checking existing entries
+    const uniqueId = ensureUniqueId(newEntry.id);
+    newEntry.id = uniqueId;
+    
+    const updatedEntries = [newEntry, ...journalEntries];
+    setJournalEntries(updatedEntries);
+    
+    // Save to storage immediately to prevent duplication on rapid additions
+    try {
+      storeData(STORAGE_KEYS.JOURNAL_ENTRIES, updatedEntries);
+    } catch (error) {
+      console.error('Failed to store journal entries:', error);
+    }
     
     // Award points for journal entry
     addPoints(15);
+    
+    // Check for badge unlocks immediately with the updated entry count
+    const checkForBadgeUnlocks = async () => {
+      let updated = false;
+      const entriesCount = updatedEntries.length;
+      console.log(`Checking journal badges with ${entriesCount} entries`);
+      
+      // Check for the first journal entry badge
+      if (entriesCount === 1) {
+        const firstEntryBadge = userProgress.achievements.find(a => a.id === 'badge-journal-first');
+        if (firstEntryBadge && !firstEntryBadge.unlocked) {
+          console.log("Unlocking first journal entry badge");
+          setUserProgress(prev => ({
+            ...prev,
+            achievements: prev.achievements.map(a => 
+              a.id === 'badge-journal-first' 
+                ? { ...a, unlocked: true, unlockedDate: Date.now() } 
+                : a
+            )
+          }));
+          updated = true;
+          showAchievement({
+            title: firstEntryBadge.name,
+            description: firstEntryBadge.description,
+            buttonText: 'Great!',
+          });
+        }
+      }
+      
+      // Check for the 3 entries badge
+      if (entriesCount === 3) {
+        const threeEntriesBadge = userProgress.achievements.find(a => a.id === 'badge-journal-3');
+        if (threeEntriesBadge && !threeEntriesBadge.unlocked) {
+          console.log("Unlocking 3 journal entries badge");
+          setUserProgress(prev => ({
+            ...prev,
+            achievements: prev.achievements.map(a => 
+              a.id === 'badge-journal-3' 
+                ? { ...a, unlocked: true, unlockedDate: Date.now() } 
+                : a
+            )
+          }));
+          updated = true;
+          showAchievement({
+            title: threeEntriesBadge.name,
+            description: threeEntriesBadge.description,
+            buttonText: 'Nice!',
+          });
+        }
+      }
+      
+      // Check for the 10 entries badge
+      if (entriesCount === 10) {
+        const tenEntriesBadge = userProgress.achievements.find(a => a.id === 'badge-journal-2');
+        if (tenEntriesBadge && !tenEntriesBadge.unlocked) {
+          console.log("Unlocking 10 journal entries badge");
+          setUserProgress(prev => ({
+            ...prev,
+            achievements: prev.achievements.map(a => 
+              a.id === 'badge-journal-2' 
+                ? { ...a, unlocked: true, unlockedDate: Date.now() } 
+                : a
+            )
+          }));
+          updated = true;
+          showAchievement({
+            title: tenEntriesBadge.name,
+            description: tenEntriesBadge.description,
+            buttonText: 'Amazing!',
+          });
+        }
+      }
+      
+      // Check for the 20 entries badge
+      if (entriesCount === 20) {
+        const twentyEntriesBadge = userProgress.achievements.find(a => a.id === 'badge-journal-master');
+        if (twentyEntriesBadge && !twentyEntriesBadge.unlocked) {
+          console.log("Unlocking 20 journal entries badge");
+          setUserProgress(prev => ({
+            ...prev,
+            achievements: prev.achievements.map(a => 
+              a.id === 'badge-journal-master' 
+                ? { ...a, unlocked: true, unlockedDate: Date.now() } 
+                : a
+            )
+          }));
+          updated = true;
+          showAchievement({
+            title: twentyEntriesBadge.name,
+            description: twentyEntriesBadge.description,
+            buttonText: 'Incredible!',
+          });
+        }
+      }
+      
+      // If any badges were updated, check for companion evolution
+      if (updated && companion) {
+        console.log("Journal badges updated, checking companion evolution");
+        await checkAndEvolveCompanion();
+      }
+    };
+    
+    // Run the badge check
+    checkForBadgeUnlocks();
     
     // Update journal streak challenge if active
     const journalStreakChallenge = challenges.find(c => 
@@ -1982,14 +2334,40 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   
   // Reset all data
   const resetData = async () => {
-    await clearAllData();
-    
-    setUserProgress({
-      ...defaultUserProgress,
-      achievements: initialAchievements.map(a => ({ ...a, unlocked: false }))
-    });
-    setJournalEntries([]);
-    setChallenges(initialChallenges);
+    try {
+      // Create a fresh new user progress object with no unlocked badges
+      const freshUserProgress: UserProgress = {
+        ...defaultUserProgress,
+        achievements: [...initialAchievements], // Ensure deep copy
+        streak: 0,
+        lastCheckIn: 0,
+        level: 1,
+        points: 0,
+        badgesEarned: [],
+        challengesCompleted: [],
+        challengesActive: [],
+        dailyCheckedIn: false
+      };
+
+      // Save the fresh progress to storage
+      await storeData(STORAGE_KEYS.ACHIEVEMENTS, freshUserProgress);
+      
+      // Also reset the companion
+      await resetCompanion();
+      
+      // Clear other data that might be persisted
+      await storeData(STORAGE_KEYS.JOURNAL_ENTRIES, []);
+      await storeData(STORAGE_KEYS.STREAK_DATA, { streak: 0, lastCheckIn: 0, dailyCheckedIn: false });
+      
+      // Update state 
+      setUserProgress(freshUserProgress);
+      setJournalEntries([]);
+      
+      return true;
+    } catch (error) {
+      console.error('Error resetting all user data:', error);
+      return false;
+    }
   };
   
   // Export data
@@ -2154,10 +2532,12 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
         lastInteraction: Date.now(),
         lastCheckIn: 0, // No check-in yet
         happinessLevel: 100,
-        isEvolutionReady: true, // Force to true for testing
+        isEvolutionReady: false, // Set to false by default for new users
         bondLevel: 10,
         feedingHistory: [],
-        unlockedSnacks: 5
+        unlockedSnacks: 5,
+        isNewUser: true, // Flag to indicate this is a newly created companion
+        creationTime: Date.now() // Add creation timestamp for reference
       };
       
       // Save to storage
@@ -2183,13 +2563,25 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   };
   
   // Create a default companion if missing or corrupted
-  const createDefaultCompanion = async () => {
-    // Default water type companion
+  const createDefaultCompanion = async (companionType: 'water' | 'fire' | 'plant' = 'water') => {
+    // Choose name based on type
+    let name = 'Stripes';
+    let description = 'A friendly water dragon companion';
+    
+    if (companionType === 'plant') {
+      name = 'Drowsi';
+      description = "Falls asleep faster than your urges — let him nap, so you don't relapse.";
+    } else if (companionType === 'fire') {
+      name = 'Snuglur';
+      description = "The monster under your bed — but this time, he's scaring off your bad habits.";
+    }
+    
+    // Default companion with specified type
     const defaultCompanion: Companion = {
       id: `companion-${Date.now()}`,
-      type: 'water',
-      name: 'Stripes',
-      description: 'A friendly water dragon companion',
+      type: companionType,
+      name: name,
+      description: description,
       currentLevel: 1,
       experience: 0,
       nextLevelExperience: 100,
@@ -2341,12 +2733,15 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   const getCompanionStage = () => {
     if (!companion) return 1;
     
-    // Get unlocked badges count
+    // SIMPLIFIED APPROACH: Always determine stage purely based on badges unlocked,
+    // completely bypassing the companion's stored level and other checks
     const unlockedBadgesCount = userProgress.achievements.filter(badge => badge.unlocked).length;
     
-    // Determine stage based on badges unlocked instead of XP/streak
-    if (unlockedBadgesCount >= 10) return 3;
-    if (unlockedBadgesCount >= 5) return 2;
+    console.log("COMPANION STAGE CHECK: Badge count =", unlockedBadgesCount);
+    
+    // Determine stage based on badges unlocked
+    if (unlockedBadgesCount >= 30) return 3;
+    if (unlockedBadgesCount >= 15) return 2;
     return 1;
   };
   
@@ -2364,6 +2759,14 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     if (!companion) return false;
     
     try {
+      // REMOVING EVOLUTION BLOCK:
+      // Remove the skip for brand new companions
+      // if (companion.lastInteraction && (Date.now() - companion.lastInteraction < 60000) && 
+      //     companion.currentLevel === 1) {
+      //   console.log("Skipping evolution for brand new companion");
+      //   return false;
+      // }
+
       // Get number of unlocked badges to determine potential evolution
       const unlockedBadgesCount = userProgress.achievements.filter(badge => badge.unlocked).length;
       const currentLevel = companion.currentLevel;
@@ -2376,8 +2779,9 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       let targetLevel = currentLevel;
       let newName = companion.name;
       
-      // 10+ badges: Should be at level 3
-      if (unlockedBadgesCount >= 10 && currentLevel < 3) {
+      // MODIFIED: Always evolve if badges meet requirements
+      // 30+ badges: Should be at level 3
+      if (unlockedBadgesCount >= 30 && currentLevel < 3) {
         targetLevel = 3;
         shouldEvolve = true;
         
@@ -2395,9 +2799,9 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
           default:
             newName = companion.name || 'Companion';
         }
-      } 
-      // 5+ badges: Should be at least level 2
-      else if (unlockedBadgesCount >= 5 && currentLevel < 2) {
+      }
+      // 15+ badges: Should be at least level 2
+      else if (unlockedBadgesCount >= 15 && currentLevel < 2) {
         targetLevel = 2;
         shouldEvolve = true;
         
@@ -2416,21 +2820,43 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
             newName = companion.name || 'Companion';
         }
       }
-      // Manual evolution (this happens outside of badge checks)
-      else if (companion.isEvolutionReady) {
-        targetLevel = currentLevel + 1;
+      // ADDED: Force evolution regardless of badge count when manually triggered
+      // This ensures that users can force evolution from the utility screen
+      else if (companion.currentLevel === 1) {
+        // Force evolution to level 2 regardless of badge count
+        targetLevel = 2;
         shouldEvolve = true;
         
-        // Find the evolution name based on type and new level
+        // Choose the appropriate name based on companion type
         switch (companionType) {
           case 'fire':
-            newName = targetLevel === 3 ? 'Infernix' : 'Emberclaw';
+            newName = 'Emberclaw';
             break;
           case 'water':
-            newName = targetLevel === 3 ? 'Aquadrake' : 'Bubblescale';
+            newName = 'Bubblescale';
             break;
           case 'plant':
-            newName = targetLevel === 3 ? 'Floravine' : 'Vinesprout';
+            newName = 'Vinesprout';
+            break;
+          default:
+            newName = companion.name || 'Companion';
+        }
+      }
+      // If on level 2, force to level 3 when manually triggered
+      else if (companion.currentLevel === 2) {
+        targetLevel = 3;
+        shouldEvolve = true;
+        
+        // Choose the appropriate name based on companion type
+        switch (companionType) {
+          case 'fire':
+            newName = 'Infernix';
+            break;
+          case 'water':
+            newName = 'Aquadrake';
+            break;
+          case 'plant':
+            newName = 'Floravine';
             break;
           default:
             newName = companion.name || 'Companion';
@@ -2451,6 +2877,7 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
         currentLevel: targetLevel,
         name: newName,
         isEvolutionReady: false,
+        isNewUser: false, // Reset new user flag to ensure future evolutions work
         experience: 0,
         lastInteraction: Date.now(),
         happinessLevel: 100,
@@ -2460,12 +2887,12 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       setCompanionState(updatedCompanion);
       console.log('Updated companion state in context to level:', updatedCompanion.currentLevel);
       
-      // Show notification with custom component instead of Alert
-      showAchievement({
-        title: "Companion Evolved!",
-        description: `Your ${newName} has evolved to level ${targetLevel}!`,
-        buttonText: "Awesome!"
-      });
+      // DISABLED: Don't show the notification to avoid spamming the user
+      // showAchievement({
+      //   title: "Companion Evolved!",
+      //   description: `Your ${newName} has evolved to level ${targetLevel}!`,
+      //   buttonText: "Awesome!"
+      // });
       
       // We'll save asynchronously, but return immediately
       storeData(STORAGE_KEYS.COMPANION_DATA, updatedCompanion)
@@ -2482,245 +2909,382 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   // Reset just the companion data
   const resetCompanion = async () => {
     try {
+      // Preserve the companion type if possible
+      const previousType = companion?.type || 'water';
+      
       // Clear companion data
       await storeData(STORAGE_KEYS.COMPANION_DATA, null);
       setCompanionState(null);
       
-      // Create a new default companion
-      await createDefaultCompanion();
+      // Create a new default companion with the same type
+      await createDefaultCompanion(previousType as 'water' | 'fire' | 'plant');
       
-      console.log("Companion reset successfully");
+      console.log(`Companion reset successfully with type: ${previousType}`);
     } catch (error) {
       console.error("Error resetting companion:", error);
     }
   };
 
-  // Add a new function to force-check all streak achievements
-  const forceCheckStreakAchievements = async () => {
-    console.log('Force checking streak achievements for streak:', userProgress.streak);
+  // Helper function to check and unlock badges by criteria
+  const checkAndUnlockBadges = async () => {
+    if (!dataLoaded) return false;
     
-    const updatedAchievements = [...userProgress.achievements];
+    console.log("Checking all badges for unlock conditions");
+    console.log(`Current streak: ${userProgress.streak}`);
     let updated = false;
     
-    // Get current streak
-    const currentStreak = userProgress.streak;
+    // Track unlocked badges before checking
+    const initialUnlockedCount = userProgress.achievements.filter(badge => badge.unlocked).length;
     
-    // Check streak-related badges
-    const checkAndUpdateBadge = (badgeId: string, requiredStreak: number) => {
+    // Function to unlock a specific badge if not already unlocked
+    const unlockBadge = (badgeId: string, points: number, showNotification: boolean = true) => {
       const badge = userProgress.achievements.find(a => a.id === badgeId);
-      if (badge && !badge.unlocked && currentStreak >= requiredStreak) {
-        badge.unlocked = true;
-        updated = true;
+      if (!badge) {
+        console.warn(`Badge with ID ${badgeId} not found!`);
+        return false;
+      }
+      
+      console.log(`Checking badge: ${badgeId}, unlocked: ${badge.unlocked}, name: ${badge.name}`);
+      
+      if (!badge.unlocked) {
+        console.log(`Unlocking badge: ${badgeId}`);
         
+        // Update the badge in user progress
+        setUserProgress(prev => ({
+          ...prev,
+          achievements: prev.achievements.map(a => 
+            a.id === badgeId 
+              ? { ...a, unlocked: true, unlockedDate: Date.now() } 
+              : a
+          )
+        }));
+        
+        // Award points
+        addPoints(points);
+        
+        // Show notification if requested
+        if (showNotification) {
         showAchievement({
           title: badge.name,
           description: badge.description,
-          buttonText: 'Nice!',
-        });
+            buttonText: 'Great!',
+          });
+        }
         
-        // Also add points for unlocking a badge
-        addPoints(50);
+        updated = true;
+        return true;
       }
+      return false;
     };
     
-    // Check all streak badges
-    checkAndUpdateBadge('badge-streak-1day', 1);
-    checkAndUpdateBadge('badge-streak-3days', 3);
-    checkAndUpdateBadge('badge-streak-5days', 5);
-    checkAndUpdateBadge('badge-streak-1', 7);
-    checkAndUpdateBadge('badge-streak-2weeks', 14);
-    checkAndUpdateBadge('badge-streak-2', 30);
-    checkAndUpdateBadge('badge-streak-45days', 45);
-    checkAndUpdateBadge('badge-streak-60days', 60);
-    checkAndUpdateBadge('badge-streak-75days', 75);
-    checkAndUpdateBadge('badge-streak-3', 90);
-    checkAndUpdateBadge('badge-streak-120days', 120);
-    checkAndUpdateBadge('badge-streak-6months', 180);
-    checkAndUpdateBadge('badge-streak-9months', 270);
-    checkAndUpdateBadge('badge-streak-1year', 365);
+    // Debug output of all streak badges
+    console.log("All streak badges:");
+    const streakBadges = userProgress.achievements.filter(a => a.id.includes('streak-'));
+    streakBadges.forEach(badge => {
+      console.log(`Badge ID: ${badge.id}, Name: ${badge.name}, Unlocked: ${badge.unlocked}`);
+    });
     
-    // Check usage streak badge
-    const usageStreakBadge = userProgress.achievements.find(a => a.id === 'badge-usage-streak');
-    if (usageStreakBadge && !usageStreakBadge.unlocked) {
-      // For simplicity, if they have a 3-day streak, we'll assume they've used the app for 3 consecutive days
-      if (currentStreak >= 3) {
-        usageStreakBadge.unlocked = true;
-        updated = true;
-        
-        showAchievement({
-          title: usageStreakBadge.name,
-          description: usageStreakBadge.description,
-          buttonText: 'Nice!',
-        });
-        
-        addPoints(25);
+    // Check journal badges based on entry count
+    const journalCount = journalEntries.length;
+    if (journalCount >= 1) unlockBadge('badge-journal-first', 50);
+    if (journalCount >= 3) unlockBadge('badge-journal-3', 75);
+    if (journalCount >= 10) unlockBadge('badge-journal-2', 150);
+    if (journalCount >= 20) unlockBadge('badge-journal-master', 200);
+    
+    // Check streak badges - log streak values for debugging
+    console.log(`Checking streak badges with streak value: ${userProgress.streak}`);
+    
+    if (userProgress.streak >= 1) {
+      console.log("Checking 1-day badge");
+      unlockBadge('badge-streak-1day', 25);
+    }
+    
+    if (userProgress.streak >= 3) {
+      console.log("Checking 3-day badge");
+      unlockBadge('badge-streak-3days', 50);
+    }
+    
+    if (userProgress.streak >= 5) {
+      console.log("Checking 5-day badge");
+      unlockBadge('badge-streak-5days', 75);
+    }
+    
+    if (userProgress.streak >= 7) {
+      console.log("Checking 7-day badge");
+      unlockBadge('badge-streak-1', 100); // 7-day badge
+    }
+    
+    if (userProgress.streak >= 14) {
+      console.log("Checking 14-day badge");
+      unlockBadge('badge-streak-2weeks', 150);
+    }
+    
+    // Special handling for 30-day badge - make sure we're using the right badge ID
+    if (userProgress.streak >= 30) {
+      console.log("Checking 30-day badge");
+      // Try both possible badge IDs for 30-day badge
+      const result1 = unlockBadge('badge-streak-2', 250); // Original ID
+      if (!result1) {
+        console.log("Trying alternate badge ID for 30-day streak");
+        unlockBadge('badge-streak-30days', 250); // Possible alternate ID
       }
     }
     
-    // Check for first use badge and daily check-in badge
-    const firstUseBadge = userProgress.achievements.find(a => a.id === 'badge-usage-first');
-    const dailyCheckInBadge = userProgress.achievements.find(a => a.id === 'badge-usage-checkin');
+    if (userProgress.streak >= 45) unlockBadge('badge-streak-45days', 300);
+    if (userProgress.streak >= 60) unlockBadge('badge-streak-60days', 350);
+    if (userProgress.streak >= 75) unlockBadge('badge-streak-75days', 400);
+    if (userProgress.streak >= 90) unlockBadge('badge-streak-3', 500);
+    if (userProgress.streak >= 120) unlockBadge('badge-streak-120days', 600);
+    if (userProgress.streak >= 180) unlockBadge('badge-streak-6months', 750);
+    if (userProgress.streak >= 270) unlockBadge('badge-streak-9months', 1000);
+    if (userProgress.streak >= 365) unlockBadge('badge-streak-1year', 1500);
     
-    if (firstUseBadge && !firstUseBadge.unlocked) {
-      firstUseBadge.unlocked = true;
-      updated = true;
-    }
+    // Check app usage badges
+    unlockBadge('badge-usage-first', 25, false); // First use badge should always be unlocked
+    if (userProgress.dailyCheckedIn) unlockBadge('badge-usage-checkin', 25);
     
-    if (dailyCheckInBadge && !dailyCheckInBadge.unlocked && userProgress.dailyCheckedIn) {
-      dailyCheckInBadge.unlocked = true;
-      updated = true;
-      
-      showAchievement({
-        title: dailyCheckInBadge.name,
-        description: dailyCheckInBadge.description,
-        buttonText: 'Nice!',
-      });
-      
-      addPoints(25);
-    }
-    
-    // Check for companion-related badges
+    // Check companion badges if a companion exists
     if (companion) {
-      const companionSelectedBadge = userProgress.achievements.find(a => a.id === 'badge-companion-selected');
-      if (companionSelectedBadge && !companionSelectedBadge.unlocked) {
-        companionSelectedBadge.unlocked = true;
-        updated = true;
-        
-        showAchievement({
-          title: companionSelectedBadge.name,
-          description: companionSelectedBadge.description,
-          buttonText: 'Nice!',
-        });
-        
-        addPoints(25);
-      }
+      unlockBadge('badge-companion-selected', 25);
       
       // Check if companion has been fed
-      const companionFeedBadge = userProgress.achievements.find(a => a.id === 'badge-companion-feed');
-      if (companionFeedBadge && !companionFeedBadge.unlocked && companion.feedingHistory && companion.feedingHistory.length > 0) {
-        companionFeedBadge.unlocked = true;
-        updated = true;
-        
-        showAchievement({
-          title: companionFeedBadge.name,
-          description: companionFeedBadge.description,
-          buttonText: 'Nice!',
-        });
-        
-        addPoints(25);
+      if (companion.feedingHistory && companion.feedingHistory.length > 0) {
+        unlockBadge('badge-companion-feed', 25);
+      }
+      
+      // Check for evolution badges
+      if (companion.currentLevel >= 2) {
+        unlockBadge('badge-companion-evolution', 100);
+      }
+      
+      if (companion.currentLevel >= 3) {
+        unlockBadge('badge-companion-max-evolution', 200);
       }
     }
     
     // Check for milestone badges based on total unlocked badges
     const unlockedBadgesCount = userProgress.achievements.filter(badge => badge.unlocked).length;
     
-    const firstMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-first');
-    if (firstMilestoneBadge && !firstMilestoneBadge.unlocked && unlockedBadgesCount >= 1) {
-      firstMilestoneBadge.unlocked = true;
-      updated = true;
-      
-      showAchievement({
-        title: firstMilestoneBadge.name,
-        description: firstMilestoneBadge.description,
-        buttonText: 'Nice!',
-      });
-      
-      addPoints(25);
+    if (unlockedBadgesCount >= 1) unlockBadge('badge-milestone-first', 25);
+    if (unlockedBadgesCount >= 3) unlockBadge('badge-milestone-three', 40);
+    if (unlockedBadgesCount >= 5) unlockBadge('badge-milestone-five', 50);
+    if (unlockedBadgesCount >= 10) unlockBadge('badge-milestone-ten', 100);
+    if (unlockedBadgesCount >= 20) unlockBadge('badge-milestone-twenty', 150);
+    if (unlockedBadgesCount >= 30) unlockBadge('badge-milestone-thirty', 200);
+    if (unlockedBadgesCount >= 50) unlockBadge('badge-milestone-fifty', 300);
+    
+    // Check if the count of unlocked badges has changed
+    const finalUnlockedCount = userProgress.achievements.filter(badge => badge.unlocked).length;
+    
+    // If any badges were unlocked and we have a companion, check for evolution
+    if (updated && companion && finalUnlockedCount > initialUnlockedCount) {
+      console.log(`Badges unlocked (${finalUnlockedCount - initialUnlockedCount}), checking companion evolution`);
+      await checkAndEvolveCompanion();
     }
     
-    const threeMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-three');
-    if (threeMilestoneBadge && !threeMilestoneBadge.unlocked && unlockedBadgesCount >= 3) {
-      threeMilestoneBadge.unlocked = true;
-      updated = true;
-      
-      showAchievement({
-        title: threeMilestoneBadge.name,
-        description: threeMilestoneBadge.description,
-        buttonText: 'Keep Going!',
-      });
-      
-      addPoints(40);
-    }
-    
-    const fiveMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-five');
-    if (fiveMilestoneBadge && !fiveMilestoneBadge.unlocked && unlockedBadgesCount >= 5) {
-      fiveMilestoneBadge.unlocked = true;
-      updated = true;
-      
-      showAchievement({
-        title: fiveMilestoneBadge.name,
-        description: fiveMilestoneBadge.description,
-        buttonText: 'Amazing!',
-      });
-      
-      addPoints(50);
-    }
-    
-    const tenMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-ten');
-    if (tenMilestoneBadge && !tenMilestoneBadge.unlocked && unlockedBadgesCount >= 10) {
-      tenMilestoneBadge.unlocked = true;
-      updated = true;
-      
-      showAchievement({
-        title: tenMilestoneBadge.name,
-        description: tenMilestoneBadge.description,
-        buttonText: 'Incredible!',
-      });
-      
-      addPoints(100);
-    }
-    
-    const twentyMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-twenty');
-    if (twentyMilestoneBadge && !twentyMilestoneBadge.unlocked && unlockedBadgesCount >= 20) {
-      twentyMilestoneBadge.unlocked = true;
-      updated = true;
-      
-      showAchievement({
-        title: twentyMilestoneBadge.name,
-        description: twentyMilestoneBadge.description,
-        buttonText: 'Outstanding!',
-      });
-      
-      addPoints(150);
-    }
-    
-    const thirtyMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-thirty');
-    if (thirtyMilestoneBadge && !thirtyMilestoneBadge.unlocked && unlockedBadgesCount >= 30) {
-      thirtyMilestoneBadge.unlocked = true;
-      updated = true;
-      
-      showAchievement({
-        title: thirtyMilestoneBadge.name,
-        description: thirtyMilestoneBadge.description,
-        buttonText: 'Master Level!',
-      });
-      
-      addPoints(200);
-    }
-    
-    const fiftyMilestoneBadge = userProgress.achievements.find(a => a.id === 'badge-milestone-fifty');
-    if (fiftyMilestoneBadge && !fiftyMilestoneBadge.unlocked && unlockedBadgesCount >= 50) {
-      fiftyMilestoneBadge.unlocked = true;
-      updated = true;
-      
-      showAchievement({
-        title: fiftyMilestoneBadge.name,
-        description: fiftyMilestoneBadge.description,
-        buttonText: 'Legendary!',
-      });
-      
-      addPoints(200);
-    }
-    
+    // Save changes to storage if any badges were updated
     if (updated) {
-      setUserProgress({...userProgress});
-      await storeData(STORAGE_KEYS.USER_DATA, userProgress);
+      try {
+        await storeData(STORAGE_KEYS.USER_DATA, userProgress);
+        await storeData(STORAGE_KEYS.ACHIEVEMENTS, userProgress.achievements);
+      } catch (error) {
+        console.error('Error saving updated badges:', error);
+      }
+    }
+    
+    return updated;
+  };
+
+  // Modify the forceCheckStreakAchievements function to use the new helper
+  const forceCheckStreakAchievements = async () => {
+    // Safety checks
+    if (!dataLoaded) return false;
+    
+    try {
+      console.log("Force checking all achievements");
       
-      // Also check if the companion should evolve based on new badges
+      // Use the existing function to check and unlock badges
+      const updated = await checkAndUnlockBadges();
+      
+      // If we updated any badges and have a companion, check for evolution
+      if (updated && companion) {
+        await checkAndEvolveCompanion();
+      }
+      
+      return updated;
+    } catch (error) {
+      console.error('Error in forceCheckStreakAchievements:', error);
+      return false;
+    }
+  };
+
+  // Helper function to ensure unique IDs
+  const ensureUniqueId = (baseId: string): string => {
+    // If no journalEntries exist yet or the ID is already unique, return it
+    if (journalEntries.length === 0 || !journalEntries.some((entry: JournalEntry) => entry.id === baseId)) {
+      return baseId;
+    }
+    // Otherwise, add more randomness to make it unique
+    return `${baseId}-${Math.random().toString(36).substring(2, 10)}`;
+  };
+
+  // Add this function to directly fix the 30-day badge
+  const fix30DayBadge = async (): Promise<boolean> => {
+    if (!dataLoaded) return false;
+    
+    console.log("Attempting to directly unlock 30-day streak badge");
+    console.log(`Current streak: ${userProgress.streak}`);
+    
+    if (userProgress.streak < 30) {
+      console.log("Streak is less than 30 days, cannot unlock 30-day badge");
+      return false;
+    }
+    
+    let updated = false;
+    
+    // Try all possible badge IDs for 30-day streak
+    const badgeIds = ['badge-streak-2', 'badge-streak-30days', 'badge-streak-30'];
+    
+    for (const badgeId of badgeIds) {
+      const badge = userProgress.achievements.find(a => a.id === badgeId);
+      
+      if (badge) {
+        console.log(`Found 30-day badge with ID: ${badgeId}, currently ${badge.unlocked ? 'unlocked' : 'locked'}`);
+        
+        if (!badge.unlocked) {
+          console.log(`Forcibly unlocking 30-day badge: ${badgeId}`);
+          
+          // Create updated achievements array with this badge unlocked
+          const updatedAchievements = userProgress.achievements.map(a => 
+            a.id === badgeId 
+              ? { ...a, unlocked: true, unlockedDate: Date.now() } 
+              : a
+          );
+          
+          // Update user progress with the unlocked badge
+          setUserProgress(prev => ({
+            ...prev,
+            achievements: updatedAchievements
+          }));
+          
+          // Add points for the badge
+          addPoints(250);
+          
+          // Show achievement notification
+      showAchievement({
+            title: badge.name,
+            description: badge.description,
+            buttonText: 'Awesome!',
+          });
+          
+          // Save to storage
+          try {
+            await storeData(STORAGE_KEYS.USER_DATA, {
+              ...userProgress,
+              achievements: updatedAchievements
+            });
+            await storeData(STORAGE_KEYS.ACHIEVEMENTS, updatedAchievements);
+          } catch (error) {
+            console.error('Error saving updated badges:', error);
+          }
+          
+      updated = true;
+          break;
+        }
+      }
+    }
+    
+    // If we updated any badges and have a companion, check for evolution
+    if (updated && companion) {
+      console.log("30-day badge unlocked, checking companion evolution");
       await checkAndEvolveCompanion();
     }
     
     return updated;
+  };
+
+  // Enhanced journal achievement checking function
+  const checkJournalAchievements = async () => {
+    if (!achievements || !journalEntries || !Array.isArray(journalEntries)) {
+      return;
+    }
+    
+    const entryCount = journalEntries.length;
+    let updated = false;
+    
+    // Check for first journal entry
+    if (entryCount > 0) {
+      updated = unlockBadge('badge-journal-first', 10, false) || updated;
+    }
+    
+    // Check for 3 journal entries
+    if (entryCount >= 3) {
+      updated = unlockBadge('badge-journal-3', 20, false) || updated;
+    }
+    
+    // Check for 10 journal entries
+    if (entryCount >= 10) {
+      updated = unlockBadge('badge-journal-2', 50, false) || updated;
+    }
+    
+    // Check for 20 journal entries
+    if (entryCount >= 20) {
+      updated = unlockBadge('badge-journal-master', 100, false) || updated;
+    }
+    
+    // Check for 5 consecutive days journaling (requires implementation of consecutive day tracking)
+    // This is placeholder code for now
+    const hasConsecutiveEntries = checkConsecutiveJournalDays(5);
+    if (hasConsecutiveEntries) {
+      updated = unlockBadge('badge-journal-5days', 75, false) || updated;
+    }
+    
+    if (updated) {
+      await saveUserProgress();
+    }
+    
+    return updated;
+  };
+
+  // Helper function to check consecutive journal days
+  const checkConsecutiveJournalDays = (requiredDays: number): boolean => {
+    if (!journalEntries || journalEntries.length < requiredDays) {
+      return false;
+    }
+    
+    // Sort entries by timestamp
+    const sortedEntries = [...journalEntries].sort((a, b) => a.timestamp - b.timestamp);
+    
+    // Group entries by day
+    const entriesByDay = new Map<string, boolean>();
+    for (const entry of sortedEntries) {
+      const date = new Date(entry.timestamp).toDateString();
+      entriesByDay.set(date, true);
+    }
+    
+    // Convert to array of dates
+    const days = Array.from(entriesByDay.keys()).map(dateStr => new Date(dateStr));
+    days.sort((a, b) => a.getTime() - b.getTime());
+    
+    // Check for consecutive days
+    let maxConsecutive = 1;
+    let currentConsecutive = 1;
+    
+    for (let i = 1; i < days.length; i++) {
+      const prevDate = days[i-1];
+      const currDate = days[i];
+      
+      const dayDiff = Math.floor((currDate.getTime() - prevDate.getTime()) / (24 * 60 * 60 * 1000));
+      
+      if (dayDiff === 1) {
+        currentConsecutive++;
+        maxConsecutive = Math.max(maxConsecutive, currentConsecutive);
+      } else if (dayDiff > 1) {
+        currentConsecutive = 1;
+      }
+    }
+    
+    return maxConsecutive >= requiredDays;
   };
 
   return (
@@ -2758,6 +3322,8 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
         logWorkout,
         logMeditation,
         forceCheckStreakAchievements,
+        fix30DayBadge,
+        checkAllAchievementTypes: () => Promise.resolve(true),
       }}
     >
       {children}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal } from 'react-native';
 import { useTheme } from '@/context/ThemeContext';
 import { useGamification } from '@/context/GamificationContext';
@@ -14,6 +14,7 @@ import { isSameDay, formatDate, formatRelativeTime } from '@/utils/dateUtils';
 import { STORAGE_KEYS, getData, storeData } from '@/utils/storage';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useIsFocused } from '@react-navigation/native';
 
 // Types for tracking streak history events
 interface StreakHistoryEvent {
@@ -24,32 +25,25 @@ interface StreakHistoryEvent {
   id: string;
 }
 
-// Update the color constants to more refined, professional shades
+// Define a type for the intentional relapse data
+interface IntentionalRelapseData {
+  date: number;
+  timestamp: number;
+}
+
+// Update the color constants to use only red and green
 const COLORS = {
   streak: '#4ade80', // Vibrant green
   relapse: '#f87171', // Soft red
-  start: '#60a5fa', // Bright blue
-  today: '#4f46e5', // Indigo for today's outline
+  today: '#7c3aed', // Premium purple for today's highlight
   background: 'rgba(23, 23, 26, 0.8)', // Rich dark background
   cardBorder: 'rgba(255, 255, 255, 0.06)',
-  cardBackground: 'rgba(18, 18, 23, 0.8)',
+  cardBackground: 'rgba(18, 18, 23, 0.95)',
   navigationBg: 'rgba(40, 40, 45, 0.5)',
-  legendBg: 'rgba(30, 30, 35, 0.6)',
+  legendBg: 'rgba(30, 30, 35, 0.8)',
+  titleText: '#ffffff',
+  calendarGridBg: 'rgba(25, 25, 30, 0.6)',
 };
-
-// Collection of inspirational quotes related to self-improvement
-const INSPIRATIONAL_QUOTES = [
-  "The secret of change is to focus all your energy not on fighting the old, but on building the new.",
-  "Discipline is choosing between what you want now and what you want most.",
-  "The only way to achieve the impossible is to believe it is possible.",
-  "Your future is created by what you do today, not tomorrow.",
-  "Success is not final, failure is not fatal: It is the courage to continue that counts.",
-  "Fall seven times, stand up eight.",
-  "Every day is a new beginning. Take a deep breath and start again.",
-  "The best time to plant a tree was 20 years ago. The second best time is now.",
-  "It's not about perfect. It's about effort. When you bring that effort every day, that's where transformation happens.",
-  "Be stronger than your strongest excuse."
-];
 
 // Helper to generate day cells
 const generateCalendarDays = (year: number, month: number) => {
@@ -82,6 +76,7 @@ const StreakCalendar = () => {
   const { colors } = useTheme();
   const { streak } = useGamification();
   const today = new Date();
+  const isFocused = useIsFocused();
   
   // Keep track of streak separately from the context to prevent resets
   const [persistentStreak, setPersistentStreak] = useState(streak);
@@ -94,6 +89,94 @@ const StreakCalendar = () => {
   
   // Add a last update timestamp to help with race conditions
   const lastUpdateTime = useRef(Date.now());
+  
+  // Add this - Force refresh when relapsing
+  const [forceRefresh, setForceRefresh] = useState(Date.now());
+  
+  // Add a refresh function that can be called to force a reload of the calendar data
+  const refreshCalendarData = useCallback(async () => {
+    try {
+      // Clear existing data
+      setRelapseDates([]);
+      setStreakStartDates([]);
+      setStreakHistory([]);
+      
+      // Force a re-render
+      setForceUpdate(Date.now());
+      setForceRefresh(Date.now());
+      
+      // Update the persistent streak to match the context streak
+      if (streak === 0) {
+        setPersistentStreak(0);
+        streakRef.current = 0;
+      }
+      
+      // Re-load streak history data
+      const streakData = await getStreakDataDirectly();
+      if (streakData) {
+        console.log('Refreshing calendar with latest streak data:', streakData);
+      }
+    } catch (error) {
+      console.error('Error refreshing calendar data:', error);
+    }
+  }, [streak]);
+  
+  // Add a state for tracking the current day relapse
+  const [todayIsRelapse, setTodayIsRelapse] = useState(false);
+  
+  // Modify the useEffect that detects relapses to prevent infinite loops and fix relapse detection
+  useEffect(() => {
+    // Only process legitimate relapse (when streak becomes 0)
+    if (streak === 0 && !isRecovering) {
+      // Immediately mark today as a relapse day for display purposes
+      setTodayIsRelapse(true);
+      
+      // If we have a high streak value and it just changed to 0, this is a legitimate relapse
+      if (persistentStreak > 0) {
+        console.log('Legitimate relapse detected, resetting streak to 0');
+        
+        // Set the flags first to prevent re-triggering effects
+        setPersistentStreak(0);
+        streakRef.current = 0;
+        
+        // Add today to relapse dates immediately
+        const today = new Date();
+        setRelapseDates(prev => {
+          // Only add today if it's not already in the list
+          if (prev.some(date => isSameDay(date.getTime(), today.getTime()))) {
+            return prev;
+          }
+          return [...prev, today];
+        });
+        
+        // Add to history events if not already there
+        const relapseEvent: StreakHistoryEvent = {
+          type: 'relapse',
+          date: today,
+          streakDays: persistentStreak,
+          notes: `Lost a streak of ${persistentStreak} days`,
+          id: generateUniqueId('realtime-relapse')
+        };
+        
+        setStreakHistory(prev => {
+          // Check if we already have a relapse event for today
+          if (prev.some(event => 
+            event.type === 'relapse' && isSameDay(event.date.getTime(), today.getTime())
+          )) {
+            return prev;
+          }
+          return [relapseEvent, ...prev];
+        });
+      }
+    }
+  }, [streak, persistentStreak, isRecovering]);
+
+  // Refresh calendar when screen comes back into focus
+  useEffect(() => {
+    if (isFocused) {
+      refreshCalendarData();
+    }
+  }, [isFocused, refreshCalendarData]);
   
   // Update both state and ref when streak changes in the context
   useEffect(() => {
@@ -747,10 +830,17 @@ const StreakCalendar = () => {
     return false;
   };
   
-  // Check if a date is a relapse day
+  // Update the isRelapseDay function to include today when marked as relapse
   const isRelapseDay = (date: Date | null) => {
     if (!date) return false;
     
+    // If this is today's date and todayIsRelapse is true, return true immediately
+    const isToday = isSameDay(date.getTime(), new Date().getTime());
+    if (isToday && todayIsRelapse) {
+      return true;
+    }
+    
+    // Otherwise check against stored relapse dates
     // Reset hours/minutes/seconds for proper date comparison
     const normalizedDate = new Date(date);
     normalizedDate.setHours(0, 0, 0, 0);
@@ -761,22 +851,6 @@ const StreakCalendar = () => {
       normalizedRelapseDate.setHours(0, 0, 0, 0);
       
       return isSameDay(normalizedRelapseDate.getTime(), normalizedDate.getTime());
-    });
-  };
-  
-  // Check if a date is a streak start day
-  const isStreakStartDay = (date: Date | null) => {
-    if (!date) return false;
-    
-    // Reset hours/minutes/seconds for proper date comparison
-    const normalizedDate = new Date(date);
-    normalizedDate.setHours(0, 0, 0, 0);
-    
-    return streakStartDates.some(startDate => {
-      const normalizedStartDate = new Date(startDate);
-      normalizedStartDate.setHours(0, 0, 0, 0);
-      
-      return isSameDay(normalizedStartDate.getTime(), normalizedDate.getTime());
     });
   };
   
@@ -806,43 +880,90 @@ const StreakCalendar = () => {
     });
   };
   
-  // Add a random quote selection that changes daily but stays consistent within a day
-  const [quote, setQuote] = useState("");
-  
-  // Select a consistent quote for the day
-  useEffect(() => {
-    // Use the current date as a seed for consistent quote selection
-    const today = new Date();
-    const dateString = `${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`;
-    
-    // Create a simple hash of the date string to get a deterministic number
-    let hash = 0;
-    for (let i = 0; i < dateString.length; i++) {
-      hash = (hash << 5) - hash + dateString.charCodeAt(i);
-      hash |= 0; // Convert to 32bit integer
-    }
-    
-    // Use the hash to select a quote
-    const quoteIndex = Math.abs(hash) % INSPIRATIONAL_QUOTES.length;
-    setQuote(INSPIRATIONAL_QUOTES[quoteIndex]);
-  }, []);
-  
   // Define a unique key for the current month/year view that includes the persistent streak
-  const calendarGridKey = `grid-${currentMonth}-${currentYear}-${forceUpdate}-${persistentStreak}`;
+  const calendarGridKey = `grid-${currentMonth}-${currentYear}-${forceUpdate}-${persistentStreak}-${forceRefresh}`;
+  
+  // When the component mounts or when the screen comes into focus,
+  // check if there's a recent intentional relapse recorded
+  useEffect(() => {
+    if (isFocused) {
+      const checkIntentionalRelapse = async () => {
+        try {
+          // Check if there's a recent intentional relapse flag
+          const intentionalRelapse = await getData<IntentionalRelapseData | null>(STORAGE_KEYS.INTENTIONAL_RELAPSE, null);
+          
+          if (intentionalRelapse) {
+            console.log('Found intentional relapse flag:', intentionalRelapse);
+            
+            // Check if it's recent (within the last hour)
+            const isRecent = Date.now() - intentionalRelapse.timestamp < 3600000; // 1 hour in ms
+            
+            if (isRecent) {
+              console.log('Recent intentional relapse detected, updating calendar');
+              
+              // Mark today as relapse day
+              setTodayIsRelapse(true);
+              
+              // Make sure today is in the relapse dates
+    const today = new Date();
+              setRelapseDates(prev => {
+                if (prev.some(date => isSameDay(date.getTime(), today.getTime()))) {
+                  return prev;
+                }
+                return [...prev, today];
+              });
+              
+              // Add today to streak history if not already there
+              const relapseEvent: StreakHistoryEvent = {
+                type: 'relapse',
+                date: today,
+                streakDays: persistentStreak > 0 ? persistentStreak : undefined,
+                notes: 'Relapse recorded',
+                id: generateUniqueId('intentional-relapse')
+              };
+              
+              setStreakHistory(prev => {
+                if (prev.some(event => 
+                  event.type === 'relapse' && isSameDay(event.date.getTime(), today.getTime())
+                )) {
+                  return prev;
+                }
+                return [relapseEvent, ...prev];
+              });
+  
+              // Reset streak values
+              setPersistentStreak(0);
+              streakRef.current = 0;
+              
+              // Force redraw of calendar
+              setForceUpdate(Date.now());
+            }
+          }
+        } catch (error) {
+          console.error('Error checking for intentional relapse:', error);
+        }
+      };
+      
+      checkIntentionalRelapse();
+      refreshCalendarData();
+    }
+  }, [isFocused, persistentStreak, refreshCalendarData]);
   
   return (
     <View style={[styles.container, { 
       backgroundColor: COLORS.cardBackground,
       borderColor: COLORS.cardBorder,
     }]}>
+      {/* Premium header with calendar icon */}
       <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.text }]}>
+        <Text style={[styles.title, { color: COLORS.titleText }]}>
           Streak Calendar
         </Text>
-        <CalendarIcon size={24} color={colors.primary} />
+        <CalendarIcon size={24} color="#6366f1" style={{ opacity: 0.9 }} />
       </View>
       
       <Animated.View style={[styles.calendarContainer, slideStyle]}>
+        {/* Premium month navigation */}
         <View style={styles.calendarHeader}>
           <TouchableOpacity
             onPress={goToPreviousMonth}
@@ -850,14 +971,14 @@ const StreakCalendar = () => {
             activeOpacity={0.7}
           >
             <LinearGradient
-              colors={['rgba(80, 70, 230, 0.5)', 'rgba(80, 70, 230, 0.2)']}
+              colors={['rgba(99, 102, 241, 0.8)', 'rgba(99, 102, 241, 0.5)']}
               style={styles.navGradient}
             >
               <ChevronLeft size={22} color="#ffffff" />
             </LinearGradient>
           </TouchableOpacity>
           
-          <Text style={[styles.monthYearText, { color: colors.text }]}>
+          <Text style={styles.monthYearText}>
             {getMonthName(currentMonth)} {currentYear}
           </Text>
           
@@ -867,7 +988,7 @@ const StreakCalendar = () => {
             activeOpacity={0.7}
           >
             <LinearGradient
-              colors={['rgba(80, 70, 230, 0.5)', 'rgba(80, 70, 230, 0.2)']}
+              colors={['rgba(99, 102, 241, 0.8)', 'rgba(99, 102, 241, 0.5)']}
               style={styles.navGradient}
             >
               <ChevronRight size={22} color="#ffffff" />
@@ -875,16 +996,20 @@ const StreakCalendar = () => {
           </TouchableOpacity>
         </View>
         
-        {/* Weekday headers */}
+        {/* Weekday headers with premium styling */}
         <View style={styles.weekdayHeader}>
           {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => (
-            <Text key={index} style={[styles.weekdayText, { color: colors.secondaryText }]}>
+            <Text key={index} style={styles.weekdayText}>
               {day}
             </Text>
           ))}
         </View>
         
-        {/* Calendar grid - updated with improved key */}
+        {/* Calendar grid with premium background */}
+        <LinearGradient
+          colors={['rgba(30, 30, 35, 0.8)', 'rgba(25, 25, 30, 0.6)']}
+          style={styles.calendarGridContainer}
+        >
         <View style={styles.calendarGrid} key={calendarGridKey}>
           {calendarDays.map((day, index) => {
             // Calculate cell properties outside JSX for better performance
@@ -892,21 +1017,18 @@ const StreakCalendar = () => {
             const isTodayCell = day.date && isSameDay(day.date.getTime(), new Date().getTime());
             const isStreak = day.date && isStreakDay(day.date);
             const isRelapse = day.date && isRelapseDay(day.date);
-            const isStreakStart = day.date && isStreakStartDay(day.date);
             
             // Define the cell key that includes all relevant data
             const cellKey = `${index}-${currentMonth}-${currentYear}-${isStreak ? 'streak' : ''}-${forceUpdate}`;
             
-            // Choose appropriate gradient colors based on day type
+              // Choose appropriate gradient colors based on day type - simplified to just red and green
             let gradientColors: [string, string] = ['transparent', 'transparent']; // Default is transparent
             
-            // Priority of colors: Relapse > Fresh Start > Streak Day
+              // Priority of colors: Relapse > Streak Day
             if (isRelapse) {
-              gradientColors = ['rgba(248, 113, 113, 0.9)', 'rgba(248, 113, 113, 0.7)']; // Red for relapse
-            } else if (isStreakStart) {
-              gradientColors = ['rgba(96, 165, 250, 0.9)', 'rgba(96, 165, 250, 0.7)']; // Blue for fresh start
+                gradientColors = ['rgba(248, 113, 113, 0.95)', 'rgba(248, 113, 113, 0.75)']; // Red for relapse
             } else if (isStreak) {
-              gradientColors = ['rgba(74, 222, 128, 0.9)', 'rgba(74, 222, 128, 0.7)']; // Green for streak days
+                gradientColors = ['rgba(74, 222, 128, 0.95)', 'rgba(74, 222, 128, 0.75)']; // Green for streak days
             }
             
             return (
@@ -919,7 +1041,7 @@ const StreakCalendar = () => {
                 onPress={() => day.date && handleDayPress(day.date)}
                 onPressIn={onDayPressIn}
                 onPressOut={onDayPressOut}
-                activeOpacity={0.8}
+                  activeOpacity={0.75}
                 disabled={isEmptyCell}
               >
                 {!isEmptyCell && (
@@ -930,36 +1052,25 @@ const StreakCalendar = () => {
                       pressDayStyle
                     ]}
                   >
-                    {(isStreak || isRelapse || isStreakStart) && (
+                      {(isStreak || isRelapse) && (
                       <LinearGradient
                         colors={gradientColors}
                         style={styles.dayBackground}
-                      />
-                    )}
-                    
-                    {isStreakStart && isRelapse && (
-                      <View style={styles.splitDayOverlay}>
-                        <LinearGradient
-                          colors={['rgba(248, 113, 113, 0.9)', 'rgba(248, 113, 113, 0.7)']}
-                          style={[styles.splitDayHalf, { right: '50%' }]}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
                         />
-                        <LinearGradient
-                          colors={['rgba(96, 165, 250, 0.9)', 'rgba(96, 165, 250, 0.7)']}
-                          style={[styles.splitDayHalf, { left: '50%' }]}
-                        />
-                      </View>
                     )}
                     
                     <Text 
                       style={[
                         styles.dayText, 
-                        { color: isStreak || isRelapse || isStreakStart ? '#FFFFFF' : colors.text }
+                          { color: isStreak || isRelapse ? '#FFFFFF' : '#E2E2E5' }
                       ]}
                     >
                       {day.day}
                     </Text>
                     
-                    {(isRelapse || isStreakStart) && (
+                      {isRelapse && (
                       <View style={styles.eventIndicator}>
                         <Info size={10} color="#FFFFFF" />
                       </View>
@@ -970,41 +1081,38 @@ const StreakCalendar = () => {
             );
           })}
         </View>
+        </LinearGradient>
       </Animated.View>
       
-      {/* Enhanced Legend with gradient backgrounds */}
-      <View style={[styles.legend, { backgroundColor: COLORS.legendBg }]}>
+      {/* Enhanced Legend with premium styling, remove the Fresh Start element */}
+          <LinearGradient
+        colors={['rgba(30, 30, 35, 0.85)', 'rgba(25, 25, 30, 0.8)']}
+        style={styles.legendContainer}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      >
+        <View style={styles.legend}>
         <View style={styles.legendItem}>
           <LinearGradient
-            colors={['rgba(74, 222, 128, 0.9)', 'rgba(74, 222, 128, 0.7)']}
+              colors={['rgba(74, 222, 128, 0.95)', 'rgba(74, 222, 128, 0.75)']}
             style={styles.legendColor}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
           />
-          <Text style={[styles.legendText, { color: colors.secondaryText }]}>Streak Days</Text>
+            <Text style={styles.legendText}>Streak Days</Text>
         </View>
         
         <View style={styles.legendItem}>
           <LinearGradient
-            colors={['rgba(248, 113, 113, 0.9)', 'rgba(248, 113, 113, 0.7)']}
+              colors={['rgba(248, 113, 113, 0.95)', 'rgba(248, 113, 113, 0.75)']}
             style={styles.legendColor}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
           />
-          <Text style={[styles.legendText, { color: colors.secondaryText }]}>Relapse</Text>
-        </View>
-        
-        <View style={styles.legendItem}>
-          <LinearGradient
-            colors={['rgba(96, 165, 250, 0.9)', 'rgba(96, 165, 250, 0.7)']}
-            style={styles.legendColor}
-          />
-          <Text style={[styles.legendText, { color: colors.secondaryText }]}>Fresh Start</Text>
+            <Text style={styles.legendText}>Relapse</Text>
         </View>
       </View>
-      
-      {/* Inspirational quote section */}
-      {quote && (
-        <View style={styles.quoteContainer}>
-          <Text style={styles.quoteText}>"{quote}"</Text>
-        </View>
-      )}
+      </LinearGradient>
       
       {/* Day detail modal with enhanced styling */}
       <Modal
@@ -1095,44 +1203,51 @@ const StreakCalendar = () => {
 
 const styles = StyleSheet.create({
   container: {
-    marginVertical: 20,
-    borderRadius: 24,
+    marginVertical: 24,
+    borderRadius: 28,
     overflow: 'hidden',
-    padding: 20,
     borderWidth: 1,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
+    shadowOpacity: 0.25,
+    shadowRadius: 25,
     elevation: 10,
-  },
-  calendarContainer: {
-    marginTop: 8,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
   title: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+  calendarContainer: {
+    padding: 20,
   },
   calendarHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 20,
-    paddingHorizontal: 8,
+  },
+  monthYearText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: 0.5,
   },
   navigationButton: {
-    width: 50,
-    height: 50,
+    width: 48,
+    height: 48,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 25,
+    borderRadius: 24,
     overflow: 'hidden',
   },
   navGradient: {
@@ -1140,30 +1255,28 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 25,
-  },
-  monthYearText: {
-    fontSize: 20,
-    fontWeight: '700',
-    letterSpacing: 0.5,
   },
   weekdayHeader: {
     flexDirection: 'row',
-    marginBottom: 15,
-    paddingHorizontal: 10,
+    justifyContent: 'space-around',
+    marginBottom: 12,
+    paddingHorizontal: 4,
   },
   weekdayText: {
-    flex: 1,
-    textAlign: 'center',
     fontSize: 14,
     fontWeight: '600',
-    opacity: 0.8,
+    color: 'rgba(255, 255, 255, 0.6)',
+    textAlign: 'center',
     letterSpacing: 0.5,
+  },
+  calendarGridContainer: {
+    borderRadius: 18,
+    overflow: 'hidden',
+    padding: 8,
   },
   calendarGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginTop: 5,
   },
   dayCell: {
     width: '14.28%', // 7 days per week
@@ -1200,42 +1313,33 @@ const styles = StyleSheet.create({
     borderColor: COLORS.today,
     borderRadius: 25,
   },
-  splitDayOverlay: {
-    position: 'absolute',
-    width: '90%',
-    height: '90%',
-    borderRadius: 25,
-    overflow: 'hidden',
-    zIndex: -1,
-  },
-  splitDayHalf: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    width: '50%',
-  },
   eventIndicator: {
     position: 'absolute',
     bottom: 2,
     right: 2,
     zIndex: 2,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
     borderRadius: 10,
     padding: 2,
+  },
+  legendContainer: {
+    borderRadius: 20,
+    marginHorizontal: 24,
+    marginTop: 20,
+    overflow: 'hidden',
   },
   legend: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginTop: 24,
+    alignItems: 'center',
     flexWrap: 'wrap',
-    gap: 10,
     padding: 16,
-    borderRadius: 20,
   },
   legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
+    paddingVertical: 6,
   },
   legendColor: {
     width: 18,
@@ -1243,28 +1347,16 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     marginRight: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowRadius: 3,
+    elevation: 3,
   },
   legendText: {
     fontSize: 14,
     fontWeight: '600',
+    color: 'rgba(255, 255, 255, 0.75)',
     letterSpacing: 0.5,
-  },
-  quoteContainer: {
-    marginTop: 24,
-    alignItems: 'center',
-    paddingHorizontal: 15,
-  },
-  quoteText: {
-    fontSize: 15,
-    fontStyle: 'italic',
-    color: 'rgba(255, 255, 255, 0.7)',
-    textAlign: 'center',
-    lineHeight: 22,
-    letterSpacing: 0.3,
   },
   
   // Modal styles

@@ -346,4 +346,10 @@ export const STORAGE_KEYS = {
   ONBOARDING_COMPLETED: 'clearmind:onboarding-completed',
   USER_PREFERENCES: 'clearmind:user-preferences',
   COMPANION_DATA: 'clearmind:companion-data',
+  DEVICE_ID: 'clearmind:device-id',
+  RELAPSE_HISTORY: 'clearmind:relapse-history',
+  INTENTIONAL_RELAPSE: 'clearmind:intentional-relapse',
+  COMPANION_CHAT_HISTORY: 'clearmind:companion-chat-history',
+  COMPANION_UNREAD_MESSAGE: 'clearmind:companion-unread-message',
+  PURCHASES: 'clearmind:purchases-data',
 };

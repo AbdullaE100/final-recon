@@ -10,6 +10,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Achievement } from '@/types/gamification';
 import { BlurView } from 'expo-blur';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import { getBadgeCompletionPercentage, sortBadges, filterBadgesByStatus, getNextBadgeToUnlock } from '@/utils/badgeHelper';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -37,7 +38,7 @@ export default function BadgeManagerScreen() {
   const unlockedBadges = achievements ? achievements.filter(badge => badge.unlocked).length : 0;
   const totalBadges = achievements ? achievements.length : 0;
   
-  // Group badges by category
+  // Group badges by category and sort them
   const badgesByCategory: BadgesByCategory = achievements ? achievements.reduce((acc: BadgesByCategory, badge) => {
     if (!acc[badge.category]) {
       acc[badge.category] = [];
@@ -45,6 +46,11 @@ export default function BadgeManagerScreen() {
     acc[badge.category].push(badge);
     return acc;
   }, {}) : {};
+  
+  // Sort badges in each category (unlocked first, then by name)
+  Object.keys(badgesByCategory).forEach(category => {
+    badgesByCategory[category] = sortBadges(badgesByCategory[category]);
+  });
   
   const applyCustomStreak = async () => {
     const value = parseInt(customStreakValue, 10);
@@ -195,7 +201,7 @@ export default function BadgeManagerScreen() {
         </TouchableOpacity>
         <View style={styles.headerTitleContainer}>
           <Trophy size={24} color="#FFD700" style={styles.trophyIcon} />
-          <Text style={styles.headerTitle}>Achievement Cabinet</Text>
+          <Text style={styles.headerTitle}>Badges</Text>
         </View>
       </View>
       
@@ -214,7 +220,7 @@ export default function BadgeManagerScreen() {
                   <View style={styles.badgeCountDisplay}>
                     <Trophy size={32} color="#FFD700" />
                     <Text style={styles.badgeCountText}>{unlockedBadges}/{totalBadges}</Text>
-                    <Text style={styles.badgeCountLabel}>ACHIEVEMENTS</Text>
+                    <Text style={styles.badgeCountLabel}>BADGES</Text>
                   </View>
                   
                   <View style={styles.progressBarContainer}>
@@ -232,10 +238,99 @@ export default function BadgeManagerScreen() {
                   </View>
                   
                   <Text style={styles.badgeRemainingText}>
-                    {totalBadges - unlockedBadges} badges remaining to unlock
+                    {totalBadges - unlockedBadges} badges remaining to unlock ({Math.round((unlockedBadges / totalBadges) * 100)}% complete)
                   </Text>
                 </View>
               </BlurView>
+            </View>
+          </LinearGradient>
+        </Animated.View>
+        
+        {/* Progress Summary */}
+        <Animated.View entering={FadeInDown.delay(150).duration(600)} style={styles.showcaseShelf}>
+          <LinearGradient
+            colors={['#5D4037', '#3E2723']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={styles.shelfBackground}
+          >
+            <View style={styles.shelfHeader}>
+              <Award size={20} color="#FFD700" />
+              <Text style={styles.shelfTitle}>Progress Summary</Text>
+            </View>
+            
+            <Text style={styles.shelfDescription}>
+              Your badge collection progress by category:
+            </Text>
+            
+            <View style={styles.categorySummaryContainer}>
+              {Object.keys(badgesByCategory).map(category => {
+                const badges = badgesByCategory[category];
+                const unlockedCount = badges.filter(badge => badge.unlocked).length;
+                const percentage = getBadgeCompletionPercentage(badges);
+                
+                // Skip categories with no badges
+                if (badges.length === 0) return null;
+                
+                // Get color based on category
+                let categoryColor;
+                switch (category) {
+                  case 'streak':
+                    categoryColor = '#FF5722';
+                    break;
+                  case 'journal':
+                    categoryColor = '#2196F3';
+                    break;
+                  case 'challenge':
+                    categoryColor = '#4CAF50';
+                    break;
+                  case 'meditation':
+                    categoryColor = '#9C27B0';
+                    break;
+                  case 'workout':
+                    categoryColor = '#F44336';
+                    break;
+                  case 'app':
+                    categoryColor = '#00BCD4';
+                    break;
+                  case 'recovery':
+                    categoryColor = '#3F51B5';
+                    break;
+                  case 'companion':
+                    categoryColor = '#FF9800';
+                    break;
+                  case 'milestone':
+                    categoryColor = '#673AB7';
+                    break;
+                  default:
+                    categoryColor = '#757575';
+                }
+                
+                return (
+                  <View key={category} style={styles.categoryProgressItem}>
+                    <View style={styles.categoryLabelContainer}>
+                      <Text style={styles.categoryProgressLabel}>
+                        {category.charAt(0).toUpperCase() + category.slice(1)}
+                      </Text>
+                      <Text style={styles.categoryProgressCount}>
+                        {unlockedCount}/{badges.length}
+                      </Text>
+                    </View>
+                    
+                    <View style={styles.categoryProgressBarContainer}>
+                      <View 
+                        style={[
+                          styles.categoryProgressFill,
+                          { 
+                            width: `${percentage}%`,
+                            backgroundColor: categoryColor
+                          }
+                        ]}
+                      />
+                    </View>
+                  </View>
+                );
+              })}
             </View>
           </LinearGradient>
         </Animated.View>
@@ -303,6 +398,48 @@ export default function BadgeManagerScreen() {
           </LinearGradient>
         </Animated.View>
         
+        {/* Add "Check All Badges" button */}
+        <Animated.View entering={FadeInDown.delay(250).duration(600)} style={styles.showcaseShelf}>
+          <LinearGradient
+            colors={['#5D4037', '#3E2723']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={styles.shelfBackground}
+          >
+            <View style={styles.shelfHeader}>
+              <Check size={20} color="#4CAF50" />
+              <Text style={styles.shelfTitle}>Badge Verification</Text>
+            </View>
+            
+            <Text style={styles.shelfDescription}>
+              Verify your progress to ensure all badges are correctly unlocked:
+            </Text>
+            
+            <TouchableOpacity 
+              style={styles.verifyButton}
+              onPress={checkAllAchievements}
+              disabled={isLoading}
+            >
+              <LinearGradient
+                colors={['#4CAF50', '#388E3C']}
+                style={styles.verifyButtonGradient}
+              >
+                <View style={styles.evolutionButtonContent}>
+                  <Text style={styles.evolutionButtonTitle}>Check All Badges</Text>
+                  <Text style={styles.evolutionButtonDescription}>
+                    Verify all achievements are properly unlocked
+                  </Text>
+                </View>
+                {isLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Check size={20} color="#FFFFFF" />
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          </LinearGradient>
+        </Animated.View>
+        
         {/* Badge Categories */}
         <Animated.View entering={FadeInDown.delay(300).duration(600)} style={[styles.showcaseShelf, {marginBottom: 40}]}>
           <LinearGradient
@@ -319,19 +456,50 @@ export default function BadgeManagerScreen() {
             {Object.keys(badgesByCategory).map((category) => {
               const badges = badgesByCategory[category];
               const categoryUnlocked = badges.filter(badge => badge.unlocked).length;
+              const completionPercentage = getBadgeCompletionPercentage(badges);
+              
+              // Get the next badge to unlock if any
+              const nextBadgeToUnlock = getNextBadgeToUnlock(badges);
+              
+              // Special styling for milestone category
+              const isMilestoneCategory = category === 'milestone';
+              const categoryStyle = isMilestoneCategory ? 
+                { marginBottom: 30, marginTop: 10 } : // Extra spacing for milestone category
+                { marginBottom: 20 };
+                
+              const badgeIconStyle = isMilestoneCategory ?
+                { width: 50, height: 50 } : // Larger icons for milestone badges
+                { width: 40, height: 40 };
               
               return (
-                <View key={category} style={styles.categoryItem}>
+                <View key={category} style={[styles.categoryItem, categoryStyle]}>
                   <View style={styles.categoryHeader}>
-                    <Text style={styles.categoryName}>
-                      {category.charAt(0).toUpperCase() + category.slice(1)}
+                    <Text style={[
+                      styles.categoryName,
+                      isMilestoneCategory && { fontSize: 18, fontWeight: 'bold' }
+                    ]}>
+                      {isMilestoneCategory ? 'Milestone Badges' : category.charAt(0).toUpperCase() + category.slice(1)}
                     </Text>
-                    <View style={styles.categoryBadgeCount}>
+                    <View style={[
+                      styles.categoryBadgeCount,
+                      isMilestoneCategory && { backgroundColor: 'rgba(103, 58, 183, 0.3)' }
+                    ]}>
                       <Text style={styles.categoryCountText}>
-                        {categoryUnlocked}/{badges.length}
+                        {categoryUnlocked}/{badges.length} ({completionPercentage}%)
                       </Text>
                     </View>
                   </View>
+                  
+                  {nextBadgeToUnlock && (
+                    <View style={styles.nextBadgeContainer}>
+                      <Text style={styles.nextBadgeText}>
+                        Next: {nextBadgeToUnlock.name}
+                      </Text>
+                      <Text style={styles.nextBadgeCriteria}>
+                        {nextBadgeToUnlock.unlockCriteria}
+                      </Text>
+                    </View>
+                  )}
                   
                   <View style={styles.badgesDisplay}>
                     <BlurView intensity={10} style={styles.badgesDisplayInner} tint="dark">
@@ -359,14 +527,25 @@ export default function BadgeManagerScreen() {
                               )}
                             </View>
                             
-                            <Text 
-                              style={[
-                                badge.unlocked ? styles.badgeNameUnlocked : styles.badgeNameLocked
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {badge.name}
-                            </Text>
+                            <View style={styles.badgeTextContainer}>
+                              <Text 
+                                style={[
+                                  badge.unlocked ? styles.badgeNameUnlocked : styles.badgeNameLocked
+                                ]}
+                                numberOfLines={2}
+                              >
+                                {badge.name}
+                              </Text>
+                              
+                              <Text 
+                                style={[
+                                  badge.unlocked ? styles.badgeDescriptionUnlocked : styles.badgeDescriptionLocked
+                                ]}
+                                numberOfLines={2}
+                              >
+                                {badge.description?.split(' ').slice(0, 4).join(' ')}...
+                              </Text>
+                            </View>
                           </View>
                         ))}
                       </View>
@@ -572,8 +751,10 @@ const styles = StyleSheet.create({
   },
   badgeItem: {
     width: (SCREEN_WIDTH - 100) / 3,
+    height: 120,
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 20,
+    paddingHorizontal: 4,
   },
   badgeItemUnlocked: {
     opacity: 1,
@@ -600,15 +781,100 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.1)',
   },
   badgeNameUnlocked: {
-    fontSize: 12,
+    fontSize: 13,
+    fontWeight: '600',
     color: '#FFFFFF',
     textAlign: 'center',
-    maxWidth: 100,
+    width: '100%',
+    height: 36,
+    marginBottom: 4,
   },
   badgeNameLocked: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.5)',
+    textAlign: 'center',
+    width: '100%',
+    height: 36,
+    marginBottom: 4,
+  },
+  badgeTextContainer: {
+    flex: 1,
+  },
+  badgeDescriptionUnlocked: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
+    textAlign: 'center',
+    width: '100%',
+    height: 36,
+    marginBottom: 4,
+  },
+  badgeDescriptionLocked: {
     fontSize: 12,
     color: 'rgba(255,255,255,0.5)',
     textAlign: 'center',
-    maxWidth: 100,
+    width: '100%',
+    height: 36,
+    marginBottom: 4,
+  },
+  verifyButton: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginVertical: 8,
+  },
+  verifyButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+  },
+  nextBadgeContainer: {
+    marginBottom: 10,
+    padding: 8,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#4CAF50',
+  },
+  nextBadgeText: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 2,
+  },
+  nextBadgeCriteria: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.7)',
+  },
+  categorySummaryContainer: {
+    marginTop: 8,
+  },
+  categoryProgressItem: {
+    marginBottom: 12,
+  },
+  categoryLabelContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  categoryProgressLabel: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    fontWeight: '500',
+  },
+  categoryProgressCount: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    opacity: 0.8,
+  },
+  categoryProgressBarContainer: {
+    height: 8,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  categoryProgressFill: {
+    height: '100%',
+    borderRadius: 4,
   },
 }); 

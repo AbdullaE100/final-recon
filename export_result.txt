@@ -1,0 +1,14 @@
+env: load .env
+env: export EXPO_PUBLIC_SUPABASE_ANON_KEY EXPO_PUBLIC_SUPABASE_URL
+Starting Metro Bundler
+Web Bundling failed 982ms node_modules/expo-router/entry.js (3071 modules)
+Error: Unable to resolve module @lottiefiles/dotlottie-react from /Users/abdullaehsan/Downloads/proj-nofap/node_modules/lottie-react-native/lib/module/LottieView/index.web.js: @lottiefiles/dotlottie-react could not be found within the project or in these directories:
+  node_modules
+  ../../node_modules
+  1 | import React, { forwardRef, useImperativeHandle, useEffect, useCallback, useState } from 'react';
+  2 | import { parsePossibleSources } from './utils';
+> 3 | import { DotLottieReact } from '@lottiefiles/dotlottie-react';
+    |                                 ^
+  4 | const LottieView = /*#__PURE__*/forwardRef(({
+  5 |   source,
+  6 |   speed,

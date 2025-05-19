@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Award, Info } from 'lucide-react-native';
 import { Achievement } from '@/types/gamification';
 import Animated, { FadeIn } from 'react-native-reanimated';
+import { formatBadgeUnlockDate } from '@/utils/badgeHelper';
 
 interface BadgeCardProps {
   achievement: Achievement;
@@ -43,10 +44,15 @@ export default function BadgeCard({ achievement }: BadgeCardProps) {
       activeOpacity={0.8}
     >
       <View style={styles.badge}>
-        <Award size={40} color={categoryColor} />
+        <Award size={40} color={achievement.unlocked ? categoryColor : colors.secondaryText} />
       </View>
       
-      <Text style={[styles.title, { color: colors.text }]}>
+      <Text style={[
+        styles.title, 
+        { 
+          color: achievement.unlocked ? colors.text : colors.secondaryText 
+        }
+      ]}>
         {achievement.name}
       </Text>
       
@@ -67,8 +73,8 @@ export default function BadgeCard({ achievement }: BadgeCardProps) {
           </View>
           
           <Text style={[styles.dateUnlocked, { color: colors.secondaryText }]}>
-            {achievement.dateUnlocked 
-              ? `Unlocked: ${new Date(achievement.dateUnlocked).toLocaleDateString()}` 
+            {achievement.unlocked 
+              ? `Unlocked: ${formatBadgeUnlockDate(achievement.unlockedDate)}` 
               : 'Not yet unlocked'}
           </Text>
         </Animated.View>

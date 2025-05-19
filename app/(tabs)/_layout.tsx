@@ -2,9 +2,28 @@ import { Tabs } from 'expo-router';
 import { Home, BookOpen, Award, BarChart, Settings } from 'lucide-react-native';
 import { useTheme } from '@/context/ThemeContext';
 import { StyleSheet, View } from 'react-native';
+import { useAuth } from '@/context/AuthContext';
+import { useEffect } from 'react';
+import { supabase } from '@/utils/supabaseClient';
 
 export default function TabLayout() {
   const { colors } = useTheme();
+  const { user, session } = useAuth();
+
+  useEffect(() => {
+    // Force refresh authentication on app startup
+    const checkAndRefreshAuth = async () => {
+      console.log("Tab layout: Checking auth status...");
+      const { data, error } = await supabase.auth.refreshSession();
+      console.log("Auth refresh result:", { 
+        success: !!data.session,
+        user: data.user?.email,
+        error: error?.message
+      });
+    };
+    
+    checkAndRefreshAuth();
+  }, []);
 
   return (
     <Tabs

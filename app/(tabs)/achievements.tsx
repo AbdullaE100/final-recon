@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'react-native';
 import LottieView from 'lottie-react-native';
 import { Achievement } from '@/types/gamification';
+import { storeData, getData, STORAGE_KEYS } from '@/utils/storage';
 
 // Define types
 interface BadgeItemProps {
@@ -102,18 +103,25 @@ export default function AchievementsScreen() {
     achievements, 
     companion, 
     getCompanionStage,
-    forceCheckStreakAchievements 
+    forceCheckStreakAchievements,
+    resetCompanion,
+    resetData,
+    journalEntries,
+    fix30DayBadge: contextFix30DayBadge
   } = useGamification();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<'badges' | 'companion'>('badges');
   const [isCheckingAchievements, setIsCheckingAchievements] = useState(false);
+  const [isResettingCompanion, setIsResettingCompanion] = useState(false);
+  const [isResettingAsNewUser, setIsResettingAsNewUser] = useState(false);
+  const [isResettingAllData, setIsResettingAllData] = useState(false);
   
   // Calculate progress percentage
   const progressPercentage = (points / totalPoints) * 100;
   const pointsToNextLevel = totalPoints - points;
   
   // Count unlocked badges
-  const unlockedBadgesCount = achievements ? achievements.filter(badge => badge.unlocked).length : 0;
+  const unlockedBadgesCount = achievements.filter(badge => badge.unlocked).length;
   
   // Get specific badges
   const sevenDayBadge = achievements?.find(badge => badge.id === 'badge-streak-1');
@@ -122,6 +130,11 @@ export default function AchievementsScreen() {
   const journalBadge = achievements?.find(badge => badge.id === 'badge-journal-1');
   const journalStreakBadge = achievements?.find(badge => badge.id === 'badge-journal-2');
   const challengeBadge = achievements?.find(badge => badge.id === 'badge-challenge-1');
+  
+  // Get the proper companion stage based purely on badge count
+  const companionStage = unlockedBadgesCount >= 30 ? 3 : unlockedBadgesCount >= 15 ? 2 : 1;
+  
+  console.log("ACHIEVEMENTS: Badge count =", unlockedBadgesCount, "Companion stage =", companionStage);
   
   // Function to force-check achievements
   const handleForceCheckAchievements = async () => {
@@ -142,8 +155,21 @@ export default function AchievementsScreen() {
     (streak >= 30 && thirtyDayBadge && !thirtyDayBadge.unlocked) ||
     (streak >= 90 && ninetyDayBadge && !ninetyDayBadge.unlocked);
   
-  // Get the proper companion stage based on the user's actual companion data or badge count
-  const companionStage = companion ? getCompanionStage() : (unlockedBadgesCount >= 10 ? 3 : unlockedBadgesCount >= 5 ? 2 : 1);
+  // Add a flag to detect missing journal badges
+  const hasJournalBadgeDiscrepancy = () => {
+    const firstJournalBadge = achievements.find(a => a.id === 'badge-journal-first');
+    const threeJournalBadge = achievements.find(a => a.id === 'badge-journal-3');
+    const tenJournalBadge = achievements.find(a => a.id === 'badge-journal-2');
+    const twentyJournalBadge = achievements.find(a => a.id === 'badge-journal-master');
+    
+    // Check if any journal badges are missing based on journal entry count
+    return (
+      journalEntries.length >= 1 && firstJournalBadge && !firstJournalBadge.unlocked ||
+      journalEntries.length >= 3 && threeJournalBadge && !threeJournalBadge.unlocked ||
+      journalEntries.length >= 10 && tenJournalBadge && !tenJournalBadge.unlocked ||
+      journalEntries.length >= 20 && twentyJournalBadge && !twentyJournalBadge.unlocked
+    );
+  };
   
   // Get companion animation source based on stage and type
   const getCompanionSource = () => {
@@ -218,6 +244,151 @@ export default function AchievementsScreen() {
   };
   
   const companionInfo = getCompanionInfo();
+  
+  // Add a function to handle companion reset
+  const handleResetCompanion = async () => {
+    setIsResettingCompanion(true);
+    try {
+      await resetCompanion();
+      console.log('Companion reset successfully');
+    } catch (error) {
+      console.error('Error resetting companion:', error);
+    } finally {
+      setIsResettingCompanion(false);
+    }
+  };
+  
+  // Add a function to handle companion reset as new user
+  const handleResetAsNewUser = async () => {
+    setIsResettingAsNewUser(true);
+    try {
+      // First reset the companion
+      await resetCompanion();
+      
+      // Then force it to be treated as a new user by updating the companion data
+      if (companion) {
+        const companionType = companion.type || 'water';
+        // Need to wait a bit for the reset to complete
+        setTimeout(async () => {
+          try {
+            // Get the current companion data after reset
+            const companionData = await getData(STORAGE_KEYS.COMPANION_DATA, null);
+            if (companionData) {
+              // Update with new user flags
+              const updatedCompanion = {
+                ...companionData as object,
+                isNewUser: true,
+                creationTime: Date.now(),
+                currentLevel: 1 // Force to level 1
+              };
+              // Save the updated data
+              await storeData(STORAGE_KEYS.COMPANION_DATA, updatedCompanion);
+              console.log('Successfully reset as new user');
+              
+              // Force a refresh by reloading the app
+              // This is a bit of a hack but it will ensure state is properly updated
+              if (Platform.OS === 'web') {
+                window.location.reload();
+              }
+            }
+          } catch (error) {
+            console.error('Error updating companion data:', error);
+          } finally {
+            setIsResettingAsNewUser(false);
+          }
+        }, 500);
+      } else {
+        setIsResettingAsNewUser(false);
+      }
+    } catch (error) {
+      console.error('Error resetting as new user:', error);
+      setIsResettingAsNewUser(false);
+    }
+  };
+  
+  // Add a handler for resetting all user data
+  const handleResetAllData = async () => {
+    if (isResettingAllData) return;
+    
+    setIsResettingAllData(true);
+    try {
+      await resetData();
+      console.log('Successfully reset all user data');
+      
+      // Force a refresh by reloading the app
+      if (Platform.OS === 'web') {
+        window.location.reload();
+      }
+    } catch (error) {
+      console.error('Error resetting all data:', error);
+    } finally {
+      setIsResettingAllData(false);
+    }
+  };
+  
+  // Fix streak badges in UI
+  const streakBadges = [
+    {
+      id: 'badge-streak-7',
+      name: '7 Days',
+      description: 'Maintain a 7-day clean streak',
+      category: 'streak',
+      unlockCriteria: 'Maintain a 7-day streak',
+      unlocked: streak >= 7
+    },
+    {
+      id: 'badge-streak-14',
+      name: '14 Days',
+      description: 'Maintain a 14-day clean streak',
+      category: 'streak',
+      unlockCriteria: 'Maintain a 14-day streak',
+      unlocked: streak >= 14
+    },
+    {
+      id: 'badge-streak-30',
+      name: '30 Days',
+      description: 'Maintain a 30-day clean streak',
+      category: 'streak',
+      unlockCriteria: 'Maintain a 30-day streak',
+      unlocked: streak >= 30
+    },
+    {
+      id: 'badge-streak-90',
+      name: '90 Days',
+      description: 'Maintain a 90-day clean streak',
+      category: 'streak',
+      unlockCriteria: 'Maintain a 90-day streak',
+      unlocked: streak >= 90
+    }
+  ];
+  
+  // Add a function to specifically fix the 30-day badge
+  const fix30DayBadge = async () => {
+    try {
+      setIsCheckingAchievements(true);
+      
+      // Use the direct fix function from the context
+      const result = await contextFix30DayBadge();
+      
+      console.log(`Result of fixing 30-day badge:`, result);
+      
+      if (result) {
+        console.log('Successfully fixed 30-day badge');
+      } else {
+        console.log('Could not fix 30-day badge. Check console for details.');
+      }
+    } catch (error) {
+      console.error('Error fixing 30-day badge:', error);
+    } finally {
+      setIsCheckingAchievements(false);
+    }
+  };
+
+  // Add a check for missing 30-day badge
+  const has30DayBadgeIssue = () => {
+    const thirtyDayBadge = achievements.find(a => a.id === 'badge-streak-2' || a.id === 'badge-streak-30days');
+    return streak >= 30 && thirtyDayBadge && !thirtyDayBadge.unlocked;
+  };
   
   const renderBadgesTab = () => {
     // Group badges by category
@@ -308,7 +479,7 @@ export default function AchievementsScreen() {
             {pointsToNextLevel} points to Level {level + 1}
           </Text>
           
-          {/* Manual Achievement Check Button - only show if there's a discrepancy */}
+          {/* Manual Achievement Check Buttons */}
           {hasStreakBadgeDiscrepancy && (
             <TouchableOpacity 
               style={styles.checkAchievementsButton}
@@ -316,7 +487,31 @@ export default function AchievementsScreen() {
               disabled={isCheckingAchievements}
             >
               <Text style={styles.checkAchievementsButtonText}>
-                {isCheckingAchievements ? 'Checking...' : 'Verify Badge Progress'}
+                {isCheckingAchievements ? 'Checking...' : 'Verify Streak Badges'}
+              </Text>
+            </TouchableOpacity>
+          )}
+          
+          {has30DayBadgeIssue() && (
+            <TouchableOpacity 
+              style={[styles.checkAchievementsButton, { marginTop: 10, backgroundColor: '#FF9500' }]}
+              onPress={fix30DayBadge}
+              disabled={isCheckingAchievements}
+            >
+              <Text style={styles.checkAchievementsButtonText}>
+                {isCheckingAchievements ? 'Fixing...' : 'Fix 30-Day Badge'}
+              </Text>
+            </TouchableOpacity>
+          )}
+          
+          {hasJournalBadgeDiscrepancy() && (
+            <TouchableOpacity 
+              style={[styles.checkAchievementsButton, { marginTop: 10, backgroundColor: '#4CD964' }]}
+              onPress={handleForceCheckAchievements}
+              disabled={isCheckingAchievements}
+            >
+              <Text style={styles.checkAchievementsButtonText}>
+                {isCheckingAchievements ? 'Checking...' : 'Verify Journal Badges'}
               </Text>
             </TouchableOpacity>
           )}
@@ -325,7 +520,7 @@ export default function AchievementsScreen() {
         {/* Badges Section */}
         <Animated.View entering={FadeInDown.delay(200).duration(500)} style={styles.badgesHeader}>
           <Text style={styles.sectionTitle}>
-            Badges ({achievements ? achievements.filter(a => a.unlocked).length : 0}/{achievements ? achievements.length : 0})
+            Badges ({achievements ? achievements.filter(a => a.unlocked).length : 0}/36)
           </Text>
         </Animated.View>
         
@@ -346,45 +541,12 @@ export default function AchievementsScreen() {
             categoryGradient = ['rgba(70, 130, 180, 0.15)', 'rgba(70, 130, 180, 0.05)']; // Steel blue for workout
           }
           
-          // For streak category, use our predefined streak badges
+          // For streak category, use our predefined streakBadges array
           let categoryBadges: Achievement[];
           
           if (category === 'streak') {
-            // Create exactly the 4 streak badges we want with no duplicates
-            categoryBadges = [
-              {
-                id: 'badge-streak-7',
-                name: '7 Days',
-                description: 'Maintain a 7-day clean streak',
-                category: 'streak',
-                unlockCriteria: 'Maintain a 7-day streak',
-                unlocked: streak >= 7
-              },
-              {
-                id: 'badge-streak-14',
-                name: '14 Days',
-                description: 'Maintain a 14-day clean streak',
-                category: 'streak',
-                unlockCriteria: 'Maintain a 14-day streak',
-                unlocked: streak >= 14
-              },
-              {
-                id: 'badge-streak-30',
-                name: '30 Days',
-                description: 'Maintain a 30-day clean streak',
-                category: 'streak',
-                unlockCriteria: 'Maintain a 30-day streak',
-                unlocked: streak >= 30
-              },
-              {
-                id: 'badge-streak-90',
-                name: '90 Days',
-                description: 'Maintain a 90-day clean streak',
-                category: 'streak',
-                unlockCriteria: 'Maintain a 90-day streak',
-                unlocked: streak >= 90
-              }
-            ];
+            // Return a copy of our fixed streakBadges array
+            categoryBadges = [...streakBadges];
           } else {
             // For other categories, use the existing logic
             categoryBadges = badgesByCategory[category] && badgesByCategory[category].length > 0 ? 
@@ -481,8 +643,8 @@ export default function AchievementsScreen() {
                       width: companionStage === 3 
                         ? '100%' 
                         : companionStage === 2 
-                          ? `${(unlockedBadgesCount - 5) * 20}%` // Progress from 5-10 badges
-                          : `${unlockedBadgesCount * 20}%` // Progress from 0-5 badges
+                          ? `${(unlockedBadgesCount - 15) * (100/15)}%` // Progress from 15-30 badges
+                          : `${unlockedBadgesCount * (100/15)}%` // Progress from 0-15 badges
                     }
                   ]} 
                 />
@@ -492,10 +654,43 @@ export default function AchievementsScreen() {
               {companionStage === 3 
                 ? 'Final evolution reached!'
                 : companionStage === 2
-                  ? `${unlockedBadgesCount}/10 badges (${10 - unlockedBadgesCount} more for final evolution)`
-                  : `${unlockedBadgesCount}/5 badges (${5 - unlockedBadgesCount} more for evolution)`}
+                  ? `${unlockedBadgesCount}/30 badges (${30 - unlockedBadgesCount} more for final evolution)`
+                  : `${unlockedBadgesCount}/15 badges (${15 - unlockedBadgesCount} more for evolution)`}
             </Text>
           </View>
+          
+          {/* Add Reset Companion Button */}
+          <TouchableOpacity 
+            style={styles.resetCompanionButton}
+            onPress={handleResetCompanion}
+            disabled={isResettingCompanion}
+          >
+            <Text style={styles.resetCompanionButtonText}>
+              {isResettingCompanion ? 'Resetting...' : 'Reset Companion (Testing)'}
+            </Text>
+          </TouchableOpacity>
+          
+          {/* Add Start as New User Button */}
+          <TouchableOpacity 
+            style={styles.startAsNewUserButton}
+            onPress={handleResetAsNewUser}
+            disabled={isResettingAsNewUser}
+          >
+            <Text style={styles.startAsNewUserButtonText}>
+              {isResettingAsNewUser ? 'Processing...' : 'Start as New User'}
+            </Text>
+          </TouchableOpacity>
+          
+          {/* Add Reset ALL Data Button */}
+          <TouchableOpacity 
+            style={styles.resetAllDataButton}
+            onPress={handleResetAllData}
+            disabled={isResettingAllData}
+          >
+            <Text style={styles.resetAllDataButtonText}>
+              {isResettingAllData ? 'Resetting All Data...' : 'Reset All Data & Badges'}
+            </Text>
+          </TouchableOpacity>
         </View>
       </LinearGradient>
     </View>
@@ -883,6 +1078,42 @@ const styles = StyleSheet.create({
   categoryCountText: {
     fontSize: 12,
     fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  resetCompanionButton: {
+    backgroundColor: '#FF3B30',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  resetCompanionButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  startAsNewUserButton: {
+    backgroundColor: '#4CD964',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  startAsNewUserButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  resetAllDataButton: {
+    backgroundColor: '#FF0000',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  resetAllDataButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
     color: '#FFFFFF',
   },
 });

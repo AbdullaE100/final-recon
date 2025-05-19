@@ -37,6 +37,9 @@ import { setFailsafeStreakValue } from '@/utils/streakService';
 import { storeData, STORAGE_KEYS, getData } from '@/utils/storage';
 import { loadStreakData } from '@/utils/streakService';
 import useAchievementNotification from '@/hooks/useAchievementNotification';
+import LottieView from 'lottie-react-native';
+import CompanionChatPrompt from '@/components/home/CompanionChatPrompt';
+import { CompanionChatProvider } from '@/context/CompanionChatContext';
 
 const { width, height } = Dimensions.get('window');
 
@@ -133,7 +136,7 @@ const DatePickerModal = ({
 // Card that shows streak info and allows editing
 const StreakCard = () => {
   const { colors } = useTheme();
-  const { streak, setStreak } = useGamification();
+  const { streak, setStreak, companion, getCompanionStage, achievements } = useGamification();
   const [isDatePickerVisible, setDatePickerVisible] = useState(false);
   const [isRelapseModalVisible, setRelapseModalVisible] = useState(false);
   const [localStreak, setLocalStreak] = useState(streak);
@@ -150,6 +153,48 @@ const StreakCard = () => {
   
   // Force a re-render if needed
   const [forceRender, setForceRender] = useState(0);
+  
+  // Get companion stage - directly calculate based on badge count for most reliable results
+  const unlockedBadgesCount = achievements.filter(badge => badge.unlocked).length;
+  const companionStage = unlockedBadgesCount >= 30 ? 3 : unlockedBadgesCount >= 15 ? 2 : 1;
+  const companionType = companion?.type || 'water';
+  
+  console.log("HOME SCREEN: Badge count =", unlockedBadgesCount, "Companion stage =", companionStage);
+  
+  // Get companion animation source based on stage and type
+  const getCompanionSource = () => {
+    if (companionType === 'plant') {
+      // Drowsi (Panda) animations
+      switch (companionStage) {
+        case 3:
+          return require('@/assets/lottie/panda/panda_stage3.json');
+        case 2:
+          return require('@/assets/lottie/panda/panda_stage2.json');
+        default:
+          return require('@/assets/lottie/baby_panda_stage1.json');
+      }
+    } else if (companionType === 'fire') {
+      // Snuglur animations
+      switch (companionStage) {
+        case 3:
+          return require('../../baby monster stage 3.json');
+        case 2:
+          return require('../../baby monster stage 2.json');
+        default:
+          return require('../../baby monster stage 1.json');
+      }
+    } else {
+      // Stripes (Tiger) animations
+      switch (companionStage) {
+        case 3:
+          return require('../../baby tiger stage 3.json');
+        case 2:
+          return require('../../baby tiger stage 2.json');
+        default:
+          return require('../../baby tiger stage 1.json');
+      }
+    }
+  };
   
   // Keep local state in sync with context
   useEffect(() => {
@@ -376,11 +421,36 @@ const StreakCard = () => {
       
       console.log('Starting relapse process...');
       
+      // Get the current date to use as relapse date
+      const now = new Date();
+      
       // Set updating flag to prevent UI flickers
       setIsUpdating(true);
       
       // Set intentional reset flag to prevent auto-recovery
       setIntentionalReset(true);
+      
+      // Store the relapse date in storage for the calendar to pick up
+      try {
+        // Store an explicit flag indicating an intentional relapse has occurred
+        await storeData(STORAGE_KEYS.INTENTIONAL_RELAPSE, {
+          date: now.getTime(),
+          timestamp: Date.now()
+        });
+        
+        // Get existing relapse dates if any
+        const relapseHistoryKey = `${STORAGE_KEYS.RELAPSE_HISTORY}`;
+        const existingRelapses = await getData<Date[]>(relapseHistoryKey, []);
+        
+        // Add today's date to the relapse history
+        const updatedRelapses = [...existingRelapses, now];
+        
+        // Save back to storage
+        await storeData(relapseHistoryKey, updatedRelapses);
+        console.log('Stored relapse date in history');
+      } catch (historyError) {
+        console.error('Error storing relapse history:', historyError);
+      }
       
       // Update local streak immediately to prevent flashing
       setLocalStreak(0);
@@ -392,7 +462,8 @@ const StreakCard = () => {
       
       // Reset streak in context - wrap in try/catch to ensure UI stays responsive
       try {
-        await setStreak(0);
+        // Pass the current date to ensure the relapse is recorded with the right date
+        await setStreak(0, now.getTime());
         console.log('Streak reset successful');
       } catch (streakError) {
         console.error('Error resetting streak:', streakError);
@@ -496,50 +567,65 @@ const StreakCard = () => {
   
   return (
     <View style={styles.streakCardWrapper}>
-      <LinearGradient
-        colors={['rgba(30, 30, 30, 0.7)', 'rgba(18, 18, 18, 0.9)']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.streakCard}
-      >
+      <View style={styles.streakCard}>
         {/* Top section */}
         <View style={styles.streakCardTop}>
           <View style={styles.streakCardLabel}>
-            <Flame size={20} color={getStreakColor()} />
-            <Text style={[styles.streakCardLabelText, { color: colors.text }]}>
+            <Flame size={20} color={getStreakColor()} style={styles.flameIcon} />
+            <Text style={styles.streakCardLabelText}>
               CURRENT STREAK
             </Text>
           </View>
           
-          <TouchableOpacity
-            style={styles.streakCardEditButton}
-            onPress={() => setDatePickerVisible(true)}
-            hitSlop={{ top: 15, right: 15, bottom: 15, left: 15 }}
-          >
-            <CalendarIcon size={18} color={colors.secondaryText} />
-          </TouchableOpacity>
+          <View style={styles.topRightControls}>
+            {/* Companion icon without blue background */}
+            {companion && (
+              <View style={styles.companionContainer}>
+                <LottieView
+                  source={getCompanionSource()}
+                  autoPlay
+                  loop
+                  style={styles.companionIcon}
+                />
+              </View>
+            )}
+            
+            <TouchableOpacity
+              style={styles.streakCardEditButton}
+              onPress={() => setDatePickerVisible(true)}
+              hitSlop={{ top: 15, right: 15, bottom: 15, left: 15 }}
+            >
+              <CalendarIcon size={18} color="rgba(255, 255, 255, 0.6)" />
+            </TouchableOpacity>
+          </View>
         </View>
         
-        {/* Middle section - streak count */}
+        {/* Middle section - clean streak display */}
         <View style={styles.streakCardMiddle}>
-          <Animated.Text style={[styles.streakCardNumber, { color: getStreakColor() }, streakNumberStyle]}>
-            {localStreak}
-          </Animated.Text>
-          <Text style={[styles.streakCardUnit, { color: colors.secondaryText }]}>
-            {localStreak === 1 ? 'day' : 'days'}
-          </Text>
+            <Animated.Text 
+              style={[
+                styles.streakCardNumber, 
+              { color: getStreakColor() }, 
+                streakNumberStyle
+              ]}
+            >
+              {localStreak}
+            </Animated.Text>
+          <Text style={styles.streakCardUnit}>
+              {localStreak === 1 ? 'DAY' : 'DAYS'}
+            </Text>
         </View>
         
-        {/* Bottom section */}
+        {/* Bottom section with improved layout */}
         <View style={styles.streakCardBottom}>
           <View style={styles.streakCardDateRow}>
-            <Clock size={16} color={colors.secondaryText} />
-            <Text style={[styles.streakCardDate, { color: colors.secondaryText }]}>
+            <Clock size={14} color="rgba(255, 255, 255, 0.5)" />
+            <Text style={styles.streakCardDate}>
               Since {formatDate(getStreakStartDate())}
             </Text>
           </View>
           
-          <Text style={[styles.streakCardMotivation, { color: colors.text }]}>
+          <Text style={styles.streakCardMotivation}>
             {getMotivationMessage()}
           </Text>
           
@@ -548,14 +634,13 @@ const StreakCard = () => {
               style={styles.relapseButton}
               onPress={() => setRelapseModalVisible(true)}
             >
-              <AlertTriangle size={16} color="#f39c12" />
               <Text style={styles.relapseButtonText}>
                 Record Relapse
               </Text>
             </TouchableOpacity>
           )}
         </View>
-      </LinearGradient>
+      </View>
       
       {/* Date picker modal */}
       <DatePickerModal
@@ -571,64 +656,10 @@ const StreakCard = () => {
   );
 };
 
-// Daily Check-in Button
-const CheckInButton = () => {
-  const { dailyCheckedIn, checkIn } = useGamification();
-  const { colors } = useTheme();
-  
-  const scaleAnim = useSharedValue(1);
-  
-  const handlePress = () => {
-    if (!dailyCheckedIn) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      scaleAnim.value = withSequence(
-        withTiming(0.95, { duration: 100 }),
-        withTiming(1.05, { duration: 100 }),
-        withTiming(1, { duration: 200 })
-      );
-      checkIn();
-    }
-  };
-  
-  const animatedStyle = useAnimatedStyle(() => {
-    return {
-      transform: [{ scale: scaleAnim.value }]
-    };
-  });
-  
-  return (
-    <Animated.View style={animatedStyle}>
-      <TouchableOpacity
-        style={[
-          styles.checkInButton,
-          dailyCheckedIn ? styles.checkInButtonCompleted : null
-        ]}
-        onPress={handlePress}
-        disabled={dailyCheckedIn}
-      >
-        <LinearGradient
-          colors={dailyCheckedIn ? ['#2ecc71', '#27ae60'] : ['#3498db', '#2980b9']}
-          style={styles.checkInButtonGradient}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        >
-          {dailyCheckedIn ? (
-            <Check size={20} color="#FFFFFF" />
-          ) : (
-            <Flame size={20} color="#FFFFFF" />
-          )}
-          <Text style={styles.checkInButtonText}>
-            {dailyCheckedIn ? 'Checked In Today' : 'Daily Check-in'}
-          </Text>
-        </LinearGradient>
-      </TouchableOpacity>
-    </Animated.View>
-  );
-};
-
 // Quote of the day
 const DailyQuote = () => {
   const { colors } = useTheme();
+  const [quoteIndex, setQuoteIndex] = useState<number>(0);
   
   const quotes = [
     "Every day is a new opportunity to grow stronger, to live healthier, and to thrive.",
@@ -637,21 +668,76 @@ const DailyQuote = () => {
     "The secret of change is to focus all your energy not on fighting the old, but on building the new.",
     "You don't have to be great to start, but you have to start to be great.",
     "Success is not final, failure is not fatal: it is the courage to continue that counts.",
-    "The only person you should try to be better than is the person you were yesterday."
+    "The only person you should try to be better than is the person you were yesterday.",
+    "Strength does not come from what you can do. It comes from overcoming the things you thought you couldn't.",
+    "Don't count the days, make the days count.",
+    "Discipline is choosing between what you want now and what you want most.",
+    "The harder the battle, the sweeter the victory.",
+    "It's not about perfect. It's about effort. When you bring that effort every day, that's where transformation happens.",
+    "What you resist persists. What you embrace dissolves.",
+    "The difference between who you are and who you want to be is what you do.",
+    "The man who moves a mountain begins by carrying away small stones.",
+    "The pain you feel today will be the strength you feel tomorrow.",
+    "We are what we repeatedly do. Excellence, then, is not an act, but a habit.",
+    "It always seems impossible until it's done.",
+    "Every accomplishment begins with the decision to try."
   ];
   
   // Get a consistent quote based on the day of the month
-  const getQuoteOfTheDay = () => {
+  useEffect(() => {
+    try {
     const day = new Date().getDate();
-    return quotes[day % quotes.length];
+      const index = day % quotes.length;
+      setQuoteIndex(index >= 0 && index < quotes.length ? index : 0);
+    } catch (error) {
+      console.error('Error setting initial quote index:', error);
+      setQuoteIndex(0);
+    }
+  }, []);
+
+  // Simple quote rotation without animations
+  const rotateQuote = () => {
+    try {
+      // Simple tap feedback
+      if (Platform.OS !== 'web') {
+        try {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        } catch (error) {}
+      }
+      
+      // Update quote index (simple approach)
+      setQuoteIndex((prev) => {
+        const next = (prev + 1) % quotes.length;
+        return next;
+      });
+    } catch (error) {
+      console.error('Error rotating quote:', error);
+    }
   };
   
   return (
-    <View style={styles.quoteContainer}>
+    <TouchableOpacity 
+      onPress={rotateQuote} 
+      activeOpacity={0.8}
+      style={styles.quoteCardWrapper}
+    >
+      <LinearGradient
+        colors={['rgba(30, 30, 35, 0.8)', 'rgba(20, 20, 25, 0.9)']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.quoteCardGradient}
+      >
+        <View style={styles.quoteInnerBorder}>
       <Text style={[styles.quoteText, { color: colors.secondaryText }]}>
-        "{getQuoteOfTheDay()}"
+            "{quotes[quoteIndex] || quotes[0]}"
       </Text>
+          
+          <View style={styles.quoteActionHint}>
+            <Text style={styles.quoteActionText}>Tap for more inspiration</Text>
     </View>
+        </View>
+      </LinearGradient>
+    </TouchableOpacity>
   );
 };
 
@@ -661,15 +747,28 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { streak, setStreak } = useGamification();
 
+  // Add state for username
+  const [username, setUsername] = useState<string>('');
   // Add a loading state
   const [isLoading, setIsLoading] = useState(true);
   
-  // Add this effect to ensure streak data is loaded properly on launch
+  // Load username and streak data on component mount
   useEffect(() => {
-    // Initialize streak data on component mount
-    const initializeStreakData = async () => {
+    const loadUserData = async () => {
       try {
         setIsLoading(true);
+        
+        // Load user preferences to get username
+        interface UserPreferences {
+          username?: string;
+          [key: string]: any;
+        }
+        
+        const userPreferences = await getData<UserPreferences>(STORAGE_KEYS.USER_PREFERENCES, {});
+        if (userPreferences && userPreferences.username) {
+          setUsername(userPreferences.username);
+        }
+        
         console.log('Initializing streak data on app launch');
         
         // First try to get the streak data from storage
@@ -715,14 +814,20 @@ export default function HomeScreen() {
           }
         }
       } catch (error) {
-        console.error('Error initializing streak data:', error);
+        console.error('Error loading user data:', error);
       } finally {
         setIsLoading(false);
       }
     };
     
-    initializeStreakData();
+    loadUserData();
   }, []);
+
+  // Get personalized greeting
+  const getPersonalizedGreeting = () => {
+    const greeting = getGreeting();
+    return `${greeting}, ${username || 'Friend'}!`;
+  };
 
   // Determine StatusBar style based on text color (simple heuristic for light/dark background)
   const barStyle = colors.text === '#FFFFFF' || colors.text === '#FFF' || colors.text.toLowerCase() === '#ffffff' ? 'light-content' : 'dark-content';
@@ -744,15 +849,16 @@ export default function HomeScreen() {
         <StatusBar barStyle={barStyle} />
         
         <View style={styles.headerContainer}>
-          <Text style={[styles.greetingText, { color: colors.text }]}>{getGreeting()}, User!</Text>
-          {/* You can add a user name here if available */}
+          <Text style={[styles.greetingText, { color: colors.text }]}>
+            {getPersonalizedGreeting()}
+          </Text>
         </View>
 
         <StreakCard />
         
+        <CompanionChatPrompt />
+        
         <BrainMetrics />
-
-        <CheckInButton />
         
         <StreakCalendar />
         
@@ -780,108 +886,110 @@ const styles = StyleSheet.create({
   streakCardWrapper: {
     borderRadius: 20,
     overflow: 'hidden',
-    marginBottom: 20,
-    elevation: 8,
+    marginBottom: 24,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 5,
   },
   streakCard: {
     borderRadius: 20,
-    padding: 24,
+    padding: 32,
+    backgroundColor: '#181820',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
   streakCardTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 36,
   },
   streakCardLabel: {
     flexDirection: 'row',
     alignItems: 'center',
   },
+  flameIcon: {
+    marginRight: 10,
+  },
   streakCardLabelText: {
     fontSize: 14,
     fontWeight: '600',
-    marginLeft: 8,
-    letterSpacing: 1,
+    letterSpacing: 1.5,
+    color: 'rgba(255, 255, 255, 0.6)',
+    textTransform: 'uppercase',
   },
   streakCardEditButton: {
-    padding: 4,
+    width: 36,
+    height: 36,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  topRightControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   streakCardMiddle: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 40,
   },
   streakCardNumber: {
-    fontSize: 80,
+    fontSize: 120,
     fontWeight: '700',
     marginBottom: 4,
+    letterSpacing: -4,
+    lineHeight: 120,
   },
   streakCardUnit: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '500',
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 6,
+    color: 'rgba(255, 255, 255, 0.5)',
   },
   streakCardBottom: {
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-    paddingTop: 16,
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+    paddingTop: 24,
   },
   streakCardDateRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 16,
+    gap: 8,
   },
   streakCardDate: {
     fontSize: 14,
-    marginLeft: 8,
+    fontWeight: '400',
+    letterSpacing: 0.2,
+    color: 'rgba(255, 255, 255, 0.5)',
   },
   streakCardMotivation: {
     fontSize: 16,
     fontWeight: '500',
-    marginBottom: 16,
+    marginBottom: 30,
+    lineHeight: 22,
+    color: 'rgba(255, 255, 255, 0.85)',
   },
   relapseButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    backgroundColor: 'rgba(243, 156, 18, 0.2)',
-    borderRadius: 12,
-    alignSelf: 'flex-start',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    alignSelf: 'center',
+    width: '100%',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 65, 65, 0.15)',
   },
   relapseButtonText: {
     fontSize: 14,
-    color: '#f39c12',
     fontWeight: '500',
-    marginLeft: 8,
-  },
-  
-  // Check-in button styles
-  checkInButton: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginBottom: 24,
-  },
-  checkInButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-  },
-  checkInButtonCompleted: {
-    opacity: 0.8,
-  },
-  checkInButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
+    color: 'rgba(255, 80, 80, 0.8)',
+    textAlign: 'center',
   },
   
   // Modal styles
@@ -956,13 +1064,63 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#f39c12',
   },
-  quoteContainer: {
+  quoteCardWrapper: {
+    borderRadius: 20,
+    overflow: 'hidden',
     marginBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 15,
+    elevation: 8,
+  },
+  quoteCardGradient: {
+    borderRadius: 20,
+    padding: 2,
+  },
+  quoteInnerBorder: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: 'rgba(25, 25, 30, 0.7)',
+    padding: 20,
+    alignItems: 'center',
   },
   quoteText: {
     fontSize: 16,
     color: 'rgba(255, 255, 255, 0.7)',
     fontStyle: 'italic',
-    lineHeight: 22,
+    lineHeight: 24,
+    textAlign: 'center',
+    paddingHorizontal: 8,
+    marginBottom: 12,
+  },
+  quoteActionHint: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+    width: '100%',
+    alignItems: 'center',
+  },
+  quoteActionText: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.4)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  companionContainer: {
+    width: 42,
+    height: 42, 
+    marginRight: 4,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  companionIcon: {
+    width: 50,
+    height: 50,
   },
 });
