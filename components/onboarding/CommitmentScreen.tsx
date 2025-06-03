@@ -15,7 +15,7 @@ import SignatureScreen from 'react-native-signature-canvas';
 import { storeData, STORAGE_KEYS, getData } from '@/utils/storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import { Ionicons } from '@expo/vector-icons';
+import { Feather, Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { MotiView } from 'moti';
 import useAchievementNotification from '@/hooks/useAchievementNotification';
@@ -24,12 +24,91 @@ interface CommitmentScreenProps {
   onSign: () => void;
 }
 
+// Simplified, more powerful commitments
 const commitment = [
-  "I commit to my personal journey of growth and self-improvement.",
-  "I will take responsibility for my actions and decisions.",
-  "I will be patient with myself and celebrate small victories.",
-  "I am worth this effort, and I deserve the freedom that awaits.",
+  "I embrace my journey toward freedom and growth",
+  "I own my choices and their consequences",
+  "I celebrate progress, no matter how small",
+  "I am worthy of the better life ahead",
 ];
+
+// Screen dimensions for responsive design
+const { width, height } = Dimensions.get('window');
+
+// Signature will use a more sophisticated color
+const SIGNATURE_COLOR = '#000000'; // Black for a clean, professional signature
+
+// Particle component for subtle background animation
+const Particle = ({ style }: { style: any }) => {
+  const moveY = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+  
+  useEffect(() => {
+    // Randomize starting values
+    const startingDelay = Math.random() * 3000;
+    const duration = 5000 + Math.random() * 7000;
+    
+    // Fade in and move animation
+    Animated.sequence([
+      Animated.delay(startingDelay),
+      Animated.parallel([
+        Animated.timing(opacity, {
+          toValue: 0.7,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(moveY, {
+          toValue: -100 - Math.random() * 100,
+          duration: duration,
+          useNativeDriver: true,
+        })
+      ]),
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: 1000,
+        useNativeDriver: true,
+      })
+    ]).start(() => {
+      // Reset and repeat
+      moveY.setValue(0);
+      opacity.setValue(0);
+      Animated.loop(
+        Animated.sequence([
+          Animated.parallel([
+            Animated.timing(opacity, {
+              toValue: 0.7,
+              duration: 1000,
+              useNativeDriver: true,
+            }),
+            Animated.timing(moveY, {
+              toValue: -100 - Math.random() * 100,
+              duration: duration,
+              useNativeDriver: true,
+            })
+          ]),
+          Animated.timing(opacity, {
+            toValue: 0,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.delay(1000)
+        ])
+      ).start();
+    });
+  }, []);
+  
+  return (
+    <Animated.View 
+      style={[
+        style,
+        {
+          opacity,
+          transform: [{ translateY: moveY }]
+        }
+      ]}
+    />
+  );
+};
 
 const CommitmentScreen: React.FC<CommitmentScreenProps> = ({ onSign }) => {
   const { colors } = useTheme();
@@ -107,7 +186,7 @@ const CommitmentScreen: React.FC<CommitmentScreenProps> = ({ onSign }) => {
   
   // Handle signature completion
   const handleSignature = async (signatureBase64: string) => {
-    console.log('Signature captured');
+    
     setSignature(signatureBase64);
     
     // Flash effect for signature capture
@@ -143,7 +222,6 @@ const CommitmentScreen: React.FC<CommitmentScreenProps> = ({ onSign }) => {
       
       // Save the updated preferences
       await storeData(STORAGE_KEYS.USER_PREFERENCES, updatedPreferences)
-        .then(() => console.log('Signature stored successfully'))
         .catch(err => console.error('Error storing signature:', err));
     } catch (error) {
       console.error('Failed to store signature:', error);
@@ -152,7 +230,7 @@ const CommitmentScreen: React.FC<CommitmentScreenProps> = ({ onSign }) => {
   
   // Handle clear button
   const handleClear = () => {
-    console.log('Clearing signature...');
+    
     
     // Multiple approaches to ensure clearing works
     try {
@@ -178,7 +256,7 @@ const CommitmentScreen: React.FC<CommitmentScreenProps> = ({ onSign }) => {
       // Force redraw of signature pad in next cycle
       setTimeout(() => {
         if (signatureRef.current) {
-          console.log('Refreshing signature pad...');
+          
           signatureRef.current.readSignature();
         }
       }, 50);
@@ -188,7 +266,7 @@ const CommitmentScreen: React.FC<CommitmentScreenProps> = ({ onSign }) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
       
-      console.log('Signature cleared successfully');
+      
     } catch (error) {
       console.error('Error clearing signature:', error);
     }
@@ -196,11 +274,11 @@ const CommitmentScreen: React.FC<CommitmentScreenProps> = ({ onSign }) => {
   
   // Handle signature empty check
   const handleEmpty = () => {
-    console.log('Signature is empty');
+    
     setSignature(null);
     showAchievement({
       title: "Signature Required", 
-      description: "Your signature represents your commitment",
+      description: "Your mark represents your commitment",
       buttonText: "OK"
     });
   };
@@ -214,7 +292,7 @@ const CommitmentScreen: React.FC<CommitmentScreenProps> = ({ onSign }) => {
     if (!signature) {
       showAchievement({
         title: "Signature Required", 
-        description: "Your signature represents your commitment",
+        description: "Your mark represents your commitment",
         buttonText: "OK"
       });
       return;
@@ -237,216 +315,271 @@ const CommitmentScreen: React.FC<CommitmentScreenProps> = ({ onSign }) => {
     });
   };
   
-  // Style for signature box
+  // Style for signature box - completely revised for better visibility
   const signatureStyle = `
     .m-signature-pad {
       box-shadow: none; 
       border: none;
+      width: 100%;
+      height: 100%;
     }
     .m-signature-pad--body {
       border: none;
+      position: relative;
+      width: 100%;
+      height: 100%;
     }
     .m-signature-pad--footer {
       display: none;
     }
     body, html {
-      background-color: rgba(20, 20, 28, 0.95);
+      background: transparent;
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    canvas {
+      background-color: white;
+      border-radius: 8px;
+      touch-action: none;
+      width: 100% !important;
+      height: 100% !important;
+    }
+    
+    /* These settings specifically target the signature drawing functionality */
+    .m-signature-pad {
+      position: absolute;
+      font-size: 10px;
+      border: 1px solid #e8e8e8;
+      background-color: white;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15), 0 0 10px rgba(0, 0, 0, 0.05) inset;
+    }
+    
+    /* Custom style to show guidelines for signing */
+    .m-signature-pad--body:after {
+      content: '';
+      position: absolute;
+      left: 10%;
+      right: 10%;
+      bottom: 30%;
+      height: 1px;
+      background-color: #DDDDDD;
+      z-index: 1;
     }
   `;
-  
-  // Animated styles
-  const titleAnimStyle = {
-    opacity: titleOpacity,
-    transform: [{ scale: titleScale }]
-  };
-  
-  const cardAnimStyle = {
+
+  // Card animation styles based on cardAnimValue
+  const cardAnimatedStyle = {
     opacity: cardAnimValue,
     transform: [
       { 
         translateY: cardAnimValue.interpolate({
           inputRange: [0, 1],
-          outputRange: [30, 0]
-        }) 
+          outputRange: [20, 0],
+        }),
       },
-      { 
-        scale: cardAnimValue.interpolate({
-          inputRange: [0, 0.7, 1],
-          outputRange: [0.9, 1.03, 1]
-        }) 
-      }
-    ]
+    ],
   };
   
-  const buttonAnimStyle = {
-    opacity: buttonOpacity,
-    transform: [{ scale: buttonScale }]
+  // Signature box animation
+  const signatureAnimatedStyle = {
+    opacity: signatureBoxOpacity,
+    transform: [
+      {
+        translateY: signatureBoxOpacity.interpolate({
+          inputRange: [0, 1],
+          outputRange: [30, 0],
+        }),
+      },
+    ],
   };
+  
+  // Button animation
+  const buttonAnimatedStyle = {
+    opacity: buttonOpacity,
+    transform: [
+      { scale: buttonScale },
+    ],
+  };
+  
+  // Create an array of particles for the background
+  const particles = Array.from({ length: 8 }).map((_, i) => {
+    const size = 4 + Math.random() * 8;
+    return (
+      <Particle
+        key={`particle-${i}`}
+        style={{
+          position: 'absolute',
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: 'rgba(255, 255, 255, 0.3)',
+          left: Math.random() * width,
+          bottom: Math.random() * height / 2,
+        }}
+      />
+    );
+  });
   
   return (
     <Animated.View 
       style={[
         styles.container, 
-        { backgroundColor: colors.background, opacity: fadeOutAnim }
+        { opacity: fadeOutAnim, backgroundColor: colors.background }
       ]}
     >
-      {/* Animated background elements */}
-      <View style={styles.backgroundElements}>
-        {/* Dark blue flames/energy effect */}
-        <MotiView
-          from={{ opacity: 0.5, translateY: 0 }}
-          animate={{ opacity: 0.7, translateY: -10 }}
-          transition={{ 
-            type: 'timing',
-            duration: 3000,
-            loop: true,
-            repeatReverse: true
-          }}
-          style={styles.energyEffect1}
+      {/* Background elements */}
+      <LinearGradient
+        colors={['rgba(59, 82, 180, 0.4)', 'rgba(29, 32, 62, 0.2)', 'rgba(11, 12, 30, 0)']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.backgroundGradient}
         />
         
-        <MotiView
-          from={{ opacity: 0.3, translateY: 0 }}
-          animate={{ opacity: 0.5, translateY: -15 }}
-          transition={{ 
-            type: 'timing',
-            duration: 4000,
-            loop: true,
-            repeatReverse: true,
-            delay: 500
-          }}
-          style={styles.energyEffect2}
-        />
-        
-        {/* Geometric accents */}
-        <View style={styles.geometricAccent1} />
-        <View style={styles.geometricAccent2} />
-        <View style={styles.geometricAccent3} />
-      </View>
+      {/* Background particles */}
+      {particles}
       
-      <View style={styles.content}>
-        {/* Title with strong visual impact */}
-        <Animated.View style={[styles.titleContainer, titleAnimStyle]}>
-          <Text style={styles.title}>YOUR COMMITMENT</Text>
-          <View style={styles.titleUnderline} />
-        </Animated.View>
+      {/* Flash effect */}
+      <Animated.View 
+        style={[
+          StyleSheet.absoluteFill, 
+          { 
+            backgroundColor: 'white', 
+            opacity: flashOpacity,
+            zIndex: 2
+          }
+        ]} 
+        />
         
-        {/* Commitment Card with powerful design */}
-        <Animated.View style={[styles.commitmentCardContainer, cardAnimStyle]}>
-          <LinearGradient
-            colors={['rgba(22, 24, 42, 0.95)', 'rgba(38, 40, 65, 0.95)']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.commitmentGradient}
-          >
-            <View style={styles.commitmentInnerBorder}>
-              <View style={styles.commitmentContent}>
-          {commitment.map((line, index) => (
+      {/* Main content */}
+      <View style={styles.contentContainer}>
+        {/* Title */}
+        <Animated.Text 
+          style={[
+            styles.title, 
+            { 
+              color: colors.text,
+              opacity: titleOpacity,
+              transform: [{ scale: titleScale }]
+            }
+          ]}
+        >
+          YOUR PLEDGE
+        </Animated.Text>
+        
+        {/* Underline below title */}
+        <Animated.View 
+          style={[
+            styles.titleUnderline, 
+            { 
+              backgroundColor: colors.primary,
+              opacity: titleOpacity,
+              transform: [
+                { 
+                  scaleX: titleOpacity.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.5, 1],
+                  })
+                }
+              ]
+            }
+          ]}
+        />
+        
+        {/* Commitment card */}
+        <Animated.View style={[styles.commitmentCard, cardAnimatedStyle]}>
+          <BlurView intensity={10} tint="dark" style={styles.blurContainer}>
+            {commitment.map((item, index) => (
                   <MotiView 
               key={index}
-                    style={styles.commitmentItemContainer}
-                    from={{ opacity: 0, translateX: -10 }}
+                from={{ opacity: 0, translateX: -20 }}
                     animate={{ opacity: 1, translateX: 0 }}
                     transition={{ 
-                      delay: 600 + (index * 150),
                       type: 'timing',
-                      duration: 500
+                  duration: 600,
+                  delay: 600 + (index * 200),
                     }}
+                style={styles.commitmentItemContainer}
                   >
-                    <View style={styles.bulletPoint} />
-                    <Text style={styles.commitmentText}>
-              {line}
+                <View style={[styles.bulletPoint, { backgroundColor: colors.primary }]} />
+                <Text style={[styles.commitmentText, { color: colors.text }]}>
+                  {item}
             </Text>
                   </MotiView>
           ))}
-        </View>
-            </View>
-          </LinearGradient>
+          </BlurView>
         </Animated.View>
         
-        {/* Signature Section with strong masculine aesthetics */}
-        <Animated.View style={[styles.signatureSection, { opacity: signatureBoxOpacity }]}>
-          <LinearGradient
-            colors={['rgba(22, 24, 42, 0.9)', 'rgba(30, 32, 55, 0.9)']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.signatureGradient}
-          >
-            <View style={styles.signatureLabelContainer}>
-              <View style={styles.signatureLabelAccent} />
-              <Text style={styles.instructionText}>
-                SIGN BELOW TO COMMIT
+        {/* Signature area */}
+        <Animated.View style={[styles.signatureContainer, signatureAnimatedStyle]}>
+          <BlurView intensity={5} tint="dark" style={styles.signatureBlur}>
+            <Text style={[styles.signatureLabel, { color: "#59A0DD" }]}>
+              {signature ? 'YOUR SIGNATURE' : 'SIGN TO COMMIT'}
         </Text>
-            </View>
         
-            <View style={styles.signatureContainer}>
+            <View style={styles.signatureBox}>
           <SignatureScreen
             ref={signatureRef}
             onOK={handleSignature}
             onEmpty={handleEmpty}
             onEnd={handleEnd}
-            webStyle={signatureStyle}
-            descriptionText=""
-                bgWidth={Platform.OS === 'web' ? 500 : (width * 0.9) - 60}
-                bgHeight={160}
-                minWidth={3}
-                maxWidth={5.5}
-                penColor="#FFFFFF"
-                backgroundColor="rgba(20, 20, 28, 0.95)"
-            dotSize={1}
-            imageType="image/png"
-            dataURL={signature || undefined}
-            androidHardwareAccelerationDisabled={false}
                 autoClear={false}
-                clearText=""
+                descriptionText=""
+                webStyle={signatureStyle}
+                backgroundColor="white"
+                penColor={SIGNATURE_COLOR}
+                imageType="image/png"
+                dotSize={2.5}
+                minWidth={2.5}
+                maxWidth={5}
+                trimWhitespace={false}
               />
             </View>
-          </LinearGradient>
-          
-          {/* Flash effect overlay for signature completion */}
-          <Animated.View style={[
-            styles.signatureFlash,
-            { opacity: flashOpacity }
-          ]} />
+            
+            {!signature ? (
+              <View style={styles.signatureInstructions}>
+                <View style={styles.signatureHint}>
+                  <Feather name="edit-2" size={16} color="#465A8C" />
+                  <Text style={[styles.signatureHintText, { color: "#465A8C" }]}>
+                    Draw your signature above
+                  </Text>
+                </View>
+                <Text style={styles.signatureGuide}>
+                  Use your finger or stylus to sign
+                </Text>
+              </View>
+            ) : (
+              <TouchableOpacity 
+                style={styles.clearButton} 
+                onPress={handleClear}
+                activeOpacity={0.7}
+              >
+                <Feather name="x" size={16} color="#465A8C" />
+                <Text style={[styles.clearButtonText, { color: "#465A8C" }]}>
+                  Clear signature
+                </Text>
+              </TouchableOpacity>
+            )}
+          </BlurView>
         </Animated.View>
         
-        {/* Commit Button with powerful visual impact */}
-        <Animated.View style={[styles.buttonSection, buttonAnimStyle]}>
-          <Text style={[
-            styles.signatureStatus, 
-            { color: signature ? '#00D1FF' : 'rgba(255,255,255,0.4)' }
-          ]}>
-            {signature ? "SIGNATURE CAPTURED ✓" : "AWAITING YOUR SIGNATURE"}
-          </Text>
-          
+        {/* Commit button */}
+        <Animated.View style={[styles.buttonContainer, buttonAnimatedStyle]}>
           <TouchableOpacity
             style={[
               styles.commitButton, 
-              { opacity: signature ? 1 : 0.4 }
+              { backgroundColor: signature ? '#3046A5' : `rgba(48, 70, 165, 0.5)` }
             ]}
             onPress={handleCommit}
-            disabled={!signature || hasSigned}
+            disabled={hasSigned}
           >
-            <LinearGradient
-              colors={['#0066FF', '#0044CC']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.commitButtonGradient}
-            >
-              <View style={styles.buttonInnerContent}>
-                <View style={styles.buttonTextContainer}>
-                  <Text style={styles.commitButtonText}>I COMMIT</Text>
-                  {signature && <View style={styles.buttonHighlight} />}
-                </View>
-                <View style={styles.buttonIconContainer}>
-                  <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
-                </View>
-              </View>
-            </LinearGradient>
-            
-            {signature && (
-              <View style={styles.commitButtonShadow} />
-            )}
+            <Text style={styles.commitButtonText}>
+              I COMMIT
+            </Text>
+            <Feather name="arrow-right" size={20} color="#FFFFFF" style={styles.buttonIcon} />
           </TouchableOpacity>
         </Animated.View>
       </View>
@@ -454,257 +587,169 @@ const CommitmentScreen: React.FC<CommitmentScreenProps> = ({ onSign }) => {
   );
 };
 
-const { width, height } = Dimensions.get('window');
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingTop: 20, // Reduced from 40 to 20
   },
-  backgroundElements: {
-    position: 'absolute',
-    width: width,
-    height: height,
-    overflow: 'hidden',
+  backgroundGradient: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.8,
   },
-  energyEffect1: {
-    position: 'absolute',
-    width: width * 1.5,
-    height: 500,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 85, 255, 0.07)',
-    bottom: -300,
-    transform: [{ rotate: '-15deg' }],
-  },
-  energyEffect2: {
-    position: 'absolute',
-    width: width * 1.5,
-    height: 400,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 85, 255, 0.07)',
-    bottom: -200,
-    left: -100,
-    transform: [{ rotate: '10deg' }],
-  },
-  geometricAccent1: {
-    position: 'absolute',
-    width: 300,
-    height: 300,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 89, 255, 0.12)',
-    transform: [{ rotate: '45deg' }],
-    top: height * 0.1,
-    right: -150,
-  },
-  geometricAccent2: {
-    position: 'absolute',
-    width: 200,
-    height: 200,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 130, 255, 0.08)',
-    top: height * 0.55,
-    left: -80,
-  },
-  geometricAccent3: {
-    position: 'absolute',
-    width: 250,
-    height: 250,
-    borderRadius: 125,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 175, 255, 0.1)',
-    bottom: height * 0.2,
-    right: -100,
-  },
-  content: {
+  contentContainer: {
     width: '100%',
-    maxWidth: 500,
+    maxWidth: 480,
     alignItems: 'center',
-  },
-  titleContainer: {
-    alignItems: 'center',
-    marginBottom: 25,
+    justifyContent: 'flex-start',
+    marginTop: 25, // Reduced from 40 to 25
   },
   title: {
     fontSize: 28,
-    fontFamily: 'System',
     fontWeight: '800',
-    color: '#FFFFFF',
-    textAlign: 'center',
     letterSpacing: 2,
-    marginBottom: 5,
+    marginBottom: 8,
+    textAlign: 'center',
   },
   titleUnderline: {
-    width: 40,
+    width: 60,
     height: 3,
-    backgroundColor: '#0066FF',
-    marginTop: 5,
+    borderRadius: 2,
+    marginBottom: 30, // Reduced from 40 to 30
   },
-  commitmentCardContainer: {
+  commitmentCard: {
     width: '100%',
-    borderRadius: 3,
+    borderRadius: 20,
     overflow: 'hidden',
-    marginBottom: 35,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 15 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 10,
+    marginBottom: 20, // Reduced from 30 to 20
   },
-  commitmentGradient: {
-    borderRadius: 3,
-    padding: 1,
-  },
-  commitmentInnerBorder: {
-    borderLeftWidth: 3,
-    borderLeftColor: '#0066FF',
-    paddingVertical: 15,
-  },
-  commitmentContent: {
-    paddingHorizontal: 24,
+  blurContainer: {
+    borderRadius: 20,
+    paddingVertical: 18, // Reduced from 24 to 18
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   commitmentItemContainer: {
     flexDirection: 'row',
-    marginBottom: 22,
     alignItems: 'flex-start',
+    marginBottom: 18, // Reduced from 24 to 18
+    paddingHorizontal: 10,
   },
   bulletPoint: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#00D1FF',
     marginTop: 8,
-    marginRight: 16,
+    marginRight: 12,
   },
   commitmentText: {
-    fontSize: 17,
-    fontFamily: 'System',
+    fontSize: 18,
     fontWeight: '600',
-    lineHeight: 24,
     flex: 1,
-    color: '#FFFFFF',
-  },
-  signatureSection: {
-    width: '100%',
-    marginBottom: 30,
-    borderRadius: 3,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  signatureGradient: {
-    borderRadius: 3,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(0, 130, 255, 0.15)',
-  },
-  signatureLabelContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  signatureLabelAccent: {
-    width: 4,
-    height: 16,
-    backgroundColor: '#00D1FF',
-    marginRight: 10,
-  },
-  instructionText: {
-    fontSize: 14,
-    fontFamily: 'System',
-    fontWeight: '700',
-    letterSpacing: 1,
-    color: '#FFFFFF',
-    textTransform: 'uppercase',
+    lineHeight: 24,
   },
   signatureContainer: {
-    padding: 12,
-    height: 170,
-    position: 'relative',
-  },
-  signatureFlash: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#FFFFFF',
-    zIndex: 10,
-  },
-  buttonSection: {
     width: '100%',
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginBottom: 16, // Reduced from 24 to 16
+  },
+  signatureBlur: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    padding: 12, // Reduced from 16 to 12
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  signatureLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    marginBottom: 12,
+    textAlign: 'center',
+    color: '#59A0DD', // More subdued blue tone
+  },
+  signatureBox: {
+    height: 130, // Reduced from 150 to 130
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 0, 0, 0.2)',
+    marginBottom: 8, // Reduced from 12 to 8
+    backgroundColor: 'white',
+    // Add a subtle shadow for depth
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  signatureInstructions: {
     alignItems: 'center',
   },
-  signatureStatus: {
-    fontSize: 12,
-    fontFamily: 'System',
-    fontWeight: '700',
-    marginBottom: 16,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-  },
-  commitButton: {
-    width: '100%',
-    position: 'relative',
-    height: 58,
-    borderRadius: 3,
-    overflow: 'visible',
-    marginBottom: 10,
-  },
-  commitButtonGradient: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 3,
-  },
-  buttonInnerContent: {
+  signatureHint: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: '100%',
+    marginVertical: 8,
   },
-  buttonTextContainer: {
-    position: 'relative',
-    paddingHorizontal: 8,
+  signatureHintText: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 6,
   },
-  buttonHighlight: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: -3,
-    height: 2,
-    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+  signatureGuide: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.6)',
+    marginTop: 4,
   },
-  buttonIconContainer: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+  clearButton: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 8,
+    marginTop: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(70, 90, 140, 0.15)',
+    borderRadius: 8,
   },
-  commitButtonShadow: {
-    position: 'absolute',
-    bottom: -8,
-    left: 0,
-    right: 0,
-    height: 58,
-    borderRadius: 3,
-    backgroundColor: 'rgba(0, 102, 255, 0.4)',
-    zIndex: -1,
-    width: '96%',
-    alignSelf: 'center',
+  clearButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginLeft: 6,
+  },
+  buttonContainer: {
+    width: '100%',
+    alignItems: 'center',
+    marginTop: 0, // Reduced from 10 to 0
+  },
+  commitButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    width: '80%',
+    maxWidth: 300,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 5,
   },
   commitButtonText: {
-    fontSize: 16,
-    fontFamily: 'System',
-    fontWeight: '800',
     color: '#FFFFFF',
-    letterSpacing: 1.5,
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  buttonIcon: {
+    marginLeft: 8,
   },
 });
 
-export default CommitmentScreen; 
+export default CommitmentScreen;

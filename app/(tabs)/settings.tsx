@@ -16,26 +16,27 @@ import {
   Award,
   ChevronRight,
   Edit,
-  Bug,
+
   CreditCard,
-  Sparkles,
-  LogOut,
-  LogIn,
+
+
   Moon,
   Bell,
   LockKeyhole,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react-native';
-import { getData, STORAGE_KEYS, storeData, removeData } from '@/utils/storage';
+import { getData, STORAGE_KEYS, storeData, removeData, clearAllData } from '@/utils/storage';
 import { useRouter } from 'expo-router';
-import { useSubscription } from '@/context/SubscriptionContext';
-import { useAuth } from '@/context/AuthContext';
+
+
 
 export default function SettingsScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { subscription, isSubscribed } = useSubscription();
-  const { user, signOut } = useAuth();
+
+
   
   const [username, setUsername] = useState<string>('');
   const [pledge, setPledge] = useState<string>('');
@@ -65,69 +66,9 @@ export default function SettingsScreen() {
     loadUserData();
   }, []);
 
-  const resetOnboarding = async () => {
-    Alert.alert(
-      "Reset Onboarding",
-      "This will reset the onboarding state so you can see the onboarding screens again. The app will restart. Continue?",
-      [
-        {
-          text: "Cancel",
-          style: "cancel"
-        },
-        {
-          text: "Reset",
-          onPress: async () => {
-            // Remove the onboarding completed flag
-            await removeData(STORAGE_KEYS.ONBOARDING_COMPLETED);
-            // Set flag to false to make sure it's recognized as not completed
-            await storeData(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
-            
-            // Restart the app
-            Alert.alert(
-              "Onboarding Reset",
-              "Onboarding has been reset. Please restart the app to see the onboarding screens.",
-              [
-                {
-                  text: "OK",
-                  onPress: () => {
-                    // Navigate to root to trigger app flow restart
-                    router.replace('/');
-                  }
-                }
-              ]
-            );
-          },
-          style: "destructive"
-        }
-      ]
-    );
-  };
 
-  const handleSignOut = async () => {
-    Alert.alert(
-      "Sign Out",
-      "Are you sure you want to sign out of your account?",
-      [
-        {
-          text: "Cancel",
-          style: "cancel"
-        },
-        {
-          text: "Sign Out",
-          onPress: async () => {
-            try {
-              await signOut();
-              Alert.alert("Success", "You have been signed out.");
-            } catch (error) {
-              console.error('Error signing out:', error);
-              Alert.alert("Error", "Failed to sign out. Please try again.");
-            }
-          }
-        }
-      ]
-    );
-  };
-  
+
+
   return (
     <ScrollView 
       style={[styles.container, { backgroundColor: colors.background }]}
@@ -165,62 +106,7 @@ export default function SettingsScreen() {
         </LinearGradient>
       </View>
       
-      {/* Subscription Section */}
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>
-          Premium
-        </Text>
-        
-        <BlurView 
-          intensity={80} 
-          tint="dark"
-          style={[styles.sectionBlur, { marginBottom: 16 }]}
-        >
-          <TouchableOpacity 
-            style={styles.settingsRow}
-            onPress={() => router.push('/subscription' as any)}
-          >
-            <View style={styles.settingsLeft}>
-              <View style={[styles.iconContainer, { backgroundColor: 'rgba(103, 114, 255, 0.1)' }]}>
-                <Sparkles size={20} color="#6772FF" />
-              </View>
-              <View>
-                <Text style={[styles.settingLabel, { color: colors.text }]}>
-                  Premium
-                </Text>
-                <Text style={[styles.settingDescription, { color: colors.secondaryText }]}>
-                  {isSubscribed
-                    ? `Subscription active until ${new Date(subscription?.current_period_end || Date.now()).toLocaleDateString()}`
-                    : 'Unlock all premium features for $3.99/month'
-                  }
-                </Text>
-              </View>
-            </View>
-            <ChevronRight size={20} color={colors.secondaryText} />
-          </TouchableOpacity>
-          
-          {/* Add Stripe Debug Button */}
-          <TouchableOpacity 
-            style={styles.settingsRow}
-            onPress={() => router.push('/stripe-test' as any)}
-          >
-            <View style={styles.settingsLeft}>
-              <View style={[styles.iconContainer, { backgroundColor: 'rgba(128, 0, 128, 0.1)' }]}>
-                <Bug size={20} color="#800080" />
-              </View>
-              <View>
-                <Text style={[styles.settingLabel, { color: colors.text }]}>
-                  Debug Stripe
-                </Text>
-                <Text style={[styles.settingDescription, { color: colors.secondaryText }]}>
-                  Test and diagnose Stripe integration issues
-                </Text>
-              </View>
-            </View>
-            <ChevronRight size={20} color={colors.secondaryText} />
-          </TouchableOpacity>
-        </BlurView>
-      </View>
+
       
       {/* Pledge Section */}
       <View style={styles.section}>
@@ -282,131 +168,52 @@ export default function SettingsScreen() {
         </BlurView>
       </View>
 
-      {/* Account Section */}
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>
-          Account
-        </Text>
-        
-        <BlurView intensity={12} tint="dark" style={styles.settingsCard}>
-          {user ? (
-            // Signed in user view
-            <>
-              <View style={styles.settingsRow}>
-                <View style={styles.settingsLeft}>
-                  <View style={[styles.iconContainer, { backgroundColor: 'rgba(46, 204, 113, 0.15)' }]}>
-                    <User size={20} color="#2ecc71" />
-                  </View>
-                  <View>
-                    <Text style={[styles.settingLabel, { color: colors.text }]}>
-                      {user.email}
-                    </Text>
-                    <Text style={[styles.settingDescription, { color: colors.secondaryText }]}>
-                      Signed in with {user.app_metadata?.provider || 'email'}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-              
-              <TouchableOpacity 
-                style={styles.settingsRow}
-                onPress={handleSignOut}
-              >
-                <View style={styles.settingsLeft}>
-                  <View style={[styles.iconContainer, { backgroundColor: 'rgba(231, 76, 60, 0.15)' }]}>
-                    <LogOut size={20} color="#e74c3c" />
-                  </View>
-                  <View>
-                    <Text style={[styles.settingLabel, { color: colors.text }]}>
-                      Sign Out
-                    </Text>
-                    <Text style={[styles.settingDescription, { color: colors.secondaryText }]}>
-                      Log out of your account
-                    </Text>
-                  </View>
-                </View>
-                
-                <ChevronRight size={20} color={colors.secondaryText} />
-              </TouchableOpacity>
-            </>
-          ) : (
-            // Sign in options for non-logged in users
-            <TouchableOpacity 
-              style={styles.settingsRow}
-              onPress={() => router.push('/login' as any)}
-            >
-              <View style={styles.settingsLeft}>
-                <View style={[styles.iconContainer, { backgroundColor: 'rgba(52, 152, 219, 0.15)' }]}>
-                  <LogIn size={20} color="#3498db" />
-                </View>
-                <View>
-                  <Text style={[styles.settingLabel, { color: colors.text }]}>
-                    Sign In
-                  </Text>
-                  <Text style={[styles.settingDescription, { color: colors.secondaryText }]}>
-                    Access your account and sync your data
-                  </Text>
-                </View>
-              </View>
-              
-              <ChevronRight size={20} color={colors.secondaryText} />
-            </TouchableOpacity>
-          )}
-        </BlurView>
+      {/* Danger Zone */} 
+      <View style={styles.section}> 
+        <Text style={[styles.sectionTitle, { color: colors.text }]}> 
+          Danger Zone 
+        </Text> 
+         
+        <BlurView intensity={12} tint="dark" style={styles.settingsCard}> 
+          <TouchableOpacity  
+            style={styles.settingsRow} 
+            onPress={() => 
+              Alert.alert( 
+                'Reset All Data', 
+                'Are you sure you want to reset all your data? This action cannot be undone and will log you out.', 
+                [ 
+                  { 
+                    text: 'Cancel', 
+                    style: 'cancel', 
+                  }, 
+                  { 
+                    text: 'Reset', 
+                    onPress: async () => { 
+                      await clearAllData(); 
+                      router.replace('/onboarding'); 
+                    }, 
+                    style: 'destructive', 
+                  }, 
+                ], 
+                { cancelable: true } 
+              ) 
+            } 
+          > 
+            <View style={styles.settingsLeft}> 
+              <View style={[styles.iconContainer, { backgroundColor: 'rgba(231, 76, 60, 0.15)' }]}> 
+                <Trash2 size={20} color="#e74c3c" /> 
+              </View> 
+              <Text style={[styles.settingLabel, { color: colors.text }]}> 
+                Reset All Data 
+              </Text> 
+            </View> 
+            <ChevronRight size={20} color={colors.secondaryText} /> 
+          </TouchableOpacity> 
+        </BlurView> 
       </View>
 
-      {/* Debug Section */}
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>
-          Debug Options
-        </Text>
-        
-        <BlurView intensity={12} tint="dark" style={styles.settingsCard}>
-          <TouchableOpacity 
-            style={styles.settingsRow}
-            onPress={resetOnboarding}
-          >
-            <View style={styles.settingsLeft}>
-              <View style={[styles.iconContainer, { backgroundColor: 'rgba(231, 76, 60, 0.15)' }]}>
-                <Bug size={20} color="#e74c3c" />
-              </View>
-              <View>
-                <Text style={[styles.settingLabel, { color: colors.text }]}>
-                  Reset Onboarding
-                </Text>
-                <Text style={[styles.settingDescription, { color: colors.secondaryText }]}>
-                  See the onboarding screens again
-                </Text>
-              </View>
-            </View>
-            
-            <ChevronRight size={20} color={colors.secondaryText} />
-          </TouchableOpacity>
-          
-          <View style={styles.divider} />
-          
-          <TouchableOpacity 
-            style={styles.settingsRow}
-            onPress={() => router.push('/force-evolution' as any)}
-          >
-            <View style={styles.settingsLeft}>
-              <View style={[styles.iconContainer, { backgroundColor: 'rgba(241, 196, 15, 0.15)' }]}>
-                <Award size={20} color="#f1c40f" />
-              </View>
-              <View>
-                <Text style={[styles.settingLabel, { color: colors.text }]}>
-                  Fix Companion Evolution
-                </Text>
-                <Text style={[styles.settingDescription, { color: colors.secondaryText }]}>
-                  Fix issues with companion evolution
-                </Text>
-              </View>
-            </View>
-            
-            <ChevronRight size={20} color={colors.secondaryText} />
-          </TouchableOpacity>
-        </BlurView>
-      </View>
+
+
     </ScrollView>
   );
 }

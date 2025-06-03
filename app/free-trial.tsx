@@ -28,6 +28,18 @@ export default function FreeTrialScreen() {
   // Check if price is passed as parameter
   const trialPrice = params.price?.toString() || '3.99';
   const companionSelected = params.selectedCompanion?.toString() || 'default';
+  
+  // Get companion color for UI accents
+  const getCompanionColor = () => {
+    switch (companionSelected) {
+      case 'tiger': return '#4FC3F7'; // Light blue
+      case 'monster': return '#FF8A65'; // Orange/red
+      case 'pumpkin': return '#81C784'; // Green
+      default: return '#9C27B0'; // Purple fallback
+    }
+  };
+  
+  const companionColor = getCompanionColor();
 
   // Initialize IAP module when component mounts
   useEffect(() => {
@@ -140,7 +152,7 @@ export default function FreeTrialScreen() {
             entering={FadeIn.duration(800)}
             style={styles.headerSection}
           >
-            <Sparkles color="#FFD700" size={40} />
+            <Sparkles color={companionColor} size={40} />
             <Text style={styles.title}>Unleash Your Full Potential</Text>
             <Text style={styles.subtitle}>
               Get premium features, no signup required
@@ -148,7 +160,7 @@ export default function FreeTrialScreen() {
           </Animated.View>
           
           <BlurView intensity={20} tint="dark" style={styles.card}>
-            <View style={styles.trialBadge}>
+            <View style={[styles.trialBadge, { backgroundColor: companionColor }]}>
               <Clock size={16} color="#FFFFFF" />
               <Text style={styles.trialBadgeText}>PREMIUM</Text>
             </View>
@@ -168,24 +180,24 @@ export default function FreeTrialScreen() {
             <View style={styles.featuresContainer}>
               <Text style={styles.featuresTitle}>What's included:</Text>
               
-              <FeatureItem title="Advanced companion features" />
-              <FeatureItem title="Unlimited journaling" />
-              <FeatureItem title="Premium badge collection" />
-              <FeatureItem title="Advanced analytics" />
-              <FeatureItem title="Custom goals and challenges" />
-              <FeatureItem title="Cloud backup & sync" />
+              <FeatureItem title={`Enhanced ${capitalizeFirstLetter(companionSelected)} companion features`} iconColor={companionColor} />
+              <FeatureItem title="Unlimited journaling" iconColor={companionColor} />
+              <FeatureItem title="Premium badge collection" iconColor={companionColor} />
+              <FeatureItem title="Advanced analytics" iconColor={companionColor} />
+              <FeatureItem title="Custom goals and challenges" iconColor={companionColor} />
+              <FeatureItem title="Cloud backup & sync" iconColor={companionColor} />
             </View>
           </BlurView>
           
           <View style={styles.buttonsContainer}>
             {processingPayment ? (
-              <View style={[styles.primaryButton, styles.processingContainer]}>
+              <View style={[styles.primaryButton, styles.processingContainer, { backgroundColor: companionColor }]}>
                 <ActivityIndicator color="#FFFFFF" size="small" />
                 <Text style={styles.processingText}>Processing Payment...</Text>
               </View>
             ) : (
               <TouchableOpacity
-                style={[styles.primaryButton, loading && styles.disabledButton]}
+                style={[styles.primaryButton, loading && styles.disabledButton, { backgroundColor: companionColor }]}
                 onPress={handleStartPremium}
                 disabled={loading}
               >
@@ -202,7 +214,7 @@ export default function FreeTrialScreen() {
               onPress={handleSkipTrial}
               disabled={loading || processingPayment}
             >
-              <Text style={styles.secondaryButtonText}>Continue with Free Version</Text>
+              <Text style={[styles.secondaryButtonText, { color: companionColor }]}>Continue with Free Version</Text>
             </TouchableOpacity>
             
             <TouchableOpacity
@@ -228,11 +240,16 @@ export default function FreeTrialScreen() {
   );
 }
 
+// Helper function to capitalize first letter of a string
+function capitalizeFirstLetter(string = '') {
+  return string.charAt(0).toUpperCase() + string.slice(1);
+}
+
 // Feature item component with checkmark
-function FeatureItem({ title }: { title: string }) {
+function FeatureItem({ title, iconColor = '#4F46E5' }: { title: string, iconColor?: string }) {
   return (
     <View style={styles.featureItem}>
-      <CheckCircle2 size={18} color="#4F46E5" />
+      <CheckCircle2 size={18} color={iconColor} />
       <Text style={styles.featureText}>{title}</Text>
     </View>
   );

@@ -11,6 +11,7 @@ import { Achievement } from '@/types/gamification';
 import { BlurView } from 'expo-blur';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { getBadgeCompletionPercentage, sortBadges, filterBadgesByStatus, getNextBadgeToUnlock } from '@/utils/badgeHelper';
+import { getData, storeData } from '@/utils/storage';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -53,10 +54,31 @@ export default function BadgeManagerScreen() {
   });
   
   const applyCustomStreak = async () => {
+    // Validate the streak value
     const value = parseInt(customStreakValue, 10);
     if (isNaN(value) || value < 0) {
       // Invalid input
       return;
+    }
+    
+    // Add protection against rapid repeat calls
+    try {
+      const lastSetKey = 'clearmind:last-custom-streak-time';
+      const lastTimeStr = await getData<string>(lastSetKey, '0');
+      const lastTime = parseInt(lastTimeStr, 10) || 0;
+      const now = Date.now();
+      
+      // If we've set streak in the last 3 seconds, skip this one
+      if (now - lastTime < 3000) {
+        console.log('Skipping redundant custom streak - already set recently');
+        return;
+      }
+      
+      // Record this time
+      await storeData(lastSetKey, now.toString());
+    } catch (e) {
+      console.error('Error checking recent streak sets:', e);
+      // Continue execution even if this check fails
     }
     
     setIsLoading(true);
@@ -71,6 +93,32 @@ export default function BadgeManagerScreen() {
   };
   
   const applyPresetStreak = async (days: number) => {
+    // Validate the streak value
+    if (typeof days !== 'number' || isNaN(days) || days < 0) {
+      console.error('Invalid streak value:', days);
+      return;
+    }
+    
+    // Add protection against rapid repeat calls
+    try {
+      const lastSetKey = 'clearmind:last-preset-streak-time';
+      const lastTimeStr = await getData<string>(lastSetKey, '0');
+      const lastTime = parseInt(lastTimeStr, 10) || 0;
+      const now = Date.now();
+      
+      // If we've set streak in the last 3 seconds, skip this one
+      if (now - lastTime < 3000) {
+        console.log('Skipping redundant preset streak - already set recently');
+        return;
+      }
+      
+      // Record this time
+      await storeData(lastSetKey, now.toString());
+    } catch (e) {
+      console.error('Error checking recent preset streak sets:', e);
+      // Continue execution even if this check fails
+    }
+    
     setIsLoading(true);
     try {
       await setStreak(days);
@@ -139,6 +187,32 @@ export default function BadgeManagerScreen() {
   };
   
   const unlockMultipleBadges = async (count: number) => {
+    // Validate the count value
+    if (typeof count !== 'number' || isNaN(count) || count < 0) {
+      console.error('Invalid count value:', count);
+      return;
+    }
+    
+    // Add protection against rapid repeat calls
+    try {
+      const lastUnlockKey = 'clearmind:last-bulk-unlock-time';
+      const lastTimeStr = await getData<string>(lastUnlockKey, '0');
+      const lastTime = parseInt(lastTimeStr, 10) || 0;
+      const now = Date.now();
+      
+      // If we've done a bulk unlock in the last 5 seconds, skip this one
+      if (now - lastTime < 5000) {
+        console.log('Skipping redundant bulk unlock - already done recently');
+        return;
+      }
+      
+      // Record this time
+      await storeData(lastUnlockKey, now.toString());
+    } catch (e) {
+      console.error('Error checking recent bulk unlocks:', e);
+      // Continue execution even if this check fails
+    }
+    
     setIsLoading(true);
     try {
       if (count >= 5) {
@@ -502,54 +576,43 @@ export default function BadgeManagerScreen() {
                   )}
                   
                   <View style={styles.badgesDisplay}>
-                    <BlurView intensity={10} style={styles.badgesDisplayInner} tint="dark">
-                      <View style={styles.badgesGrid}>
-                        {badges.map((badge) => (
-                          <View 
-                            key={badge.id} 
-                            style={[
-                              styles.badgeItem,
-                              badge.unlocked ? styles.badgeItemUnlocked : styles.badgeItemLocked
-                            ]}
-                          >
-                            <View style={styles.badgeIconContainer}>
-                              {badge.unlocked ? (
-                                <LinearGradient
-                                  colors={['#FFD700', '#FFA500']}
-                                  style={styles.badgeIconBackground}
-                                >
-                                  <Award size={16} color="#FFFFFF" />
-                                </LinearGradient>
-                              ) : (
-                                <View style={styles.badgeIconBackgroundLocked}>
-                                  <Award size={16} color="rgba(255,255,255,0.3)" />
-                                </View>
-                              )}
-                            </View>
-                            
-                            <View style={styles.badgeTextContainer}>
-                              <Text 
-                                style={[
-                                  badge.unlocked ? styles.badgeNameUnlocked : styles.badgeNameLocked
-                                ]}
-                                numberOfLines={2}
+                    <View style={styles.badgesGrid}>
+                      {badges.map((badge, index) => (
+                        <View 
+                          key={badge.id} 
+                          style={[
+                            styles.badgeItem,
+                            badge.unlocked ? styles.badgeItemUnlocked : styles.badgeItemLocked
+                          ]}
+                        >
+                          <View style={styles.badgeIconContainer}>
+                            {badge.unlocked ? (
+                              <LinearGradient
+                                colors={['#FFD700', '#FFA500']}
+                                style={styles.badgeIconBackground}
                               >
-                                {badge.name}
-                              </Text>
-                              
-                              <Text 
-                                style={[
-                                  badge.unlocked ? styles.badgeDescriptionUnlocked : styles.badgeDescriptionLocked
-                                ]}
-                                numberOfLines={2}
-                              >
-                                {badge.description?.split(' ').slice(0, 4).join(' ')}...
-                              </Text>
-                            </View>
+                                <Award size={24} color="#FFFFFF" />
+                              </LinearGradient>
+                            ) : (
+                              <View style={styles.badgeIconBackgroundLocked}>
+                                <Award size={24} color="rgba(255,255,255,0.3)" />
+                              </View>
+                            )}
                           </View>
-                        ))}
-                      </View>
-                    </BlurView>
+                          
+                          <View style={styles.badgeTextContainer}>
+                            <Text 
+                              style={[
+                                badge.unlocked ? styles.badgeNameUnlocked : styles.badgeNameLocked
+                              ]}
+                              numberOfLines={2}
+                            >
+                              {badge.name}
+                            </Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
                   </View>
                 </View>
               );
@@ -718,104 +781,140 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 15,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 10,
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#FFD700',
   },
   categoryName: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: 'bold',
     color: '#FFFFFF',
+    textShadowColor: 'rgba(0,0,0,0.75)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   categoryBadgeCount: {
-    backgroundColor: 'rgba(255,215,0,0.2)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    backgroundColor: 'rgba(255,215,0,0.3)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 12,
   },
   categoryCountText: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: 'bold',
     color: '#FFD700',
+    textShadowColor: 'rgba(0,0,0,0.75)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   badgesDisplay: {
     borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  badgesDisplayInner: {
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(0,0,0,0.75)',
     padding: 12,
+    width: '100%',
   },
   badgesGrid: {
+    width: '100%',
     flexDirection: 'row',
     flexWrap: 'wrap',
+    justifyContent: 'space-between',
   },
   badgeItem: {
-    width: (SCREEN_WIDTH - 100) / 3,
-    height: 120,
+    width: '48%',
+    height: 125,
     alignItems: 'center',
-    marginBottom: 20,
-    paddingHorizontal: 4,
+    marginBottom: 16,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 2,
   },
   badgeItemUnlocked: {
     opacity: 1,
+    borderColor: 'rgba(255,215,0,0.6)',
+    backgroundColor: 'rgba(0,0,0,0.6)',
   },
   badgeItemLocked: {
-    opacity: 0.6,
+    opacity: 0.9,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(0,0,0,0.7)',
   },
   badgeIconContainer: {
-    marginBottom: 8,
+    marginBottom: 10,
   },
   badgeIconBackground: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
+    elevation: 5,
+    shadowColor: '#FFD700',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
   },
   badgeIconBackgroundLocked: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  badgeNameUnlocked: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    textAlign: 'center',
-    width: '100%',
-    height: 36,
-    marginBottom: 4,
-  },
-  badgeNameLocked: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.5)',
-    textAlign: 'center',
-    width: '100%',
-    height: 36,
-    marginBottom: 4,
+    backgroundColor: 'rgba(40,40,40,0.9)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
   badgeTextContainer: {
-    flex: 1,
+    width: '100%',
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    borderRadius: 6,
+    padding: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  badgeNameUnlocked: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
+  },
+  badgeNameLocked: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: 'rgba(255,255,255,0.8)',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   badgeDescriptionUnlocked: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.9)',
+    textAlign: 'center',
+    width: '100%',
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
+  badgeDescriptionLocked: {
     fontSize: 12,
     color: 'rgba(255,255,255,0.7)',
     textAlign: 'center',
     width: '100%',
-    height: 36,
-    marginBottom: 4,
-  },
-  badgeDescriptionLocked: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.5)',
-    textAlign: 'center',
-    width: '100%',
-    height: 36,
-    marginBottom: 4,
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   verifyButton: {
     borderRadius: 12,

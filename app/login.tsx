@@ -43,7 +43,7 @@ export default function LoginScreen() {
   };
   
   const handleGoogleSuccess = (data: any) => {
-    console.log('Google sign-in success:', data);
+    
     router.replace('/(tabs)');
   };
   

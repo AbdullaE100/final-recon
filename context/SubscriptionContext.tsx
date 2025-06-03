@@ -1,21 +1,18 @@
-import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
-import { supabase } from '@/utils/supabaseClient';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useAuth } from './AuthContext';
+import { checkSubscriptionStatus, SubscriptionStatus as IAPSubscriptionStatus, SubscriptionData } from '@/utils/inAppPurchase';
 
-// Define subscription types
-export type SubscriptionStatus = 'active' | 'trialing' | 'canceled' | 'incomplete' | 'incomplete_expired' | 'past_due' | 'unpaid' | 'none';
+// Define subscription types for Apple IAP
+export type SubscriptionStatus = 'active' | 'expired' | 'none';
 
 export interface Subscription {
   id: string;
   user_id: string;
-  stripe_customer_id: string;
-  stripe_subscription_id: string;
-  stripe_price_id: string;
+  product_id: string;
+  transaction_id: string;
   status: SubscriptionStatus;
-  current_period_end: string;
-  canceled_at: string | null;
-  created_at: string;
-  updated_at: string;
+  expires_date: string;
+  purchase_date: string;
 }
 
 interface SubscriptionContextValue {
@@ -44,11 +41,9 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState<boolean>(true);
 
   // Check if the user has an active subscription
-  const isSubscribed = 
-    subscription?.status === 'active' || 
-    subscription?.status === 'trialing';
+  const isSubscribed = subscription?.status === 'active';
 
-  // Fetch subscription data from Supabase
+  // Fetch subscription data from Apple IAP
   const fetchSubscription = async () => {
     if (!user) {
       setSubscription(null);
@@ -59,20 +54,27 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     try {
       setLoading(true);
       
-      const { data, error } = await supabase
-        .from('user_subscriptions')
-        .select('*')
-        .eq('user_id', user.id);
-        
-      if (error) {
-        console.error('Error fetching subscription:', error);
-      }
+      const status = await checkSubscriptionStatus();
       
-      // Check if data exists and has at least one entry
-      setSubscription(data && data.length > 0 ? data[0] : null);
+      if (status.isPremium && status.subscription) {
+        // Convert IAP subscription data to our format
+        const subscriptionData: Subscription = {
+          id: status.subscription.transactionId,
+          user_id: user.id,
+          product_id: status.subscription.productId,
+          transaction_id: status.subscription.transactionId,
+          status: 'active',
+          expires_date: status.subscription.expiresDate,
+          purchase_date: status.subscription.purchaseDate,
+        };
+        setSubscription(subscriptionData);
+      } else {
+        setSubscription(null);
+      }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       console.error('Error in fetchSubscription:', errorMessage);
+      setSubscription(null);
     } finally {
       setLoading(false);
     }
@@ -88,28 +90,17 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     }
   }, [user]);
 
-  // Set up a real-time subscription to update when the subscription data changes
+  // Periodically check subscription status (since Apple IAP doesn't have real-time updates)
   useEffect(() => {
     if (!user) return;
     
-    const subscriptionChannel = supabase
-      .channel(`subscription-${user.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'user_subscriptions',
-          filter: `user_id=eq.${user.id}`,
-        },
-        () => {
-          fetchSubscription();
-        }
-      )
-      .subscribe();
+    // Check subscription status every 5 minutes
+    const interval = setInterval(() => {
+      fetchSubscription();
+    }, 5 * 60 * 1000);
       
     return () => {
-      subscriptionChannel.unsubscribe();
+      clearInterval(interval);
     };
   }, [user]);
 
@@ -125,4 +116,4 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       {children}
     </SubscriptionContext.Provider>
   );
-} 
+}

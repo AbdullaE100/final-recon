@@ -117,7 +117,7 @@ const AchievementNotification: React.FC<AchievementNotificationProps> = ({
   useEffect(() => {
     if (visible && !isClosing.current) {
       const closeTimeout = setTimeout(() => {
-        console.log('Auto-closing achievement notification after timeout');
+        
         handleClose();
       }, 5000); // Auto-close after 5 seconds
       

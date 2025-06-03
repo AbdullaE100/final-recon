@@ -159,7 +159,7 @@ const StreakCard = () => {
   const companionStage = unlockedBadgesCount >= 30 ? 3 : unlockedBadgesCount >= 15 ? 2 : 1;
   const companionType = companion?.type || 'water';
   
-  console.log("HOME SCREEN: Badge count =", unlockedBadgesCount, "Companion stage =", companionStage);
+  
   
   // Get companion animation source based on stage and type
   const getCompanionSource = () => {
@@ -198,11 +198,11 @@ const StreakCard = () => {
   
   // Keep local state in sync with context
   useEffect(() => {
-    console.log(`Streak changed in context: ${streak}, updating local state, current ref value: ${streakValueRef.current}`);
+    
     
     // Prevent streaks of 0 from overriding valid streak values 
     if (streak === 0 && streakValueRef.current > 0 && !intentionalReset) {
-      console.log(`Preventing context reset from ${streakValueRef.current} to 0`);
+      
       return;
     }
     
@@ -235,7 +235,7 @@ const StreakCard = () => {
   // Safety recovery mechanism - if streak gets reset unintentionally, restore from ref
   useEffect(() => {
     if (localStreak === 0 && streakValueRef.current > 0 && !intentionalReset) {
-      console.log(`Detected streak reset - recovering from ${streakValueRef.current}`);
+      
       
       // Schedule recovery to avoid immediate state conflicts
       const recoveryTimer = setTimeout(() => {
@@ -293,10 +293,6 @@ const StreakCard = () => {
     // Ensure streak is calculated correctly (can't be negative)
     const validatedStreakDays = Math.max(0, diffDays);
     
-    console.log(`User selected date: ${normalizedDate.toISOString()}`);
-    console.log(`Today's date: ${normalizedToday.toISOString()}`);
-    console.log(`Calculated streak: ${validatedStreakDays} days`);
-    
     try {
       // Close the date picker first to prevent visual glitches
       setDatePickerVisible(false);
@@ -352,11 +348,11 @@ const StreakCard = () => {
       // Small delay to ensure UI updates after animation completes
       setTimeout(() => {
         if (localStreak !== streakToRestore) {
-          console.log(`Streak mismatch detected, forcing restore to ${streakToRestore}`);
+          
           setLocalStreak(streakToRestore);
           setForceRender(prev => prev + 1);
         }
-        console.log(`Final streak update confirmation: ${streakToRestore} days`);
+        
         // Only turn off updating after everything is stable
         setIsUpdating(false);
       }, 300);
@@ -366,7 +362,7 @@ const StreakCard = () => {
       setTimeout(() => {
         try {
           loadStreakData().then(() => {
-            console.log('Streak data reloaded successfully after date change');
+            
             // Only update if we're losing our value - otherwise keep the local value
             if (isUpdating && streakValueRef.current !== 0) {
               setLocalStreak(streakValueRef.current);
@@ -411,6 +407,37 @@ const StreakCard = () => {
   // Handle relapse confirmation
   const handleRelapseConfirm = async () => {
     try {
+      // Add protection against redundant calls
+      const currentTimestamp = Date.now();
+      const lastRelapseKey = 'clearmind:last-ui-relapse-time';
+      
+      try {
+        // Use correct type for getData
+        const lastRelapseTimeStr = await getData<string>(lastRelapseKey, '0');
+        const lastRelapseTime = parseInt(lastRelapseTimeStr, 10) || 0;
+        
+        // If we've processed a relapse in the last 5 seconds, skip this one
+        if (currentTimestamp - lastRelapseTime < 5000) {
+          
+          // Still close the modal to avoid UI being stuck
+          setRelapseModalVisible(false);
+          return;
+        }
+        
+        // Store this relapse time with string conversion
+        await storeData(lastRelapseKey, currentTimestamp.toString());
+      } catch (e) {
+        console.error('Error checking recent UI relapses:', e);
+        // Continue execution even if this check fails
+      }
+      
+      // If streak is already 0, don't process again
+      if (localStreak === 0) {
+        
+        setRelapseModalVisible(false);
+        return;
+      }
+      
       // Immediately close the modal to prevent UI lock
       setRelapseModalVisible(false);
       
@@ -419,10 +446,10 @@ const StreakCard = () => {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       }
       
-      console.log('Starting relapse process...');
+      
       
       // Get the current date to use as relapse date
-      const now = new Date();
+      const relapseDate = new Date();
       
       // Set updating flag to prevent UI flickers
       setIsUpdating(true);
@@ -434,7 +461,7 @@ const StreakCard = () => {
       try {
         // Store an explicit flag indicating an intentional relapse has occurred
         await storeData(STORAGE_KEYS.INTENTIONAL_RELAPSE, {
-          date: now.getTime(),
+          date: relapseDate.getTime(),
           timestamp: Date.now()
         });
         
@@ -443,11 +470,11 @@ const StreakCard = () => {
         const existingRelapses = await getData<Date[]>(relapseHistoryKey, []);
         
         // Add today's date to the relapse history
-        const updatedRelapses = [...existingRelapses, now];
+        const updatedRelapses = [...existingRelapses, relapseDate];
         
         // Save back to storage
         await storeData(relapseHistoryKey, updatedRelapses);
-        console.log('Stored relapse date in history');
+        
       } catch (historyError) {
         console.error('Error storing relapse history:', historyError);
       }
@@ -458,18 +485,18 @@ const StreakCard = () => {
       // Update the ref value to 0 to prevent recovery mechanisms
       streakValueRef.current = 0;
       
-      console.log('Local state updated, calling setStreak...');
+      
       
       // Reset streak in context - wrap in try/catch to ensure UI stays responsive
       try {
         // Pass the current date to ensure the relapse is recorded with the right date
-        await setStreak(0, now.getTime());
-        console.log('Streak reset successful');
+        await setStreak(0, relapseDate.getTime());
+        
       } catch (streakError) {
         console.error('Error resetting streak:', streakError);
       }
       
-      console.log('Showing feedback notification...');
+      
       
       // Show feedback to the user - wrap in try/catch to prevent crashes
       try {
@@ -495,7 +522,7 @@ const StreakCard = () => {
       // Always reset updating flag, even if there's an error
       setTimeout(() => {
         setIsUpdating(false);
-        console.log('Relapse process complete, UI unlocked');
+        
       }, 500);
     }
   };
@@ -769,7 +796,7 @@ export default function HomeScreen() {
           setUsername(userPreferences.username);
         }
         
-        console.log('Initializing streak data on app launch');
+        
         
         // First try to get the streak data from storage
         const streakData = await getData(STORAGE_KEYS.STREAK_DATA, { 
@@ -778,12 +805,12 @@ export default function HomeScreen() {
           startDate: Date.now()
         });
         
-        console.log(`Loaded initial streak data:`, streakData);
+        
         
         // If we have a valid streak, ensure it's set in the context
-        if (streakData && streakData.streak > 0) {
+        if (streakData && typeof streakData.streak === 'number' && !isNaN(streakData.streak) && streakData.streak > 0) {
           if (streakData.streak !== streak) {
-            console.log(`Setting initial streak to ${streakData.streak} from storage`);
+            
             
             // Use the startDate from storage if available
             const startDate = streakData.startDate || (() => {
@@ -808,8 +835,8 @@ export default function HomeScreen() {
             lastCheckIn: 0,
             startDate: Date.now()
           });
-          if (backupData && backupData.streak > 0) {
-            console.log('Recovery: Found non-zero streak in storage while context has 0');
+          if (backupData && typeof backupData.streak === 'number' && !isNaN(backupData.streak) && backupData.streak > 0) {
+            
             await setStreak(backupData.streak, backupData.startDate);
           }
         }

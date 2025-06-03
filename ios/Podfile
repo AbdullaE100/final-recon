@@ -13,22 +13,8 @@ install! 'cocoapods',
 
 prepare_react_native_project!
 
-# Force lottie-ios to use version 4.5.0
-pre_install do |installer|
-  installer.pod_targets.each do |pod|
-    if pod.name.eql?('lottie-ios') || pod.name.eql?('Lottie')
-      def pod.version
-        "4.5.0"
-      end
-    end
-  end
-end
-
-target 'boltexponativewind' do
+target 'Pledge' do
   use_expo_modules!
-
-  # Explicitly add lottie-ios at version 4.5.0
-  pod 'lottie-ios', '4.5.0'
 
   if ENV['EXPO_USE_COMMUNITY_AUTOLINKING'] == '1'
     config_command = ['node', '-e', "process.argv=['', '', 'config'];require('@react-native-community/cli').run()"];

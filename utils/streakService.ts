@@ -1,6 +1,7 @@
 import { supabase } from './supabaseClient';
 import { getData, storeData, STORAGE_KEYS } from './storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform, NativeModules } from 'react-native';
 
 // Add type declarations for the window object at the top level
 declare global {
@@ -32,6 +33,16 @@ const isWebEnvironment = typeof document !== 'undefined' && typeof window !== 'u
 const MANUAL_STREAK_KEY = 'MANUAL_STREAK_VALUE';
 const BACKUP_STREAK_KEY = 'BACKUP_STREAK_VALUE';
 const FAILSAFE_STREAK_KEY = 'FAILSAFE_STREAK_VALUE';
+
+// Widget updater interface for iOS
+interface WidgetUpdaterInterface {
+  updateWidget(streak: number, startDate: number, lastCheckIn: number): Promise<boolean>;
+}
+
+// Get the native module
+const WidgetUpdater: WidgetUpdaterInterface = Platform.OS === 'ios' 
+  ? NativeModules.WidgetUpdaterModule
+  : { updateWidget: () => Promise.resolve(false) };
 
 /**
  * FAILSAFE: Get the streak value from all possible storage locations
@@ -361,13 +372,42 @@ export const updateStreak = async (newStreak: number, userId = DEFAULT_USER_ID, 
       return;
     }
     
-    console.log(`Updating streak to ${newStreak} days${specifiedStartDate ? ' with specified start date: ' + new Date(specifiedStartDate).toISOString() : ''}`);
+    // Additional validation to ensure it's a properly formatted number
+    const validatedStreak = Number(newStreak);
+    if (isNaN(validatedStreak)) {
+      console.error('Invalid streak value after conversion, aborting update:', newStreak);
+      return;
+    }
+    
+    // CRITICAL: Add prevention for redundant updates
+    // When setting streak to 0 repeatedly, check if we've already done this recently
+    if (validatedStreak === 0) {
+      try {
+        const lastResetTime = await AsyncStorage.getItem('LAST_STREAK_RESET_TIME');
+        if (lastResetTime) {
+          const lastReset = parseInt(lastResetTime, 10);
+          const now = Date.now();
+          // If we did a reset in the last 5 seconds, skip this update
+          if (now - lastReset < 5000) {
+            console.log('Skipping redundant streak reset - already reset recently');
+            return;
+          }
+        }
+        // Record this reset time
+        await AsyncStorage.setItem('LAST_STREAK_RESET_TIME', Date.now().toString());
+      } catch (e) {
+        // Continue even if this check fails
+        console.error('Error checking recent resets:', e);
+      }
+    }
+    
+    console.log(`Updating streak to ${validatedStreak} days${specifiedStartDate ? ' with specified start date: ' + new Date(specifiedStartDate).toISOString() : ''}`);
     
     // Store this value in a global variable for emergency recovery
-    const globalStreakRef = { current: newStreak };
+    const globalStreakRef = { current: validatedStreak };
     
     // CRITICAL: Save the streak value in multiple backup locations first
-    await setFailsafeStreakValue(newStreak);
+    await setFailsafeStreakValue(validatedStreak);
     
     // Important: Set this global flag to prevent auto-reset
     hasInitializedData = true;
@@ -377,7 +417,7 @@ export const updateStreak = async (newStreak: number, userId = DEFAULT_USER_ID, 
     
     // Store previous streak for recovery if needed
     const previousStreak = currentData.streak;
-    console.log(`Previous streak: ${previousStreak}, updating to: ${newStreak}`);
+    console.log(`Previous streak: ${previousStreak}, updating to: ${validatedStreak}`);
     
     // Calculate start date for the streak - this is critical for correct streak display
     let startDate: number;
@@ -389,11 +429,14 @@ export const updateStreak = async (newStreak: number, userId = DEFAULT_USER_ID, 
       normalizedDate.setHours(0, 0, 0, 0);
       startDate = normalizedDate.getTime();
       console.log(`Using specified start date: ${new Date(startDate).toISOString()}`);
-    } else if (newStreak === 0) {
+    } else if (validatedStreak === 0) {
       // If streak is being reset to 0, use current date
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       startDate = today.getTime();
+      
+      // CRITICAL FIX: For streak of 0, we don't need date validation
+      console.log(`Using today as start date for streak reset: ${new Date(startDate).toISOString()}`);
     } else {
       // If no start date provided but streak > 0, calculate what it should be
       // Important: Calculate start date as current day - (streak - 1) days
@@ -401,36 +444,39 @@ export const updateStreak = async (newStreak: number, userId = DEFAULT_USER_ID, 
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const millisecondsPerDay = 24 * 60 * 60 * 1000;
-      startDate = today.getTime() - ((newStreak - 1) * millisecondsPerDay);
+      startDate = today.getTime() - ((validatedStreak - 1) * millisecondsPerDay);
     }
     
-    // Verify our calculations by checking the derived streak
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const startDateObj = new Date(startDate);
-    startDateObj.setHours(0, 0, 0, 0);
-    
-    // Use a more accurate method for calculating days between dates
-    const diffTime = Math.abs(today.getTime() - startDateObj.getTime());
-    const derivedStreak = Math.round(diffTime / (24 * 60 * 60 * 1000)) + (startDateObj <= today ? 1 : 0);
-    
-    // Log validation check
-    console.log(`Start date: ${startDateObj.toLocaleDateString()}`);
-    console.log(`Today: ${today.toLocaleDateString()}`);
-    console.log(`Derived streak: ${derivedStreak}, requested streak: ${newStreak}`);
-    
-    // If there's a significant mismatch, adjust start date to match requested streak
-    // Allow small rounding differences due to DST and timezone issues
-    if (Math.abs(derivedStreak - newStreak) > 1) {
-      console.log('Adjusting start date to match requested streak exactly');
-      // Re-calculate with the exact desired streak
-      startDate = today.getTime() - ((newStreak - 1) * 24 * 60 * 60 * 1000);
-      console.log(`Adjusted start date: ${new Date(startDate).toLocaleDateString()}`);
+    // Only validate the derived streak if we're not doing a reset to 0
+    if (validatedStreak > 0) {
+      // Verify our calculations by checking the derived streak
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const startDateObj = new Date(startDate);
+      startDateObj.setHours(0, 0, 0, 0);
+      
+      // Use a more accurate method for calculating days between dates
+      const diffTime = Math.abs(today.getTime() - startDateObj.getTime());
+      const derivedStreak = Math.round(diffTime / (24 * 60 * 60 * 1000)) + (startDateObj <= today ? 1 : 0);
+      
+      // Log validation check
+      console.log(`Start date: ${startDateObj.toLocaleDateString()}`);
+      console.log(`Today: ${today.toLocaleDateString()}`);
+      console.log(`Derived streak: ${derivedStreak}, requested streak: ${validatedStreak}`);
+      
+      // If there's a significant mismatch, adjust start date to match requested streak
+      // Allow small rounding differences due to DST and timezone issues
+      if (Math.abs(derivedStreak - validatedStreak) > 1) {
+        console.log('Adjusting start date to match requested streak exactly');
+        // Re-calculate with the exact desired streak
+        startDate = today.getTime() - ((validatedStreak - 1) * 24 * 60 * 60 * 1000);
+        console.log(`Adjusted start date: ${new Date(startDate).toLocaleDateString()}`);
+      }
     }
     
     // Create updated data object with new values
     const updatedData: StreakData = {
-      streak: newStreak,
+      streak: validatedStreak,
       lastCheckIn: Date.now(), // Update timestamp to ensure it's newer than any server data
       startDate,
     };
@@ -439,7 +485,7 @@ export const updateStreak = async (newStreak: number, userId = DEFAULT_USER_ID, 
     if (isWebEnvironment) {
       try {
         // Store emergency recovery data to prevent accidental resets
-        window.localStorage.setItem('EMERGENCY_STREAK_VALUE', String(newStreak));
+        window.localStorage.setItem('EMERGENCY_STREAK_VALUE', String(validatedStreak));
         window.localStorage.setItem('EMERGENCY_STREAK_TIME', String(Date.now()));
       } catch (e) {
         console.error('Failed to set emergency recovery data:', e);
@@ -452,7 +498,7 @@ export const updateStreak = async (newStreak: number, userId = DEFAULT_USER_ID, 
     // If we're in a web environment, also update localStorage directly for immediate access
     if (isWebEnvironment) {
       try {
-        window.localStorage.setItem('STREAK_FORCE_VALUE', String(newStreak));
+        window.localStorage.setItem('STREAK_FORCE_VALUE', String(validatedStreak));
         window.localStorage.setItem('LAST_MANUAL_STREAK_TIME', String(Date.now()));
         
         // Additional redundancy for start date
@@ -464,7 +510,7 @@ export const updateStreak = async (newStreak: number, userId = DEFAULT_USER_ID, 
     
     // Wait for primary storage to complete
     await storagePromise;
-    console.log(`Streak ${newStreak} saved to local storage, start date: ${new Date(startDate).toISOString()}`);
+    console.log(`Streak ${validatedStreak} saved to local storage, start date: ${new Date(startDate).toISOString()}`);
     
     // Then sync with Supabase in the background for additional redundancy
     syncWithSupabase(updatedData, userId);
@@ -493,7 +539,7 @@ export const updateStreak = async (newStreak: number, userId = DEFAULT_USER_ID, 
       }
     }, 2000);
     
-    console.log(`Streak successfully updated to ${newStreak} days, start date: ${new Date(startDate).toLocaleDateString()}`);
+    console.log(`Streak successfully updated to ${validatedStreak} days, start date: ${new Date(startDate).toLocaleDateString()}`);
   } catch (error) {
     console.error('Failed to update streak:', error);
   }
@@ -501,30 +547,52 @@ export const updateStreak = async (newStreak: number, userId = DEFAULT_USER_ID, 
 
 // Helper function to sync with Supabase without blocking UI updates
 const syncWithSupabase = (data: StreakData, userId = DEFAULT_USER_ID) => {
-  // Use a fire-and-forget approach to updating Supabase
+  // Use a fire-and-forget approach to updating Supabase with retry logic
   setTimeout(async () => {
-    try {
-      const { error } = await supabase
-        .from('streaks')
-        .upsert(
-          { 
-            user_id: userId,
-            streak: data.streak,
-            last_check_in: new Date(data.lastCheckIn).toISOString(),
-            start_date: new Date(data.startDate).toISOString(),
-            updated_at: new Date().toISOString()
-          },
-          { onConflict: 'user_id' }
-        );
-        
-      if (error) {
-        console.error('Background Supabase sync failed:', error);
-      } else {
+    let retryCount = 0;
+    const maxRetries = 3;
+    const retryDelay = 2000; // 2 seconds
+
+    const attemptSync = async (): Promise<void> => {
+      try {
+        const { error } = await supabase
+          .from('streaks')
+          .upsert(
+            { 
+              user_id: userId,
+              streak: data.streak,
+              last_check_in: new Date(data.lastCheckIn).toISOString(),
+              start_date: new Date(data.startDate).toISOString(),
+              updated_at: new Date().toISOString()
+            },
+            { onConflict: 'user_id' }
+          );
+          
+        if (error) {
+          throw error;
+        }
         console.log('Successfully synced streak to Supabase in background');
+      } catch (syncError: any) {
+        retryCount++;
+        
+        // Check if it's a network error
+        const isNetworkError = syncError?.message?.includes('Network request failed') || 
+                              syncError?.message?.includes('fetch') ||
+                              syncError?.code === 'NETWORK_ERROR' ||
+                              !navigator.onLine;
+        
+        if (isNetworkError && retryCount < maxRetries) {
+          console.log(`Network error detected, retrying sync in ${retryDelay}ms (attempt ${retryCount}/${maxRetries})`);
+          setTimeout(attemptSync, retryDelay * retryCount); // Exponential backoff
+        } else if (retryCount >= maxRetries) {
+          console.warn('Background Supabase sync failed after max retries. Data saved locally.');
+        } else {
+          console.error('Background Supabase sync failed:', syncError);
+        }
       }
-    } catch (syncError) {
-      console.error('Background Supabase sync failed:', syncError);
-    }
+    };
+
+    await attemptSync();
   }, 100);
 };
 
@@ -684,8 +752,18 @@ export const loadStreakData = async (userId = DEFAULT_USER_ID): Promise<StreakDa
           return streakData;
         }
       }
-    } catch (supabaseError) {
-      console.error('Failed to load data from Supabase, using local data:', supabaseError);
+    } catch (supabaseError: any) {
+      // Check if it's a network error and handle it gracefully
+      const isNetworkError = supabaseError?.message?.includes('Network request failed') || 
+                            supabaseError?.message?.includes('fetch') ||
+                            supabaseError?.code === 'NETWORK_ERROR' ||
+                            !navigator.onLine;
+      
+      if (isNetworkError) {
+        console.log('Network unavailable, using local data. Sync will retry automatically.');
+      } else {
+        console.error('Failed to load data from Supabase, using local data:', supabaseError);
+      }
     }
     
     // Default to using local data in any other case
@@ -741,4 +819,38 @@ export const performCheckIn = async (userId = DEFAULT_USER_ID): Promise<void> =>
   } catch (error) {
     console.error('Failed to perform check-in:', error);
   }
-}; 
+};
+
+// Add this code to update the iOS widget data
+export const updateWidgetStreakData = async (streak: number, startDate: number, lastCheckIn: number) => {
+  try {
+    // Widget functionality disabled
+    console.log('Widget functionality has been disabled');
+    return true;
+  } catch (error) {
+    console.error('Error updating widget data:', error);
+    return false;
+  }
+};
+
+export const setStreak = async (value: number, relapseDate?: number): Promise<void> => {
+  // ... existing code ...
+  
+  // Add this before the end of the function
+  try {
+    // Get the current timestamp
+    const currentTime = relapseDate || Date.now();
+    
+    // Calculate streak start date - current date minus (streak - 1) days
+    const startDate = value > 0 
+      ? currentTime - ((value - 1) * 24 * 60 * 60 * 1000) 
+      : currentTime;
+    
+    // Update widget data
+    await updateWidgetStreakData(value, startDate, currentTime);
+  } catch (error) {
+    console.error('Error updating widget data:', error);
+  }
+  
+  // ... end of function
+};

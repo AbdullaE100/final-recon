@@ -52,7 +52,7 @@ export default function SignupScreen() {
   };
   
   const handleGoogleSuccess = (data: any) => {
-    console.log('Google sign-in success:', data);
+    
     router.replace('/(tabs)');
   };
   

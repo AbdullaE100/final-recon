@@ -174,7 +174,11 @@ const StreakCalendar = () => {
   // Refresh calendar when screen comes back into focus
   useEffect(() => {
     if (isFocused) {
+      console.log('Screen focused, refreshing calendar data');
       refreshCalendarData();
+      
+      // Check if there's a recent intentional relapse
+      checkIntentionalRelapse();
     }
   }, [isFocused, refreshCalendarData]);
   
@@ -420,207 +424,193 @@ const StreakCalendar = () => {
     return `${prefix}-${timestamp}-${random}-${uniqueStr}`;
   };
   
-  // Load streak history
-  useEffect(() => {
-    const loadStreakHistory = async () => {
-      try {
-        // Get streak data which contains the start date of current streak
-        const streakData = await getData(STORAGE_KEYS.STREAK_DATA, { 
-          streak: 0, 
-          lastCheckIn: 0,
-          startDate: Date.now()
+  // Add a state for tracking whether streak data has loaded
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  // Define loadStreakHistory as a variable-scoped function so it can be called from multiple places
+  const loadStreakHistory = async () => {
+    try {
+      // Get streak data which contains the start date of current streak
+      const streakData = await getData(STORAGE_KEYS.STREAK_DATA, { 
+        streak: 0, 
+        lastCheckIn: 0,
+        startDate: Date.now()
+      });
+      
+      // Check if there's journal entries that might have relapse records
+      const journalEntries = await getData(STORAGE_KEYS.JOURNAL_ENTRIES, []);
+      
+      const detectedRelapses: Date[] = [];
+      const detectedStarts: Date[] = [];
+      const historyEvents: StreakHistoryEvent[] = [];
+      
+      // Add the current streak start if streak > 0
+      if (persistentStreak > 0 && streakData.startDate) {
+        const startDate = new Date(streakData.startDate);
+        detectedStarts.push(startDate);
+        
+        // Add to history events with unique ID
+        historyEvents.push({
+          type: 'start',
+          date: startDate,
+          notes: 'Current streak started',
+          id: generateUniqueId('history-start-current')
         });
         
-        // Check if there's journal entries that might have relapse records
-        const journalEntries = await getData(STORAGE_KEYS.JOURNAL_ENTRIES, []);
+        // The day before streak start might be a relapse day
+        const relapseDayBefore = new Date(startDate);
+        relapseDayBefore.setDate(relapseDayBefore.getDate() - 1);
+        detectedRelapses.push(relapseDayBefore);
         
-        const detectedRelapses: Date[] = [];
-        const detectedStarts: Date[] = [];
-        const historyEvents: StreakHistoryEvent[] = [];
-        
-        // Add the current streak start if streak > 0
-        if (persistentStreak > 0 && streakData.startDate) {
-          const startDate = new Date(streakData.startDate);
-          detectedStarts.push(startDate);
-          
-          // Add to history events with unique ID
-          historyEvents.push({
-            type: 'start',
-            date: startDate,
-            notes: 'Current streak started',
-            id: generateUniqueId('history-start-current')
-          });
-          
-          // The day before streak start might be a relapse day
-          const relapseDayBefore = new Date(startDate);
-          relapseDayBefore.setDate(relapseDayBefore.getDate() - 1);
-          detectedRelapses.push(relapseDayBefore);
-          
-          // Add to history events with unique ID
-          historyEvents.push({
-            type: 'relapse',
-            date: relapseDayBefore,
-            streakDays: 0, // We don't know the previous streak length
-            notes: 'Relapse before current streak',
-            id: generateUniqueId('history-relapse-before-current')
-          });
-        }
-        
-        // Scan journal entries for mentions of relapses and fresh starts
-        if (journalEntries && journalEntries.length) {
-          // Sort entries by date to ensure chronological processing
-          const sortedEntries = [...journalEntries].sort((a: any, b: any) => 
-            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-          );
+        // Add to history events with unique ID
+        historyEvents.push({
+          type: 'relapse',
+          date: relapseDayBefore,
+          streakDays: 0, // We don't know the previous streak length
+          notes: 'Relapse before current streak',
+          id: generateUniqueId('history-relapse-before-current')
+        });
+      }
+      
+      // Scan journal entries for mentions of relapses and fresh starts
+      if (journalEntries && journalEntries.length) {
+        // Sort entries by date to ensure chronological processing
+        const sortedEntries = [...journalEntries].sort((a: any, b: any) => 
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        );
 
-          sortedEntries.forEach((entry: any) => {
-            if (entry.content && entry.timestamp) {
-              const entryDate = new Date(entry.timestamp);
-              const lowerContent = entry.content.toLowerCase();
-              
-              // Check for relapse mentions
-              const hasRelapseKeywords = lowerContent.includes('relapse') || 
-                  lowerContent.includes('failed') ||
-                  lowerContent.includes('reset') ||
-                  lowerContent.includes('broke streak') ||
-                  lowerContent.includes('gave in');
-              
-              if (hasRelapseKeywords) {
-                // Only add if this date isn't already recorded as a relapse
-                if (!detectedRelapses.some(d => isSameDay(d.getTime(), entryDate.getTime()))) {
-                  detectedRelapses.push(new Date(entryDate));
-                  
-                  // Add to history with context from journal and guaranteed unique ID
-                  historyEvents.push({
-                    type: 'relapse',
-                    date: new Date(entryDate),
-                    notes: entry.content.substring(0, 100) + (entry.content.length > 100 ? '...' : ''),
-                    id: generateUniqueId(`journal-relapse-${entry.timestamp}`)
-                  });
-                }
-              }
-              
-              // Check for fresh start mentions
-              const hasFreshStartKeywords = lowerContent.includes('fresh start') || 
-                  lowerContent.includes('new beginning') ||
-                  lowerContent.includes('starting again') ||
-                  lowerContent.includes('day 1') ||
-                  lowerContent.includes('restart') ||
-                  lowerContent.includes('starting over');
-              
-              if (hasFreshStartKeywords) {
-                // Only add if this date isn't already recorded as a start
-                if (!detectedStarts.some(d => isSameDay(d.getTime(), entryDate.getTime()))) {
-                  detectedStarts.push(new Date(entryDate));
-                  
-                  // Add to history with context from journal and guaranteed unique ID
-                  historyEvents.push({
-                    type: 'start',
-                    date: new Date(entryDate),
-                    notes: entry.content.substring(0, 100) + (entry.content.length > 100 ? '...' : ''),
-                    id: generateUniqueId(`journal-start-${entry.timestamp}`)
-                  });
-                }
+        sortedEntries.forEach((entry: any) => {
+          if (entry.content && entry.timestamp) {
+            const entryDate = new Date(entry.timestamp);
+            const lowerContent = entry.content.toLowerCase();
+            
+            // Check for relapse mentions
+            const hasRelapseKeywords = lowerContent.includes('relapse') || 
+                lowerContent.includes('failed') ||
+                lowerContent.includes('reset') ||
+                lowerContent.includes('broke streak') ||
+                lowerContent.includes('gave in');
+            
+            if (hasRelapseKeywords) {
+              // Only add if this date isn't already recorded as a relapse
+              if (!detectedRelapses.some(d => isSameDay(d.getTime(), entryDate.getTime()))) {
+                detectedRelapses.push(new Date(entryDate));
+                
+                // Add to history with context from journal and guaranteed unique ID
+                historyEvents.push({
+                  type: 'relapse',
+                  date: new Date(entryDate),
+                  notes: entry.content.substring(0, 100) + (entry.content.length > 100 ? '...' : ''),
+                  id: generateUniqueId(`journal-relapse-${entry.timestamp}`)
+                });
               }
             }
-          });
-        }
-        
-        // Always add synthetic data for demonstration purposes
-        // This will ensure we have some relapse days to show
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - 90);
-        
-        for (let i = 1; i <= 3; i++) {
-          // Create synthetic relapse date
-          const syntheticRelapse = new Date(startDate);
-          syntheticRelapse.setDate(syntheticRelapse.getDate() + (i * 25));
-          
-          // Skip if during current streak
-          if (persistentStreak > 0 && streakStartDate && 
-              syntheticRelapse >= streakStartDate && syntheticRelapse <= today) {
-            continue;
-          }
-          
-          detectedRelapses.push(syntheticRelapse);
-          historyEvents.push({
-            type: 'relapse',
-            date: syntheticRelapse,
-            streakDays: 20, // Example streak length
-            notes: 'Lost a 20-day streak',
-            id: generateUniqueId(`history-synthetic-relapse-${i}`)
-          });
-          
-          // Create synthetic restart 1-2 days after relapse
-          const daysAfterRelapse = 1 + Math.floor(Math.random() * 2);
-          const syntheticRestart = new Date(syntheticRelapse);
-          syntheticRestart.setDate(syntheticRestart.getDate() + daysAfterRelapse);
-          
-          // Skip if during current streak
-          if (persistentStreak > 0 && streakStartDate && 
-              syntheticRestart >= streakStartDate && syntheticRestart <= today) {
-            continue;
-          }
-          
-          detectedStarts.push(syntheticRestart);
-          historyEvents.push({
-            type: 'start',
-            date: syntheticRestart,
-            notes: 'Fresh start after relapse',
-            id: generateUniqueId(`history-synthetic-start-${i}`)
-          });
-        }
-        
-        // Add a relapse day in the current month for visibility testing
-        const thisMonth = new Date();
-        thisMonth.setDate(10); // 10th of current month
-        
-        // Only add if it's not in current streak
-        if (!(persistentStreak > 0 && streakStartDate && thisMonth >= streakStartDate)) {
-          detectedRelapses.push(thisMonth);
-          historyEvents.push({
-            type: 'relapse',
-            date: thisMonth,
-            streakDays: 5,
-            notes: 'Recent relapse for testing',
-            id: generateUniqueId('history-recent-relapse')
-          });
-        }
-        
-        // Sort history events by date
-        historyEvents.sort((a, b) => b.date.getTime() - a.date.getTime());
-        
-        // Deduplicate history events - keep only one event of each type per day
-        const uniqueEvents: StreakHistoryEvent[] = [];
-        const processed = new Set<string>();
-        
-        historyEvents.forEach(event => {
-          // Create a date-based key for deduplication using just the date part
-          const dateStr = event.date.toDateString();
-          const dayKey = `${dateStr}-${event.type}`;
-          
-          // Only add the event if we haven't seen this date-type combination yet
-          if (!processed.has(dayKey)) {
-            uniqueEvents.push(event);
-            processed.add(dayKey);
+            
+            // Check for fresh start mentions
+            const hasFreshStartKeywords = lowerContent.includes('fresh start') || 
+                lowerContent.includes('new beginning') ||
+                lowerContent.includes('starting again') ||
+                lowerContent.includes('day 1') ||
+                lowerContent.includes('restart') ||
+                lowerContent.includes('starting over');
+            
+            if (hasFreshStartKeywords) {
+              // Only add if this date isn't already recorded as a start
+              if (!detectedStarts.some(d => isSameDay(d.getTime(), entryDate.getTime()))) {
+                detectedStarts.push(new Date(entryDate));
+                
+                // Add to history with context from journal and guaranteed unique ID
+                historyEvents.push({
+                  type: 'start',
+                  date: new Date(entryDate),
+                  notes: entry.content.substring(0, 100) + (entry.content.length > 100 ? '...' : ''),
+                  id: generateUniqueId(`journal-start-${entry.timestamp}`)
+                });
+              }
+            }
           }
         });
+      }
+      
+      // Removed synthetic data generation for demonstration purposes
+      // This was interfering with actual user streak data
+      // Only use real relapse data from journal entries and user actions
+      
+      // Remove synthetic relapse data for current month
+      // This was causing the current day to show as red even when user hasn't relapsed
+      
+      // Sort history events by date
+      historyEvents.sort((a, b) => b.date.getTime() - a.date.getTime());
+      
+      // Deduplicate history events - keep only one event of each type per day
+      const uniqueEvents: StreakHistoryEvent[] = [];
+      const processed = new Set<string>();
+      
+      historyEvents.forEach(event => {
+        // Create a date-based key for deduplication using just the date part
+        const dateStr = event.date.toDateString();
+        const dayKey = `${dateStr}-${event.type}`;
         
-        console.log('Loaded relapse dates:', detectedRelapses.map(d => d.toDateString()).join(', '));
+        // Only add the event if we haven't seen this date-type combination yet
+        if (!processed.has(dayKey)) {
+          uniqueEvents.push(event);
+          processed.add(dayKey);
+        }
+      });
+      
+      console.log('Loaded relapse dates:', detectedRelapses.map(d => d.toDateString()).join(', '));
+      
+      setRelapseDates(detectedRelapses);
+      setStreakStartDates(detectedStarts);
+      setStreakHistory(uniqueEvents); // Use deduplicated list
+      return true;
+    } catch (error) {
+      console.error('Error loading streak history:', error);
+      setRelapseDates([]);
+      setStreakStartDates([]);
+      setStreakHistory([]);
+      return false;
+    }
+  };
+
+  // Use an effect to ensure that all streak-related data is loaded on component mount
+  useEffect(() => {
+    const initializeCalendarData = async () => {
+      try {
+        console.log('Initializing calendar data...');
+        // Get streak data from storage
+        const streakData = await getStreakDataDirectly();
         
-        setRelapseDates(detectedRelapses);
-        setStreakStartDates(detectedStarts);
-        setStreakHistory(uniqueEvents); // Use deduplicated list
+        // Get relapse history from storage
+        const relapseHistory = await getData<Date[]>(`${STORAGE_KEYS.RELAPSE_HISTORY}`, []);
+        setRelapseDates(relapseHistory);
+        
+        // Load streak history events
+        await loadStreakHistory();
+        
+        // Check for any recent intentional relapse
+        const intentionalRelapse = await getData<IntentionalRelapseData | null>(STORAGE_KEYS.INTENTIONAL_RELAPSE, null);
+        if (intentionalRelapse) {
+          const isRecent = Date.now() - intentionalRelapse.timestamp < 86400000; // 24 hours in ms
+          if (isRecent) {
+            setTodayIsRelapse(true);
+          }
+        }
+        
+        // Mark initialization as complete
+        setIsInitialized(true);
+        console.log('Calendar data initialization complete');
       } catch (error) {
-        console.error('Error loading streak history:', error);
-        setRelapseDates([]);
-        setStreakStartDates([]);
-        setStreakHistory([]);
+        console.error('Error initializing calendar data:', error);
+        // Still mark as initialized to prevent infinite loops
+        setIsInitialized(true);
       }
     };
     
-    loadStreakHistory();
-  }, [persistentStreak]); // Add additional dependencies if needed
+    if (!isInitialized) {
+      initializeCalendarData();
+    }
+  }, [isInitialized]);
   
   // Month name display
   const getMonthName = (month: number) => {
@@ -773,6 +763,16 @@ const StreakCalendar = () => {
     const normalizedToday = new Date();
     normalizedToday.setHours(0, 0, 0, 0);
     
+    // First check if this is a relapse day - if so, it can't be a streak day
+    if (isRelapseDay(date)) {
+      return false;
+    }
+    
+    // If it's today and we haven't relapsed and we have an active streak, it's a streak day
+    if (isSameDay(date.getTime(), normalizedToday.getTime()) && !todayIsRelapse && persistentStreak > 0) {
+      return true;
+    }
+    
     // Case 1: Part of the current active streak
     if (persistentStreak > 0 && streakStartDate) {
       const normalizedStartDate = new Date(streakStartDate);
@@ -788,12 +788,12 @@ const StreakCalendar = () => {
     const relevantStartDate = streakStartDates.find(startDate => {
       const normalizedStartDate = new Date(startDate);
       normalizedStartDate.setHours(0, 0, 0, 0);
-      return normalizedStartDate <= normalizedDate && !isSameDay(normalizedStartDate.getTime(), normalizedDate.getTime());
+      return normalizedStartDate <= normalizedDate;
     });
     
     // If there's a relevant start date, check if there's a relapse after this date
     if (relevantStartDate) {
-      // Find the earliest relapse date after the fresh start
+      // Find the earliest relapse date after this date
       const relevantRelapse = relapseDates.find(relapseDate => {
         const normalizedRelapseDate = new Date(relapseDate);
         normalizedRelapseDate.setHours(0, 0, 0, 0);
@@ -802,28 +802,20 @@ const StreakCalendar = () => {
       });
       
       // If no relapse after this date, and this date is after a fresh start, it's a streak day
-      // Unless this date is a fresh start day itself (which has its own color)
-      const isFreshStartDay = streakStartDates.some(startDate => 
-        isSameDay(startDate.getTime(), date.getTime())
-      );
+      const normalizedRelevantStart = new Date(relevantStartDate);
+      normalizedRelevantStart.setHours(0, 0, 0, 0);
       
-      if (!isFreshStartDay) {
-        // Check if this date is after a start date but before a relapse
-        const normalizedRelevantStart = new Date(relevantStartDate);
-        normalizedRelevantStart.setHours(0, 0, 0, 0);
+      if (!relevantRelapse) {
+        // No relapse after this date, so it's part of an ongoing streak
+        // But only if it's not after today
+        return normalizedDate <= normalizedToday;
+      } else {
+        // There's a relapse after this date
+        const normalizedRelevantRelapse = new Date(relevantRelapse);
+        normalizedRelevantRelapse.setHours(0, 0, 0, 0);
         
-        if (!relevantRelapse) {
-          // No relapse after this date, so it's part of an ongoing streak
-          // But only if it's not after today
-          return normalizedDate <= normalizedToday;
-        } else {
-          // There's a relapse after this date
-          const normalizedRelevantRelapse = new Date(relevantRelapse);
-          normalizedRelevantRelapse.setHours(0, 0, 0, 0);
-          
-          // It's a streak day if it's after a start but before a relapse
-          return normalizedDate > normalizedRelevantStart && normalizedDate < normalizedRelevantRelapse;
-        }
+        // It's a streak day if it's after a start but before a relapse
+        return normalizedDate > normalizedRelevantStart && normalizedDate < normalizedRelevantRelapse;
       }
     }
     
@@ -883,72 +875,64 @@ const StreakCalendar = () => {
   // Define a unique key for the current month/year view that includes the persistent streak
   const calendarGridKey = `grid-${currentMonth}-${currentYear}-${forceUpdate}-${persistentStreak}-${forceRefresh}`;
   
-  // When the component mounts or when the screen comes into focus,
-  // check if there's a recent intentional relapse recorded
-  useEffect(() => {
-    if (isFocused) {
-      const checkIntentionalRelapse = async () => {
-        try {
-          // Check if there's a recent intentional relapse flag
-          const intentionalRelapse = await getData<IntentionalRelapseData | null>(STORAGE_KEYS.INTENTIONAL_RELAPSE, null);
-          
-          if (intentionalRelapse) {
-            console.log('Found intentional relapse flag:', intentionalRelapse);
-            
-            // Check if it's recent (within the last hour)
-            const isRecent = Date.now() - intentionalRelapse.timestamp < 3600000; // 1 hour in ms
-            
-            if (isRecent) {
-              console.log('Recent intentional relapse detected, updating calendar');
-              
-              // Mark today as relapse day
-              setTodayIsRelapse(true);
-              
-              // Make sure today is in the relapse dates
-    const today = new Date();
-              setRelapseDates(prev => {
-                if (prev.some(date => isSameDay(date.getTime(), today.getTime()))) {
-                  return prev;
-                }
-                return [...prev, today];
-              });
-              
-              // Add today to streak history if not already there
-              const relapseEvent: StreakHistoryEvent = {
-                type: 'relapse',
-                date: today,
-                streakDays: persistentStreak > 0 ? persistentStreak : undefined,
-                notes: 'Relapse recorded',
-                id: generateUniqueId('intentional-relapse')
-              };
-              
-              setStreakHistory(prev => {
-                if (prev.some(event => 
-                  event.type === 'relapse' && isSameDay(event.date.getTime(), today.getTime())
-                )) {
-                  return prev;
-                }
-                return [relapseEvent, ...prev];
-              });
-  
-              // Reset streak values
-              setPersistentStreak(0);
-              streakRef.current = 0;
-              
-              // Force redraw of calendar
-              setForceUpdate(Date.now());
-            }
-          }
-        } catch (error) {
-          console.error('Error checking for intentional relapse:', error);
-        }
-      };
+  // Create a separate function for checking intentional relapse
+  const checkIntentionalRelapse = async () => {
+    try {
+      // Check if there's a recent intentional relapse flag
+      const intentionalRelapse = await getData<IntentionalRelapseData | null>(STORAGE_KEYS.INTENTIONAL_RELAPSE, null);
       
-      checkIntentionalRelapse();
-      refreshCalendarData();
+      if (intentionalRelapse) {
+        console.log('Found intentional relapse flag:', intentionalRelapse);
+        
+        // Check if it's recent (within the last day)
+        const isRecent = Date.now() - intentionalRelapse.timestamp < 86400000; // 24 hours in ms
+        
+        if (isRecent) {
+          console.log('Recent intentional relapse detected, updating calendar');
+          
+          // Mark today as relapse day
+          setTodayIsRelapse(true);
+          
+          // Make sure today is in the relapse dates
+          const today = new Date();
+          setRelapseDates(prev => {
+            if (prev.some(date => isSameDay(date.getTime(), today.getTime()))) {
+              return prev;
+            }
+            return [...prev, today];
+          });
+          
+          // Add today to streak history if not already there
+          const relapseEvent: StreakHistoryEvent = {
+            type: 'relapse',
+            date: today,
+            streakDays: persistentStreak > 0 ? persistentStreak : undefined,
+            notes: 'Relapse recorded',
+            id: generateUniqueId('intentional-relapse')
+          };
+          
+          setStreakHistory(prev => {
+            if (prev.some(event => 
+              event.type === 'relapse' && isSameDay(event.date.getTime(), today.getTime())
+            )) {
+              return prev;
+            }
+            return [relapseEvent, ...prev];
+          });
+
+          // Reset streak values
+          setPersistentStreak(0);
+          streakRef.current = 0;
+          
+          // Force redraw of calendar
+          setForceUpdate(Date.now());
+        }
+      }
+    } catch (error) {
+      console.error('Error checking for intentional relapse:', error);
     }
-  }, [isFocused, persistentStreak, refreshCalendarData]);
-  
+  };
+
   return (
     <View style={[styles.container, { 
       backgroundColor: COLORS.cardBackground,
@@ -1019,16 +1003,19 @@ const StreakCalendar = () => {
             const isRelapse = day.date && isRelapseDay(day.date);
             
             // Define the cell key that includes all relevant data
-            const cellKey = `${index}-${currentMonth}-${currentYear}-${isStreak ? 'streak' : ''}-${forceUpdate}`;
+            const cellKey = `${index}-${currentMonth}-${currentYear}-${isStreak ? 'streak' : ''}-${isRelapse ? 'relapse' : ''}-${forceUpdate}-${forceRefresh}`;
             
-              // Choose appropriate gradient colors based on day type - simplified to just red and green
+            // Choose appropriate gradient colors based on day type
             let gradientColors: [string, string] = ['transparent', 'transparent']; // Default is transparent
             
-              // Priority of colors: Relapse > Streak Day
+            // Priority of colors: Relapse > Streak Day > Today (if not relapse)
             if (isRelapse) {
                 gradientColors = ['rgba(248, 113, 113, 0.95)', 'rgba(248, 113, 113, 0.75)']; // Red for relapse
             } else if (isStreak) {
                 gradientColors = ['rgba(74, 222, 128, 0.95)', 'rgba(74, 222, 128, 0.75)']; // Green for streak days
+            } else if (isTodayCell && !isRelapseDay(day.date)) {
+                // If it's today and not a relapse day, make it green (covers new users or users without an active streak)
+                gradientColors = ['rgba(74, 222, 128, 0.95)', 'rgba(74, 222, 128, 0.75)']; 
             }
             
             return (
@@ -1041,7 +1028,7 @@ const StreakCalendar = () => {
                 onPress={() => day.date && handleDayPress(day.date)}
                 onPressIn={onDayPressIn}
                 onPressOut={onDayPressOut}
-                  activeOpacity={0.75}
+                activeOpacity={0.75}
                 disabled={isEmptyCell}
               >
                 {!isEmptyCell && (
@@ -1448,4 +1435,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default StreakCalendar; 
+export default StreakCalendar;

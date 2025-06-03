@@ -1,39 +1,78 @@
-import { Platform, Alert } from 'react-native';
-import { storeData, STORAGE_KEYS, getData } from './storage';
+import { Alert } from 'react-native';
 
-// Mock IAP functionality since we can't install the actual library
-// In a real implementation, you would use react-native-iap
+// Apple In-App Purchase utilities using react-native-iap
+// Import the react-native-iap library
+// import RNIap, {
+//   Product,
+//   PurchaseError,
+//   SubscriptionPurchase,
+//   acknowledgePurchaseAndroid,
+//   consumePurchaseAndroid,
+//   finishTransaction,
+//   purchaseErrorListener,
+//   purchaseUpdatedListener,
+// } from 'react-native-iap';
 
-// Product IDs for Apple IAP
-const PRODUCT_IDS = {
-  PREMIUM_MONTHLY: 'com.nofap.premium.monthly',  // $3.99 premium monthly subscription
+// Product IDs from App Store Connect (replace with your actual product IDs)
+export const PRODUCT_IDS = {
+  PREMIUM_MONTHLY: 'com.yourapp.premium.monthly',
+  PREMIUM_YEARLY: 'com.yourapp.premium.yearly',
 };
 
-// Mock user state - in a real app, this would come from the native IAP module
-let mockPurchaseState = {
-  isPremium: false,
-  purchaseDate: null,
-  productId: null,
-  expiryDate: null,
-  transactionId: null,
-};
+// Interfaces
+export interface SubscriptionData {
+  productId: string;
+  transactionId: string;
+  purchaseDate: string;
+  expiresDate: string;
+}
 
-/**
- * Initialize IAP module - in real app, this would connect to App Store
- */
-export const initializeIAP = async (): Promise<boolean> => {
+export interface PurchaseResult {
+  success: boolean;
+  transactionId?: string;
+  error?: string;
+}
+
+export interface SubscriptionStatus {
+  isPremium: boolean;
+  subscription?: SubscriptionData;
+}
+
+export interface Product {
+  productId: string;
+  price: string;
+  currency: string;
+  title: string;
+  description: string;
+}
+
+// Note: This is a simplified implementation for Apple IAP
+// In a real app, you would use react-native-iap or expo-in-app-purchases
+// and integrate with your backend to validate receipts
+
+// Initialize IAP connection
+let isIapInitialized = false;
+
+const initializeIAP = async (): Promise<boolean> => {
+  if (isIapInitialized) return true;
+  
   try {
-    console.log('Initializing In-App Purchases...');
+    // Uncomment when react-native-iap is installed:
+    // const result = await RNIap.initConnection();
+    // console.log('IAP connection initialized:', result);
     
-    // Load any existing purchase data from storage
-    const storedPurchases = await getData(STORAGE_KEYS.PURCHASES, null);
-    if (storedPurchases) {
-      mockPurchaseState = storedPurchases;
-      console.log('Loaded existing purchase data:', mockPurchaseState);
-    }
+    // Set up purchase listeners
+    // purchaseUpdatedListener((purchase) => {
+    //   console.log('Purchase updated:', purchase);
+    //   // Handle successful purchase
+    //   finishTransaction(purchase);
+    // });
     
-    // In real app, this would connect to app store and verify receipts
-    console.log('IAP initialized successfully');
+    // purchaseErrorListener((error) => {
+    //   console.log('Purchase error:', error);
+    // });
+    
+    isIapInitialized = true;
     return true;
   } catch (error) {
     console.error('Failed to initialize IAP:', error);
@@ -42,115 +81,249 @@ export const initializeIAP = async (): Promise<boolean> => {
 };
 
 /**
- * Check if user has active subscription
+ * Check current subscription status
+ * In a real implementation, this would check with Apple's servers
  */
-export const checkSubscriptionStatus = async (): Promise<boolean> => {
+export const checkSubscriptionStatus = async (): Promise<SubscriptionStatus> => {
   try {
-    // In real app, this would verify with App Store if subscription is active
+    await initializeIAP();
     
-    // Check if we have stored purchase data
-    const purchaseData = await getData(STORAGE_KEYS.PURCHASES, null);
-    if (!purchaseData) {
-      return false;
-    }
+    // Uncomment when react-native-iap is installed:
+    // const purchases = await RNIap.getAvailablePurchases();
+    // const validSubscription = purchases.find(purchase => 
+    //   Object.values(PRODUCT_IDS).includes(purchase.productId) &&
+    //   new Date(purchase.transactionDate) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // Within last 30 days
+    // );
     
-    // Check if subscription is still valid (not expired)
-    if (purchaseData.expiryDate && new Date(purchaseData.expiryDate) > new Date()) {
-      return true;
-    }
+    // if (validSubscription) {
+    //   return {
+    //     isPremium: true,
+    //     subscription: {
+    //       productId: validSubscription.productId,
+    //       transactionId: validSubscription.transactionId,
+    //       purchaseDate: validSubscription.transactionDate,
+    //       expiresDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days from now
+    //     },
+    //   };
+    // }
     
-    return false;
+    // Mock implementation for development
+    return {
+      isPremium: false,
+      subscription: undefined,
+    };
   } catch (error) {
     console.error('Error checking subscription status:', error);
-    return false;
+    return {
+      isPremium: false,
+      subscription: undefined,
+    };
   }
 };
 
 /**
- * Get available products (prices, descriptions, etc.)
+ * Get available subscription products
  */
-export const getProducts = async () => {
-  // Mock response - in real app, this would come from App Store
-  return [
-    {
-      productId: PRODUCT_IDS.PREMIUM_MONTHLY,
-      price: '$3.99',
-      currency: 'USD',
-      localizedPrice: '$3.99',
-      title: 'Premium Monthly',
-      description: 'Full access to all premium features',
-    }
-  ];
+export const getProducts = async (): Promise<Product[]> => {
+  try {
+    await initializeIAP();
+    
+    // Uncomment when react-native-iap is installed:
+    // const products = await RNIap.getSubscriptions(Object.values(PRODUCT_IDS));
+    // return products.map(product => ({
+    //   productId: product.productId,
+    //   price: product.localizedPrice,
+    //   currency: product.currency,
+    //   title: product.title,
+    //   description: product.description,
+    // }));
+    
+    // Mock data for development
+    return [
+      {
+        productId: PRODUCT_IDS.PREMIUM_MONTHLY,
+        price: '$9.99',
+        currency: 'USD',
+        title: 'Premium Monthly',
+        description: 'Monthly premium subscription'
+      },
+      {
+        productId: PRODUCT_IDS.PREMIUM_YEARLY,
+        price: '$99.99',
+        currency: 'USD',
+        title: 'Premium Yearly',
+        description: 'Yearly premium subscription (Save 17%)'
+      }
+    ];
+  } catch (error) {
+    console.error('Error fetching products:', error);
+    return [];
+  }
 };
 
 /**
- * Request purchase of the premium subscription
+ * Purchase a premium subscription
  */
-export const purchasePremiumSubscription = async (): Promise<boolean> => {
+export const purchasePremiumSubscription = async (productId: string): Promise<PurchaseResult> => {
   try {
-    console.log('Initiating premium subscription purchase...');
+    await initializeIAP();
     
-    // In a real app, this would open the native purchase flow
-    // Here we're simulating a successful purchase
+    // Uncomment when react-native-iap is installed:
+    // const purchase = await RNIap.requestSubscription(productId);
+    // 
+    // if (purchase) {
+    //   // Finish the transaction
+    //   await finishTransaction(purchase);
+    //   
+    //   // Validate receipt with your backend here
+    //   // await validateReceiptWithBackend(purchase.transactionReceipt);
+    //   
+    //   return {
+    //     success: true,
+    //     transactionId: purchase.transactionId,
+    //   };
+    // }
     
-    // Simulate processing time
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    // Mock implementation for development
+    Alert.alert(
+      'Purchase Simulation',
+      'This is a mock purchase. In production, this would process through Apple IAP.',
+      [{ text: 'OK' }]
+    );
     
-    // Create mock purchase data (in real app, this would come from App Store)
-    const now = new Date();
-    const expiryDate = new Date();
-    expiryDate.setMonth(expiryDate.getMonth() + 1); // Expires in 1 month
-    
-    mockPurchaseState = {
-      isPremium: true,
-      purchaseDate: now.toISOString(),
-      productId: PRODUCT_IDS.PREMIUM_MONTHLY,
-      expiryDate: expiryDate.toISOString(),
-      transactionId: `mock-transaction-${Date.now()}`,
+    return {
+      success: true,
+      transactionId: `mock_${Date.now()}`,
     };
-    
-    // Save purchase data
-    await storeData(STORAGE_KEYS.PURCHASES, mockPurchaseState);
-    console.log('Purchase completed successfully:', mockPurchaseState);
-    
-    return true;
   } catch (error) {
-    console.error('Error during purchase:', error);
-    return false;
+    console.error('Error purchasing subscription:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Purchase failed',
+    };
   }
 };
 
 /**
  * Restore previous purchases
  */
-export const restorePurchases = async (): Promise<boolean> => {
+export const restorePurchases = async (): Promise<PurchaseResult> => {
   try {
-    console.log('Restoring purchases...');
+    await initializeIAP();
     
-    // In a real app, this would verify receipt with App Store
-    // and restore any previous purchases
+    // Uncomment when react-native-iap is installed:
+    // const purchases = await RNIap.getAvailablePurchases();
+    // 
+    // const validSubscription = purchases.find(purchase => 
+    //   Object.values(PRODUCT_IDS).includes(purchase.productId)
+    // );
+    // 
+    // if (validSubscription) {
+    //   // Validate the restored purchase with your backend
+    //   // await validateReceiptWithBackend(validSubscription.transactionReceipt);
+    //   
+    //   return {
+    //     success: true,
+    //     transactionId: validSubscription.transactionId,
+    //   };
+    // } else {
+    //   return {
+    //     success: false,
+    //     error: 'No previous purchases found',
+    //   };
+    // }
     
-    // For demo, just check if we have stored purchase data
-    const purchaseData = await getData(STORAGE_KEYS.PURCHASES, null);
-    if (purchaseData && purchaseData.isPremium) {
-      mockPurchaseState = purchaseData;
-      return true;
-    }
+    // Mock implementation for development
+    Alert.alert(
+      'Restore Simulation',
+      'This is a mock restore. In production, this would restore from Apple IAP.',
+      [{ text: 'OK' }]
+    );
     
-    return false;
+    return {
+      success: true,
+      transactionId: `restored_${Date.now()}`,
+    };
   } catch (error) {
     console.error('Error restoring purchases:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Restore failed',
+    };
+  }
+};
+
+/**
+ * Validate receipt with Apple's servers
+ * This should be done on your backend for security
+ */
+export const validateReceipt = async (receiptData: string): Promise<boolean> => {
+  try {
+    // In production, send the receipt to your backend for validation
+    // Your backend should validate with Apple's servers:
+    // 
+    // const response = await fetch('https://your-backend.com/validate-receipt', {
+    //   method: 'POST',
+    //   headers: { 'Content-Type': 'application/json' },
+    //   body: JSON.stringify({ receiptData, userId: currentUserId })
+    // });
+    // 
+    // const result = await response.json();
+    // return result.isValid;
+    
+    // Mock validation for development
+    console.log('Validating receipt:', receiptData.substring(0, 50) + '...');
+    return true;
+  } catch (error) {
+    console.error('Error validating receipt:', error);
     return false;
   }
 };
 
 /**
- * Handle purchase completion
+ * Get subscription expiry date
  */
-export const handlePurchaseCompletion = async (success: boolean): Promise<void> => {
-  if (success) {
-    // Update app state to reflect premium status
-    // This would typically update your app's context or state management
-    console.log('Purchase completed, updating app state');
+export const getSubscriptionExpiryDate = async (): Promise<Date | null> => {
+  try {
+    const status = await checkSubscriptionStatus();
+    if (status.subscription) {
+      return new Date(status.subscription.expiresDate);
+    }
+    return null;
+  } catch (error) {
+    console.error('Error getting expiry date:', error);
+    return null;
   }
-}; 
+};
+
+/**
+ * Check if subscription is expiring soon (within 7 days)
+ */
+export const isSubscriptionExpiringSoon = async (): Promise<boolean> => {
+  try {
+    const expiryDate = await getSubscriptionExpiryDate();
+    if (!expiryDate) return false;
+    
+    const sevenDaysFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    return expiryDate <= sevenDaysFromNow;
+  } catch (error) {
+    console.error('Error checking expiry:', error);
+    return false;
+  }
+};
+
+/**
+ * Clean up IAP connection when app is closing
+ */
+export const cleanupIAP = async (): Promise<void> => {
+  try {
+    // Uncomment when react-native-iap is installed:
+    // await RNIap.endConnection();
+    console.log('IAP connection cleaned up');
+  } catch (error) {
+    console.error('Error cleaning up IAP:', error);
+  }
+};
+
+export { PRODUCT_IDS };
+export type { SubscriptionData, PurchaseResult, SubscriptionStatus, Product };

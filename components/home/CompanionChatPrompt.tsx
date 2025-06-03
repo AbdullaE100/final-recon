@@ -28,7 +28,7 @@ const CompanionChatPrompt = () => {
   const companionStage = unlockedBadgesCount >= 30 ? 3 : unlockedBadgesCount >= 15 ? 2 : 1;
   const companionType = companion?.type || 'water';
   
-  console.log("CHAT PROMPT: Badge count =", unlockedBadgesCount, "Companion stage =", companionStage);
+  
   
   // Get companion animation source based on stage and type
   const getCompanionSource = () => {

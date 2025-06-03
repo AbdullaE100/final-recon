@@ -8,10 +8,13 @@ import {
   LevelRequirement
 } from '@/types/gamification';
 import { getStartOfDay, isToday } from '@/utils/dateUtils';
-import { Alert, Platform } from 'react-native';
+import { Alert, Platform, NativeModules } from 'react-native';
 import { loadStreakData, updateStreak, performCheckIn as serviceCheckIn, DEFAULT_USER_ID } from '@/utils/streakService';
 import { Companion, CompanionType, UserCompanion, EVOLUTION_THRESHOLDS, BOND_THRESHOLDS, XpActionType, FeedingAction } from '@/types/companion';
 import useAchievementNotification, { AchievementProps } from '@/hooks/useAchievementNotification';
+
+// Import the updateWidgetStreakData function from streakService
+import { updateWidgetStreakData } from '@/utils/streakService';
 
 // Initial challenges
 const initialChallenges: Challenge[] = [
@@ -810,6 +813,10 @@ const defaultUserProgress: UserProgress = {
   companionId: undefined,
   achievements: initialAchievements,
   dailyCheckedIn: false,
+  meditationSessions: 0,
+  meditationStreak: 0,
+  lastMeditationDate: 0,
+  totalMeditationMinutes: 0,
 };
 
 interface GamificationContextType {
@@ -822,7 +829,7 @@ interface GamificationContextType {
   
   // Journal
   journalEntries: JournalEntry[];
-  addJournalEntry: (content: string) => void;
+  addJournalEntry: (content: string, options?: { mood?: string, tags?: string[], audioUri?: string }) => void;
   deleteJournalEntry: (id: string) => void;
   
   // Challenges
@@ -1479,7 +1486,7 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
           evolvedName = 'Emberclaw';
           break;
         case 'water':
-          evolvedName = 'Bubblescale';
+          evolvedName = 'Stripes';
           break;
         case 'plant':
           evolvedName = 'Vinesprout';
@@ -1584,7 +1591,7 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
           evolvedName = 'Emberclaw';
           break;
         case 'water':
-          evolvedName = 'Bubblescale';
+          evolvedName = 'Stripes';
           break;
         case 'plant':
           evolvedName = 'Vinesprout';
@@ -1863,13 +1870,19 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   };
   
   // Add journal entry
-  const addJournalEntry = (content: string) => {
-    if (!content.trim()) return;
+  const addJournalEntry = (
+    content: string, 
+    options?: { mood?: string, tags?: string[], audioUri?: string }
+  ) => {
+    if (!content.trim() && !options?.audioUri) return;
     
     const newEntry: JournalEntry = {
       id: `journal-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`,
       content,
       timestamp: Date.now(),
+      mood: options?.mood,
+      tags: options?.tags,
+      audioUri: options?.audioUri
     };
     
     // Ensure the new entry has a unique ID by checking existing entries
@@ -2258,33 +2271,56 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       return false;
     }
     
+    const now = Date.now();
+    const today = new Date(now).toDateString();
+    const lastMeditationDay = userProgress.lastMeditationDate ? new Date(userProgress.lastMeditationDate).toDateString() : null;
+    
+    // Update meditation tracking
+    setUserProgress(prev => {
+      const newSessions = (prev.meditationSessions || 0) + 1;
+      const newTotalMinutes = (prev.totalMeditationMinutes || 0) + durationMinutes;
+      
+      // Calculate meditation streak
+      let newStreak = prev.meditationStreak || 0;
+      if (lastMeditationDay !== today) {
+        // Only increment streak if this is a new day
+        const yesterday = new Date(now - 24 * 60 * 60 * 1000).toDateString();
+        if (lastMeditationDay === yesterday || newSessions === 1) {
+          newStreak += 1;
+        } else if (lastMeditationDay !== yesterday && newSessions > 1) {
+          newStreak = 1; // Reset streak if gap in days
+        }
+      }
+      
+      return {
+        ...prev,
+        meditationSessions: newSessions,
+        meditationStreak: newStreak,
+        lastMeditationDate: now,
+        totalMeditationMinutes: newTotalMinutes,
+      };
+    });
+    
     // Find the meditation challenge
     const meditationChallenge = challenges.find(c => c.id === 'challenge-2');
-    if (!meditationChallenge) return false;
-    
-    // Only allow logging if the challenge is active
-    if (!userProgress.challengesActive.includes('challenge-2')) {
-      showAchievement({
-        title: "Challenge Not Active",
-        description: "Start the Morning Meditation challenge first!",
-        buttonText: "OK"
-      });
-      return false;
+    if (meditationChallenge && userProgress.challengesActive.includes('challenge-2')) {
+      // Update the progress directly since this is a daily challenge without steps
+      setChallenges(prev => prev.map(c => {
+        if (c.id === 'challenge-2') {
+          return {
+            ...c,
+            progress: 100, // Set to 100% since it's a one-time daily action
+          };
+        }
+        return c;
+      }));
+      
+      // Save the updated challenges
+      storeData(STORAGE_KEYS.CHALLENGES, challenges);
+      
+      // Auto-complete the challenge
+      completeChallenge('challenge-2');
     }
-    
-    // Update the progress directly since this is a daily challenge without steps
-    setChallenges(prev => prev.map(c => {
-      if (c.id === 'challenge-2') {
-        return {
-          ...c,
-          progress: 100, // Set to 100% since it's a one-time daily action
-        };
-      }
-      return c;
-    }));
-    
-    // Save the updated challenges
-    storeData(STORAGE_KEYS.CHALLENGES, challenges);
     
     // Give some points for meditation
     addPoints(15);
@@ -2294,8 +2330,8 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       updateCompanionExperience(10, XpActionType.MEDITATION);
     }
     
-    // Auto-complete the challenge
-    completeChallenge('challenge-2');
+    // Check for meditation badge unlocks
+    setTimeout(() => checkAndUnlockBadges(), 100);
     
     return true;
   };
@@ -2414,9 +2450,16 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
         return userProgress.streak; // Return current streak instead of invalid value
       }
       
+      // Ensure days is a valid number by converting it to a number and check if it's actually a number
+      const validatedDays = Number(days);
+      if (isNaN(validatedDays)) {
+        console.error('Invalid streak value after conversion, aborting update:', days);
+        return userProgress.streak;
+      }
+      
       // NEW SAFEGUARD: Prevent resetting a large streak value to 0 accidentally
       // But allow it if it's explicitly a relapse (when user confirms)
-      const isRelapse = days === 0;
+      const isRelapse = validatedDays === 0;
       
       if (isRelapse && userProgress.streak > 20) {
         console.log(`Relapse recorded: Reset from ${userProgress.streak} days to 0`);
@@ -2424,28 +2467,28 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       
       // CRITICAL: Store the current streak value before updating for potential recovery
       const previousStreak = userProgress.streak;
-      console.log(`Previous streak value: ${previousStreak}, updating to: ${days}`);
+      console.log(`Previous streak value: ${previousStreak}, updating to: ${validatedDays}`);
       
       // CRITICAL: Calculate normalized start date if one wasn't provided
       const calculatedStartDate = startDate || (() => {
         const now = new Date();
         now.setHours(0, 0, 0, 0);
         // Calculate what the start date should be based on current date minus (days-1)
-        return now.getTime() - ((days - 1) * 24 * 60 * 60 * 1000);
+        return now.getTime() - ((validatedDays - 1) * 24 * 60 * 60 * 1000);
       })();
       
       // Create a persistent ref to track streak value across function calls
-      const streakRef = { current: days };
+      const streakRef = { current: validatedDays };
       
       // CRITICAL: Immediately update the UI state
       // Using a function form of the state update to ensure it's based on the latest state
       setUserProgress(currentProgress => {
         const updatedProgress = {
           ...currentProgress,
-          streak: days,
+          streak: validatedDays,
           lastCheckIn: Date.now(),
         };
-        console.log(`Updated user progress with streak: ${days}`);
+        console.log(`Updated user progress with streak: ${validatedDays}`);
         return updatedProgress;
       });
       
@@ -2455,12 +2498,12 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       // Store streak value in all possible storage mechanisms
       try {
         // Try updating the streak data in our service - pass the startDate to ensure it's correctly stored
-        await updateStreak(days, DEFAULT_USER_ID, calculatedStartDate);
+        await updateStreak(validatedDays, DEFAULT_USER_ID, calculatedStartDate);
         
         // Add direct fallback - update the user progress in storage directly
         const updatedProgress = {
         ...userProgress,
-        streak: days,
+        streak: validatedDays,
           lastCheckIn: Date.now(),
         };
         
@@ -2468,10 +2511,20 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
         
         // Also update the streak data in storage with the correct start date
         await storeData(STORAGE_KEYS.STREAK_DATA, {
-          streak: days,
+          streak: validatedDays,
           lastCheckIn: Date.now(),
           startDate: calculatedStartDate
         });
+        
+        // Update the widget with the streak data
+        if (Platform.OS === 'ios') {
+          try {
+            await updateWidgetStreakData(validatedDays, calculatedStartDate, Date.now());
+            console.log('Widget data updated successfully');
+          } catch (widgetError) {
+            console.error('Error updating widget data:', widgetError);
+          }
+        }
         
         // If this is a relapse, we need to update companion data (reduce happiness)
         if (isRelapse && companion) {
@@ -2494,10 +2547,10 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
         setUserProgress(currentProgress => {
           const finalProgress = {
             ...currentProgress,
-            streak: days,
+            streak: validatedDays,
             lastCheckIn: Date.now(),
           };
-          console.log(`Final streak update to ${days} days`);
+          console.log(`Final streak update to ${validatedDays} days`);
           return finalProgress;
         });
         
@@ -2506,8 +2559,8 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
         // Even if we hit an error here, we've already updated the UI state
       }
       
-      console.log(`Successfully set streak to ${days} days in context`);
-      return days; // Return the new streak value for confirmation
+      console.log(`Successfully set streak to ${validatedDays} days in context`);
+      return validatedDays; // Return the new streak value for confirmation
     } catch (error) {
       console.error('Failed to set streak:', error);
       // If there was an error, make sure the UI still shows the correct value
@@ -2811,7 +2864,7 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
             newName = 'Emberclaw';
             break;
           case 'water':
-            newName = 'Bubblescale';
+            newName = 'Stripes';
             break;
           case 'plant':
             newName = 'Vinesprout';
@@ -2833,7 +2886,7 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
             newName = 'Emberclaw';
             break;
           case 'water':
-            newName = 'Bubblescale';
+            newName = 'Stripes';
             break;
           case 'plant':
             newName = 'Vinesprout';
@@ -3062,6 +3115,75 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       }
     }
     
+    // Check challenge badges based on completed challenges
+    const completedChallengesCount = userProgress.challengesCompleted.length;
+    const activeChallengesCount = userProgress.challengesActive.length;
+    
+    // First challenge badge - unlock when user has started or completed any challenge
+    if ((completedChallengesCount > 0 || activeChallengesCount > 0)) {
+      unlockBadge('badge-challenge-first', 50);
+    }
+    
+    // Challenge completion badges
+    if (completedChallengesCount >= 5) {
+      unlockBadge('badge-challenge-1', 200);
+    }
+    
+    if (completedChallengesCount >= 10) {
+      unlockBadge('badge-challenge-expert', 250);
+    }
+    
+    // Check if habit replacement challenge was completed
+    if (userProgress.challengesCompleted.includes('challenge-4')) {
+      unlockBadge('badge-habit-1', 100);
+    }
+    
+    // Check meditation badges based on actual meditation tracking
+    const meditationSessions = userProgress.meditationSessions || 0;
+    const meditationStreak = userProgress.meditationStreak || 0;
+    const totalMeditationMinutes = userProgress.totalMeditationMinutes || 0;
+    
+    // First meditation session
+    if (meditationSessions >= 1) {
+      unlockBadge('badge-meditation-first', 50);
+    }
+    
+    // 3 meditation sessions
+    if (meditationSessions >= 3) {
+      unlockBadge('badge-meditation-3', 75);
+    }
+    
+    // 10 meditation sessions (master)
+    if (meditationSessions >= 10) {
+      unlockBadge('badge-meditation-master', 150);
+    }
+    
+    // 3-day meditation streak
+    if (meditationStreak >= 3) {
+      unlockBadge('badge-meditation-streak-3', 100);
+    }
+    
+    // 7-day meditation streak
+    if (meditationStreak >= 7) {
+      unlockBadge('badge-meditation-daily', 200);
+    }
+    
+    // 20+ minute meditation session (check if last session was 20+ minutes)
+    // This would need to be tracked per session, for now we'll use a simple heuristic
+    if (totalMeditationMinutes >= 20 && meditationSessions >= 1) {
+      unlockBadge('badge-meditation-duration', 100);
+    }
+    
+    // 5 hours total meditation time (300 minutes)
+    if (totalMeditationMinutes >= 300) {
+      unlockBadge('badge-meditation-total', 250);
+    }
+    
+    // Morning meditation badge (if meditation challenge completed)
+    if (userProgress.challengesCompleted.includes('challenge-2')) {
+      unlockBadge('badge-meditation-morning', 100);
+    }
+    
     // Check for milestone badges based on total unlocked badges
     const unlockedBadgesCount = userProgress.achievements.filter(badge => badge.unlocked).length;
     
@@ -3205,42 +3327,75 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
 
   // Enhanced journal achievement checking function
   const checkJournalAchievements = async () => {
-    if (!achievements || !journalEntries || !Array.isArray(journalEntries)) {
+    if (!userProgress.achievements || !journalEntries || !Array.isArray(journalEntries)) {
       return;
     }
     
     const entryCount = journalEntries.length;
     let updated = false;
     
+    // Use a closure to access the unlockBadge function in the parent scope
+    const checkAndUnlockBadge = (badgeId: string, points: number, showNotification = false) => {
+      const badge = userProgress.achievements.find(a => a.id === badgeId);
+      if (!badge || badge.unlocked) return false;
+      
+      // Mark badge as unlocked
+      const updatedAchievements = userProgress.achievements.map(achievement => 
+        achievement.id === badgeId
+          ? { ...achievement, unlocked: true, unlockedDate: Date.now() }
+          : achievement
+      );
+      
+      // Update state
+      setUserProgress(prev => ({
+        ...prev,
+        achievements: updatedAchievements
+      }));
+      
+      // Add points
+      addPoints(points);
+      
+      // Show notification if requested
+      if (showNotification) {
+        showAchievement({
+          title: badge.name,
+          description: badge.description,
+          buttonText: 'Awesome!'
+        });
+      }
+      
+      return true;
+    };
+    
     // Check for first journal entry
     if (entryCount > 0) {
-      updated = unlockBadge('badge-journal-first', 10, false) || updated;
+      updated = checkAndUnlockBadge('badge-journal-first', 10, false) || updated;
     }
     
     // Check for 3 journal entries
     if (entryCount >= 3) {
-      updated = unlockBadge('badge-journal-3', 20, false) || updated;
+      updated = checkAndUnlockBadge('badge-journal-3', 20, false) || updated;
     }
     
     // Check for 10 journal entries
     if (entryCount >= 10) {
-      updated = unlockBadge('badge-journal-2', 50, false) || updated;
+      updated = checkAndUnlockBadge('badge-journal-2', 50, false) || updated;
     }
     
     // Check for 20 journal entries
     if (entryCount >= 20) {
-      updated = unlockBadge('badge-journal-master', 100, false) || updated;
+      updated = checkAndUnlockBadge('badge-journal-master', 100, false) || updated;
     }
     
     // Check for 5 consecutive days journaling (requires implementation of consecutive day tracking)
     // This is placeholder code for now
     const hasConsecutiveEntries = checkConsecutiveJournalDays(5);
     if (hasConsecutiveEntries) {
-      updated = unlockBadge('badge-journal-5days', 75, false) || updated;
+      updated = checkAndUnlockBadge('badge-journal-5days', 75, false) || updated;
     }
     
     if (updated) {
-      await saveUserProgress();
+      await storeData(STORAGE_KEYS.USER_DATA, userProgress);
     }
     
     return updated;
@@ -3287,6 +3442,207 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     return maxConsecutive >= requiredDays;
   };
 
+  // Replace the existing placeholder with a comprehensive implementation
+  const checkAllAchievementTypes = async (): Promise<boolean> => {
+    if (!dataLoaded) return false;
+    
+    console.log("Performing comprehensive check of all achievement types");
+    
+    // Use the existing force check function that already handles badge unlocking
+    const updated = await forceCheckStreakAchievements();
+    
+    // Return the result
+    return updated;
+  };
+
+  // Test function to unlock exactly 15 badges for stage 2 evolution
+  const testUnlock15Badges = async () => {
+    if (!dataLoaded) return false;
+    
+    console.log("Testing: Unlocking 15 badges for stage 2 evolution");
+    let updated = false;
+    
+    // Function to unlock a specific badge if not already unlocked
+    const unlockBadge = (badgeId: string, points: number, showNotification: boolean = false) => {
+      const badge = userProgress.achievements.find(a => a.id === badgeId);
+      if (!badge) {
+        console.warn(`Badge with ID ${badgeId} not found!`);
+        return false;
+      }
+      
+      if (!badge.unlocked) {
+        console.log(`Test unlocking badge: ${badgeId}`);
+        
+        // Update the badge in user progress
+        setUserProgress(prev => ({
+          ...prev,
+          achievements: prev.achievements.map(a => 
+            a.id === badgeId 
+              ? { ...a, unlocked: true, unlockedDate: Date.now() } 
+              : a
+          )
+        }));
+        
+        // Award points
+        addPoints(points);
+        
+        updated = true;
+        return true;
+      }
+      return false;
+    };
+    
+    // List of 15 badges to unlock for testing (mix of different types)
+    const testBadges = [
+      { id: 'badge-usage-first', points: 25 },
+      { id: 'badge-usage-checkin', points: 25 },
+      { id: 'badge-companion-selected', points: 25 },
+      { id: 'badge-companion-feed', points: 25 },
+      { id: 'badge-streak-1day', points: 25 },
+      { id: 'badge-streak-3days', points: 50 },
+      { id: 'badge-streak-5days', points: 75 },
+      { id: 'badge-streak-1', points: 100 }, // 7-day badge
+      { id: 'badge-journal-first', points: 50 },
+      { id: 'badge-journal-3', points: 75 },
+      { id: 'badge-milestone-first', points: 25 },
+      { id: 'badge-milestone-three', points: 40 },
+      { id: 'badge-milestone-five', points: 50 },
+      { id: 'badge-streak-2weeks', points: 150 },
+      { id: 'badge-journal-2', points: 150 } // 10 journal entries badge
+    ];
+    
+    // Unlock exactly 15 badges
+    let unlockedCount = 0;
+    for (const badgeInfo of testBadges) {
+      if (unlockedCount >= 15) break;
+      
+      const wasUnlocked = unlockBadge(badgeInfo.id, badgeInfo.points, false);
+      if (wasUnlocked) {
+        unlockedCount++;
+      }
+    }
+    
+    console.log(`Test completed: Unlocked ${unlockedCount} badges`);
+    
+    // Check companion evolution after unlocking badges
+    if (updated && companion) {
+      console.log("Checking companion evolution after test badge unlock");
+      await checkAndEvolveCompanion();
+    }
+    
+    return updated;
+  };
+
+  // Test function to unlock exactly 30 badges for stage 3 evolution
+  const testUnlock30Badges = async () => {
+    if (!dataLoaded) return false;
+    
+    console.log("Testing: Unlocking 30 badges for stage 3 evolution");
+    let updated = false;
+    
+    // Function to unlock a specific badge if not already unlocked
+    const unlockBadge = (badgeId: string, points: number, showNotification: boolean = false) => {
+      const badge = userProgress.achievements.find(a => a.id === badgeId);
+      if (!badge) {
+        console.warn(`Badge with ID ${badgeId} not found!`);
+        return false;
+      }
+      
+      if (!badge.unlocked) {
+        console.log(`Test unlocking badge: ${badgeId}`);
+        
+        // Update the badge in user progress
+        setUserProgress(prev => ({
+          ...prev,
+          achievements: prev.achievements.map(a => 
+            a.id === badgeId 
+              ? { ...a, unlocked: true, unlockedDate: Date.now() } 
+              : a
+          )
+        }));
+        
+        // Award points
+        addPoints(points);
+        
+        updated = true;
+        return true;
+      }
+      return false;
+    };
+    
+    // List of 30 badges to unlock for testing (using valid badge IDs)
+    const testBadges = [
+      // Usage badges
+      { id: 'badge-usage-first', points: 25 },
+      { id: 'badge-usage-checkin', points: 25 },
+      { id: 'badge-usage-week', points: 50 },
+      { id: 'badge-usage-month', points: 100 },
+      { id: 'badge-usage-checkin-3', points: 50 },
+      { id: 'badge-usage-streak', points: 75 },
+      { id: 'badge-usage-profile', points: 50 },
+      { id: 'badge-usage-features', points: 75 },
+      
+      // Companion badges
+      { id: 'badge-companion-selected', points: 25 },
+      { id: 'badge-companion-feed', points: 25 },
+      { id: 'badge-companion-evolution', points: 100 },
+      { id: 'badge-companion-feed-streak', points: 75 },
+      { id: 'badge-companion-interaction', points: 50 },
+      { id: 'badge-companion-bond-level', points: 100 },
+      { id: 'badge-companion-daily', points: 50 },
+      { id: 'badge-companion-feeder', points: 75 },
+      
+      // Streak badges
+      { id: 'badge-streak-1day', points: 25 },
+      { id: 'badge-streak-3days', points: 50 },
+      { id: 'badge-streak-5days', points: 75 },
+      { id: 'badge-streak-1', points: 100 }, // 7-day badge
+      { id: 'badge-streak-2weeks', points: 150 },
+      { id: 'badge-streak-2', points: 200 }, // 30-day badge
+      
+      // Journal badges
+      { id: 'badge-journal-first', points: 50 },
+      { id: 'badge-journal-1', points: 75 },
+      { id: 'badge-journal-2', points: 100 },
+      { id: 'badge-journal-3', points: 125 },
+      { id: 'badge-journal-master', points: 150 },
+      
+      // Challenge badges
+      { id: 'badge-challenge-first', points: 50 },
+      { id: 'badge-habit-1', points: 50 },
+      { id: 'badge-challenge-1', points: 75 },
+      
+      // Milestone badges
+      { id: 'badge-milestone-first', points: 25 },
+      { id: 'badge-milestone-three', points: 40 },
+      { id: 'badge-milestone-five', points: 50 },
+      { id: 'badge-milestone-ten', points: 75 },
+      { id: 'badge-milestone-twenty', points: 125 },
+      { id: 'badge-milestone-thirty', points: 150 }
+    ];
+    
+    // Unlock exactly 30 badges
+    let unlockedCount = 0;
+    for (const badgeInfo of testBadges) {
+      if (unlockedCount >= 30) break;
+      
+      const wasUnlocked = unlockBadge(badgeInfo.id, badgeInfo.points, false);
+      if (wasUnlocked) {
+        unlockedCount++;
+      }
+    }
+    
+    console.log(`Test completed: Unlocked ${unlockedCount} badges`);
+    
+    // Check companion evolution after unlocking badges
+    if (updated && companion) {
+      console.log("Checking companion evolution after test badge unlock");
+      await checkAndEvolveCompanion();
+    }
+    
+    return updated;
+  };
+
   return (
     <GamificationContext.Provider
       value={{
@@ -3323,6 +3679,8 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
         logMeditation,
         forceCheckStreakAchievements,
         fix30DayBadge,
+        testUnlock15Badges,
+        testUnlock30Badges,
         checkAllAchievementTypes: () => Promise.resolve(true),
       }}
     >

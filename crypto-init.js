@@ -10,23 +10,28 @@ if (typeof global.CryptoJS === 'undefined') {
   global.CryptoJS = CryptoJS;
 }
 
-// Always patch the WordArray.random method to be deterministic
-// This avoids reliance on native crypto which is problematic in Hermes
-if (global.CryptoJS && global.CryptoJS.lib && global.CryptoJS.lib.WordArray) {
-  global.CryptoJS.lib.WordArray.random = function(nBytes) {
-    const words = [];
-    
-    // Simple deterministic algorithm that works consistently
-    for (let i = 0; i < nBytes; i += 4) {
-      // Simple position-based generator
-      const value = ((i * 23) + 17) % 0xFFFFFFFF;
-      words.push(value);
-    }
-    
-    return global.CryptoJS.lib.WordArray.create(words, nBytes);
-  };
+// Only patch the random function if needed, without global modifications
+if (CryptoJS && CryptoJS.lib && CryptoJS.lib.WordArray) {
+  // Store original function
+  const originalRandom = CryptoJS.lib.WordArray.random;
   
-  console.log('[CryptoInit] CryptoJS patched successfully');
+  // Only patch if the original doesn't work properly
+  try {
+    originalRandom(16); // Test if it works
+  } catch (error) {
+    // Only patch if the original fails
+    CryptoJS.lib.WordArray.random = function(nBytes) {
+      const words = [];
+      for (let i = 0; i < nBytes; i += 4) {
+        const randomValue = Math.floor(Math.random() * 0x100000000);
+        words.push(randomValue);
+      }
+      
+      return CryptoJS.lib.WordArray.create(words, nBytes);
+    };
+    
+    console.log('[CryptoInit] CryptoJS random function patched');
+  }
 }
 
 // Also ensure crypto global exists
@@ -49,4 +54,4 @@ if (typeof global.msCrypto === 'undefined') {
   global.msCrypto = global.crypto;
 }
 
-export default {}; 
+export default {};

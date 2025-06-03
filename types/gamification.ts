@@ -10,6 +10,10 @@ export interface UserProgress {
   companionId?: string; // ID of the selected companion
   achievements: Achievement[]; // Array of achievements/badges
   dailyCheckedIn?: boolean; // Whether the user has checked in today
+  meditationSessions?: number; // Total number of meditation sessions completed
+  meditationStreak?: number; // Current consecutive days of meditation
+  lastMeditationDate?: number; // Timestamp of last meditation session
+  totalMeditationMinutes?: number; // Total minutes of meditation
 }
 
 // Journal entry
@@ -19,6 +23,7 @@ export interface JournalEntry {
   timestamp: number;
   mood?: string;
   tags?: string[];
+  audioUri?: string; // URI to the audio recording file
 }
 
 // Challenge

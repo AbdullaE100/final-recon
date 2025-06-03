@@ -1,27 +1,25 @@
 /**
- * This file directly patches CryptoJS to work in React Native
+ * This file provides a safe CryptoJS import for React Native
  */
 import CryptoJS from 'crypto-js';
 
-// Direct patch for WordArray.random
+// Only patch if absolutely necessary
 if (CryptoJS.lib && CryptoJS.lib.WordArray) {
-  // Store original for debugging
-  const originalRandom = CryptoJS.lib.WordArray.random;
-  
-  // Create a fixed, deterministic implementation
-  CryptoJS.lib.WordArray.random = function(nBytes: number) {
-    // Create a fixed array for deterministic output
-    const words: number[] = [];
-    
-    // Use a simple counter-based value generator
-    // This will always produce the same sequence for a given input size
-    // which is what we want for reproducible encryption
-    for (let i = 0; i < Math.ceil(nBytes / 4); i++) {
-      words.push(((i + 1) * 0x01020304) % 0xFFFFFFFF);
-    }
-    
-    return CryptoJS.lib.WordArray.create(words, nBytes);
-  };
+  try {
+    // Test if the original random function works
+    CryptoJS.lib.WordArray.random(16);
+  } catch (error) {
+    // Only patch if the original fails
+    CryptoJS.lib.WordArray.random = function(nBytes: number) {
+      const words = [];
+      for (let i = 0; i < nBytes; i += 4) {
+        const randomValue = Math.floor(Math.random() * 0x100000000);
+        words.push(randomValue);
+      }
+      
+      return CryptoJS.lib.WordArray.create(words, nBytes);
+    };
+  }
 }
 
-export default CryptoJS; 
+export default CryptoJS;

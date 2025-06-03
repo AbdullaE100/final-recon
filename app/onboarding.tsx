@@ -4,9 +4,11 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '@/context/ThemeContext';
 import WelcomeScreen from '@/components/onboarding/WelcomeScreen';
 import QuizScreen from '@/components/onboarding/QuizScreen';
+import TimeImpactScreen from '@/components/onboarding/TimeImpactScreen';
 import CommitmentScreen from '@/components/onboarding/CommitmentScreen';
 import CompanionSelectionScreen, { CompanionChoice } from '@/components/onboarding/CompanionSelectionScreen';
 import UsernameSetupScreen from '@/components/onboarding/UsernameSetupScreen';
+import StreakReveal from '@/components/companions/StreakReveal';
 import { storeData, STORAGE_KEYS, getData } from '@/utils/storage';
 import { supabase } from '@/utils/supabaseClient';
 import { useAuth } from '@/context/AuthContext';
@@ -28,17 +30,20 @@ export default function OnboardingScreen() {
   
   // Onboarding state
   const [step, setStep] = useState(0);
-  const [quizAnswers, setQuizAnswers] = useState({});
+  const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({});
   const [selectedCompanion, setSelectedCompanion] = useState<CompanionChoice | null>(null);
   const [username, setUsername] = useState<string>('');
+
 
   // Steps in the onboarding flow
   const steps = [
     'username',
     'welcome',
     'quiz',
+    'timeImpact',
     'commitment',
     'companionSelection',
+
   ];
 
   // Handle next step in the flow
@@ -57,7 +62,7 @@ export default function OnboardingScreen() {
   };
 
   // Handle saving quiz answers
-  const handleQuizComplete = (answers: Record<string, any>) => {
+  const handleQuizComplete = (answers: Record<string, string>) => {
     setQuizAnswers(answers);
     handleNext();
   };
@@ -71,6 +76,8 @@ export default function OnboardingScreen() {
   const handleCompanionSelectionComplete = async () => {
     await completeOnboardingAndNavigate();
   };
+
+
 
   // Complete onboarding and navigate to subscription screen
   const completeOnboardingAndNavigate = async () => {
@@ -130,21 +137,49 @@ export default function OnboardingScreen() {
       // Continue even if Supabase sync fails - local data is still saved
     }
     
-    try {
-      // Navigate to the trial subscription screen with parameters
-      router.replace({
-        pathname: '/free-trial',
-        params: { 
-          from: 'onboarding',
-          price: '3.99',
-          selectedCompanion: selectedCompanion || 'default'
-        }
-      } as any);
-    } catch (error) {
-      console.error('Error navigating to trial subscription:', error);
-      // Fallback to main app if navigation fails
-      router.replace('/(tabs)' as any);
+    // Navigate directly to main app, skipping the free trial screen
+    router.replace('/(tabs)' as any);
+  };
+
+  // Get risk level based on weekly hours
+  const getRiskLevel = () => {
+    const weeklyHours = getWeeklyHours(); // Call getWeeklyHours internally
+    
+    if (weeklyHours >= 1.5) {
+      return 'High Risk';
+    } else if (weeklyHours >= 1) {
+      return 'Medium Risk';
+    } else {
+      return 'Low Risk';
     }
+  };
+  
+  // Calculate weekly hours based on quiz answers
+  const getWeeklyHours = () => {
+    // Use the frequency and duration questions to calculate weekly hours
+    if (!quizAnswers.frequency || !quizAnswers.duration) return 7; // Default fallback
+    
+    // Map frequency to times per week
+    const frequencyMap = {
+      daily_multiple: 14, // ~2 times per day
+      daily: 7,           // 1 time per day
+      weekly: 3,          // ~3 times per week
+      occasionally: 1     // ~1 time per week
+    };
+    
+    // Map duration to hours per session
+    const durationMap = {
+      short: 0.5,       // 30 min average
+      medium: 0.75,     // 45 min average
+      long: 1.5,        // 1.5 hours average
+      very_long: 2.5    // 2.5 hours average
+    };
+    
+    // Calculate weekly hours: frequency * duration
+    const timesPerWeek = frequencyMap[quizAnswers.frequency as keyof typeof frequencyMap] || 3;
+    const hoursPerSession = durationMap[quizAnswers.duration as keyof typeof durationMap] || 0.75;
+    
+    return Math.round(timesPerWeek * hoursPerSession * 10) / 10; // Round to 1 decimal place
   };
 
   // Render the current step of the onboarding flow
@@ -156,10 +191,17 @@ export default function OnboardingScreen() {
         return <WelcomeScreen onContinue={handleNext} />;
       case 'quiz':
         return <QuizScreen onComplete={handleQuizComplete} />;
+      case 'timeImpact':
+        return <TimeImpactScreen 
+          riskLevel={getRiskLevel() as 'Low Risk' | 'Medium Risk' | 'High Risk' | 'Very High Risk'}
+          weeklyHours={getWeeklyHours()}
+          onContinue={handleNext}
+        />;
       case 'commitment':
         return <CommitmentScreen onSign={handleNext} />;
       case 'companionSelection':
         return <CompanionSelectionScreen onSelect={handleCompanionSelect} onComplete={handleCompanionSelectionComplete} />;
+
       default:
         return null;
     }
@@ -183,4 +225,4 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
   }
-}); 
+});

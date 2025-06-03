@@ -18,7 +18,7 @@ export const syncUserData = async (): Promise<boolean> => {
     
     // If no device ID, we can't sync
     if (!deviceId) {
-      console.log('No device ID found, skipping sync');
+      
       return false;
     }
     
@@ -27,7 +27,7 @@ export const syncUserData = async (): Promise<boolean> => {
     
     // If no username, we can't sync
     if (!userPreferences.username) {
-      console.log('No username found in preferences, skipping sync');
+      
       return false;
     }
     
@@ -58,7 +58,7 @@ export const syncUserData = async (): Promise<boolean> => {
       return false;
     }
     
-    console.log('User data successfully synced with Supabase');
+    
     return true;
   } catch (error) {
     console.error('Error in syncUserData:', error);
@@ -97,7 +97,7 @@ export const retrieveUserData = async (username: string): Promise<boolean> => {
     // Store the device ID for future syncs
     await storeData(STORAGE_KEYS.DEVICE_ID, userData.device_id);
     
-    console.log('User data successfully retrieved from Supabase');
+    
     return true;
   } catch (error) {
     console.error('Error in retrieveUserData:', error);

@@ -78,11 +78,11 @@ export default function MyPledgeScreen() {
     const loadSignature = async () => {
       try {
         setLoadingSignature(true);
-        console.log('Loading signature data from storage...');
+        
         const preferences = await getData<UserPreferences>(STORAGE_KEYS.USER_PREFERENCES, {});
         
         if (preferences && preferences.signature) {
-          console.log('Found signature in preferences, setting signature state');
+          
           setSignature(preferences.signature);
           
           // Calculate pledge date based on stored date or fallback to current date
@@ -96,7 +96,7 @@ export default function MyPledgeScreen() {
             day: 'numeric' 
           }));
         } else {
-          console.log('No signature found in storage');
+          
           // Don't set a placeholder signature, keep it null
           setSignature(null);
           setPledgeDate(new Date().toLocaleDateString('en-US', { 

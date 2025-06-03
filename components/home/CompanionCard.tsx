@@ -28,16 +28,7 @@ export default function CompanionCard() {
         </View>
       </TouchableOpacity>
       
-      {evolutionReady && (
-        <TouchableOpacity 
-          style={styles.evolutionNotice}
-          onPress={() => router.push('/force-evolution' as any)}
-        >
-          <Text style={styles.evolutionNoticeText}>
-            Evolution Ready! Tap to fix evolution issue
-          </Text>
-        </TouchableOpacity>
-      )}
+
     </View>
   );
 }
@@ -82,4 +73,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
-}); 
+});

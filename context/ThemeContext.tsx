@@ -112,7 +112,7 @@ export const ThemeProvider: React.FC<{children: React.ReactNode}> = ({ children 
   // Toggle function kept for interface compatibility but does nothing
   const toggleTheme = () => {
     // No-op function - dark mode is always enabled
-    console.log('Dark mode is always enabled');
+    
   };
   
   return (

@@ -43,7 +43,6 @@
     "expo-symbols": "~0.4.4",
     "expo-system-ui": "~5.0.7",
     "expo-web-browser": "~14.1.6",
-    "lottie-ios": "^4.5.0",
     "lottie-react-native": "^7.2.2",
     "lucide-react-native": "^0.475.0",
     "moti": "^0.30.0",
@@ -56,6 +55,7 @@
     "react-native-fs": "^2.20.0",
     "react-native-gesture-handler": "~2.24.0",
     "react-native-get-random-values": "^1.11.0",
+    "react-native-iap": "^12.10.7",
     "react-native-reanimated": "~3.17.4",
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.10.0",
@@ -80,6 +80,7 @@
     "babel-preset-expo": "~13.0.0",
     "metro-minify-terser": "^0.82.3",
     "metro-react-native-babel-transformer": "^0.77.0",
+    "react-native-codegen": "^0.70.7",
     "supabase": "^1.142.2",
     "typescript": "~5.8.3"
   }

@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-// Import our patched CryptoJS implementation
-import CryptoJS from './cryptoJsPolyfill';
+// Import our safe CryptoJS implementation for Hermes compatibility
+import CryptoJS from './safecryptojspolyfill';
 
 // Use a fixed key for all platforms
 const ENCRYPTION_KEY = 'clearmind-secure-key-2025';
@@ -33,7 +33,7 @@ export const initializeStorage = async (): Promise<void> => {
     
     // If version doesn't match or doesn't exist, or force clear is enabled, clear storage
     if (version !== STORAGE_VERSION || shouldForceClear) {
-      console.log(`[Storage] Clearing data - version changed from ${version || 'none'} to ${STORAGE_VERSION} or force clear enabled`);
+      
       
       // Get all keys
       const keys = await AsyncStorage.getAllKeys();
@@ -44,14 +44,14 @@ export const initializeStorage = async (): Promise<void> => {
       // Remove all app data
       if (appKeys.length > 0) {
         await AsyncStorage.multiRemove(appKeys);
-        console.log(`[Storage] Cleared ${appKeys.length} items from storage`);
+        
       }
       
       // Set new version
       await AsyncStorage.setItem(VERSION_KEY, STORAGE_VERSION);
-      console.log(`[Storage] Set storage version to ${STORAGE_VERSION}`);
+      
     } else {
-      console.log(`[Storage] Using existing storage version ${STORAGE_VERSION}`);
+      
     }
 
     // Reset encryption flag to ensure plain storage
@@ -63,7 +63,7 @@ export const initializeStorage = async (): Promise<void> => {
     try {
       // Set new version but don't clear data - recovery mode
       await AsyncStorage.setItem(VERSION_KEY, STORAGE_VERSION);
-      console.log('[Storage] Recovery mode - preserving existing data');
+      
       
       // Ensure we use plain storage
       USING_PLAIN_STORAGE = true;
@@ -148,7 +148,7 @@ const encrypt = (data: any): string => {
     
     // Fall back to plain JSON storage if encryption fails
     USING_PLAIN_STORAGE = true;
-    console.log('[Storage] Falling back to plain storage due to encryption failure');
+    
     return JSON.stringify(data);
   }
 };
@@ -196,7 +196,7 @@ const decrypt = (encryptedData: string, key: string): any => {
     
     // Try to detect if data is already in JSON format (not encrypted)
     if (encryptedData.startsWith('{') || encryptedData.startsWith('[')) {
-      console.log(`[Storage] Data for ${key} appears to be plain JSON, parsing directly`);
+      
       return JSON.parse(encryptedData);
     }
     
@@ -218,7 +218,7 @@ const decrypt = (encryptedData: string, key: string): any => {
     
     // Signal that we should use plain storage going forward
     USING_PLAIN_STORAGE = true;
-    console.log('[Storage] Switching to plain storage mode due to decryption failure');
+    
     
     throw error;
   }
@@ -244,7 +244,7 @@ export const storeData = async (key: string, value: any): Promise<void> => {
     
     // Try one more time with plain JSON as a last resort
     try {
-      console.log(`[Storage] Attempting fallback storage for ${key}`);
+      
       const jsonValue = JSON.stringify(value);
       await AsyncStorage.setItem(key, jsonValue);
     } catch (fallbackError) {
@@ -272,20 +272,20 @@ export const getData = async <T>(key: string, defaultValue: T): Promise<T> => {
         // Direct JSON parse now that we've disabled encryption
         return JSON.parse(storedValue);
       } catch (parseError) {
-        console.log(`[Storage] Error parsing JSON for ${key}:`, parseError);
+        
         
         // Try to load from backup
-        console.log(`[Storage] Attempting to load backup for ${key}`);
+        
         const backupValue = await loadBackup(key);
         if (backupValue !== null) {
           // If backup retrieved successfully, re-save it as main value
-          console.log(`[Storage] Recovered data from backup for ${key}`);
+          
           await storeData(key, backupValue);
           return backupValue;
         }
         
         // If all recovery methods fail, return default
-        console.log(`[Storage] All recovery methods failed for ${key}, using default value`);
+        
         return defaultValue;
       }
     }

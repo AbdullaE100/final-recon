@@ -3,7 +3,7 @@ import { StyleSheet, View, Text, TouchableOpacity, Pressable } from 'react-nativ
 import { useTheme } from '@/context/ThemeContext';
 import { formatDate, formatRelativeTime } from '@/utils/dateUtils';
 import { JournalEntry as JournalEntryType } from '@/types/gamification';
-import { ChevronDown, ChevronUp, Trash2, Tag, ThumbsUp, Clock, Smile, Meh, Frown } from 'lucide-react-native';
+import { ChevronDown, ChevronUp, Trash2, Tag, ThumbsUp, Clock, Smile, Meh, Frown, Mic } from 'lucide-react-native';
 import Animated, { FadeIn, FadeOut, SlideInRight, SlideOutLeft } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -58,6 +58,24 @@ export default function JournalEntry({ entry, onDelete }: JournalEntryProps) {
       default: return '';
     }
   };
+  
+  // Get background color based on mood
+  const getMoodGradient = () => {
+    switch(entry.mood) {
+      case 'great': 
+        return ['rgba(76, 175, 80, 0.12)', 'rgba(76, 175, 80, 0.03)'] as const;
+      case 'good': 
+        return ['rgba(139, 195, 74, 0.12)', 'rgba(139, 195, 74, 0.03)'] as const;
+      case 'neutral': 
+        return ['rgba(255, 193, 7, 0.12)', 'rgba(255, 193, 7, 0.03)'] as const;
+      case 'bad': 
+        return ['rgba(255, 152, 0, 0.12)', 'rgba(255, 152, 0, 0.03)'] as const;
+      case 'awful': 
+        return ['rgba(244, 67, 54, 0.12)', 'rgba(244, 67, 54, 0.03)'] as const;
+      default:
+        return ['rgba(33, 150, 243, 0.08)', 'rgba(33, 150, 243, 0.02)'] as const;
+    }
+  };
 
   return (
     <Animated.View 
@@ -66,15 +84,7 @@ export default function JournalEntry({ entry, onDelete }: JournalEntryProps) {
       exiting={SlideOutLeft.duration(200)}
     >
       <LinearGradient
-        colors={[
-          entry.mood === 'great' ? 'rgba(76, 175, 80, 0.08)' : 
-          entry.mood === 'good' ? 'rgba(139, 195, 74, 0.08)' :
-          entry.mood === 'neutral' ? 'rgba(255, 193, 7, 0.08)' :
-          entry.mood === 'bad' ? 'rgba(255, 152, 0, 0.08)' :
-          entry.mood === 'awful' ? 'rgba(244, 67, 54, 0.08)' :
-          'rgba(0, 0, 0, 0.04)',
-          'rgba(0, 0, 0, 0.01)'
-        ]}
+        colors={getMoodGradient()}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={[styles.gradientContainer, { backgroundColor: colors.card }]}
@@ -119,7 +129,7 @@ export default function JournalEntry({ entry, onDelete }: JournalEntryProps) {
                 {entry.tags.map((tag, index) => (
                   <View 
                     key={tag} 
-                    style={[styles.tag, { backgroundColor: `${colors.primary}10` }]}
+                    style={[styles.tag, { backgroundColor: `${colors.primary}15` }]}
                   >
                     <Text style={[styles.tagText, { color: colors.primary }]}>
                       {tag}
@@ -171,13 +181,15 @@ const styles = StyleSheet.create({
       width: 0,
       height: 2,
     },
-    shadowOpacity: 0.08,
-    shadowRadius: 3.84,
-    elevation: 2,
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   gradientContainer: {
     borderRadius: 16,
     overflow: 'hidden',
+    borderWidth: 0.5,
+    borderColor: 'rgba(0,0,0,0.05)',
   },
   contentContainer: {
     padding: 16,
@@ -199,6 +211,12 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginLeft: 6,
   },
+  audioIndicator: {
+    backgroundColor: 'rgba(0, 120, 255, 0.1)',
+    borderRadius: 12,
+    padding: 4,
+    marginLeft: 8,
+  },
   expandButton: {
     padding: 4,
   },
@@ -206,6 +224,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 24,
     fontWeight: '400',
+  },
+  audioPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 8,
+    padding: 8,
+    marginTop: 10,
+  },
+  audioPreviewText: {
+    fontSize: 13,
+    marginLeft: 6,
   },
   tagsContainer: {
     flexDirection: 'row',

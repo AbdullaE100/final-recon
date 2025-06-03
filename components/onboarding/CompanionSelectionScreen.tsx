@@ -96,7 +96,7 @@ const CompanionSelectionScreen: React.FC<CompanionSelectionScreenProps> = ({ onS
         evolutions: [
           { 
             level: 2, 
-            name: 'Bubblescale',
+            name: 'Stripes',
             xpRequired: EVOLUTION_THRESHOLDS.STAGE_2,
             bondRequired: BOND_THRESHOLDS.LEVEL_2
           },
@@ -306,4 +306,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default CompanionSelectionScreen; 
+export default CompanionSelectionScreen;

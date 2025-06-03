@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import Animated, { 
   useSharedValue, 
@@ -9,6 +9,7 @@ import Animated, {
   Easing 
 } from 'react-native-reanimated';
 import LottieView from 'lottie-react-native';
+import { useLottieManager } from '../../utils/LottieManager';
 
 interface PlantCompanionProps {
   stage: 1 | 2 | 3;
@@ -18,46 +19,98 @@ interface PlantCompanionProps {
 
 export const PlantCompanion: React.FC<PlantCompanionProps> = ({ 
   stage = 1,
-  size = 200,
+  size = 100,
   animate = true 
 }) => {
-  const translateY = useSharedValue(0);
+  const [animationSource, setAnimationSource] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const lottieRef = useRef<LottieView>(null);
+  const { loadAnimation, unloadAnimation, registerRef, isMemoryPressureHigh } = useLottieManager();
   
+  // Basic bouncing animation for all stages
+  const bounceValue = useSharedValue(1);
+
   useEffect(() => {
-    if (animate) {
-      // Basic bouncing animation for all stages
-      translateY.value = withRepeat(
-        withSequence(
-          withTiming(-size * 0.02, { duration: 800, easing: Easing.out(Easing.cubic) }),
-          withTiming(size * 0.02, { duration: 800, easing: Easing.in(Easing.cubic) })
-        ),
-        -1,
-        true
-      );
-    }
-  }, [animate, size, translateY]);
-  
+    // Create a subtle bouncing animation
+    bounceValue.value = withRepeat(
+      withSequence(
+        withTiming(1.05, {
+          duration: 2000,
+          easing: Easing.inOut(Easing.ease),
+        }),
+        withTiming(1, {
+          duration: 2000,
+          easing: Easing.inOut(Easing.ease),
+        })
+      ),
+      -1, // Infinite repeat
+      false // Don't reverse
+    );
+  }, [bounceValue]);
+
+  // Animated style for bouncing
   const animatedStyle = useAnimatedStyle(() => {
     return {
-      transform: [
-        { translateY: translateY.value }
-      ]
+      transform: [{ scale: bounceValue.value }],
     };
   });
 
-  // Get animation source based on stage
-  const getAnimationSource = () => {
-    switch(stage) {
-      case 1:
-        return require('../../assets/lottie/baby_panda_stage1.json');
-      case 2:
-        return require('../../assets/lottie/baby_panda_stage2.json');
-      case 3:
-        return require('../../assets/lottie/baby_panda_stage3.json');
-      default:
-        return require('../../assets/lottie/baby_panda_stage1.json');
-    }
-  };
+  // Load animation with memory management
+  useEffect(() => {
+    const loadAnimationAsync = async () => {
+      try {
+        setIsLoading(true);
+        const animationKey = `panda_stage_${stage}`;
+        
+        // Check if memory pressure is high
+        if (isMemoryPressureHigh()) {
+          console.warn('[PlantCompanion] High memory pressure, skipping animation load');
+          setAnimationSource(null);
+          setIsLoading(false);
+          return;
+        }
+
+        // Get animation source based on stage
+        let source;
+        switch (stage) {
+          case 1:
+            source = require('../../assets/lottie/baby_panda_stage1.json');
+            break;
+          case 2:
+            source = require('../../assets/lottie/baby_panda_stage2.json');
+            break;
+          case 3:
+            source = require('../../assets/lottie/baby_panda_stage3.json');
+            break;
+          default:
+            source = require('../../assets/lottie/baby_panda_stage1.json');
+        }
+
+        // Load through LottieManager
+        const managedSource = loadAnimation(animationKey, source);
+        setAnimationSource(managedSource);
+        
+        // Register ref for cleanup
+        if (lottieRef.current) {
+          registerRef(animationKey, lottieRef);
+        }
+        
+      } catch (error) {
+        console.error('[PlantCompanion] Error loading animation:', error);
+        setAnimationSource(null);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadAnimationAsync();
+
+    // Cleanup on unmount
+    return () => {
+      const animationKey = `panda_stage_${stage}`;
+      unloadAnimation(animationKey);
+    };
+  }, [stage, loadAnimation, unloadAnimation, registerRef, isMemoryPressureHigh]);
 
   // Determine animation speed based on stage
   const getAnimationSpeed = () => {
@@ -106,24 +159,36 @@ export const PlantCompanion: React.FC<PlantCompanionProps> = ({
   return (
     <View style={[styles.container, { width: size, height: size }]}>
       <Animated.View style={[styles.animationContainer, animatedStyle]}>
-        <LottieView
-          source={getAnimationSource()}
-          autoPlay={animate}
-          loop={true}
-          speed={getAnimationSpeed()}
-          style={[
-            styles.lottieView,
-            { transform: [{ scale: getAnimationScale() }] }
-          ]}
-          // Use specific frames based on the stage
-          {...(stage > 1 ? { 
-            progress: undefined,
-            // The frame properties below are used when not auto-playing
-            // If autoPlay is true, these are ignored
-            fromFrame: fromFrame,
-            toFrame: toFrame
-          } : {})}
-        />
+        {animationSource && !isLoading ? (
+          <LottieView
+            ref={lottieRef}
+            source={animationSource}
+            autoPlay={animate}
+            loop={true}
+            speed={getAnimationSpeed()}
+            style={[
+              styles.lottieView,
+              { transform: [{ scale: getAnimationScale() }] }
+            ]}
+            // Use specific frames based on the stage
+            {...(stage > 1 ? { 
+              progress: undefined,
+              // The frame properties below are used when not auto-playing
+              // If autoPlay is true, these are ignored
+              fromFrame: fromFrame,
+              toFrame: toFrame
+            } : {})}
+            onAnimationFailure={(error) => {
+              console.error('[PlantCompanion] Animation failed:', error);
+              setAnimationSource(null);
+            }}
+          />
+        ) : (
+          // Fallback view when animation is loading or failed
+          <View style={[styles.lottieView, styles.fallbackView]}>
+            {/* You can add a static image or placeholder here */}
+          </View>
+        )}
       </Animated.View>
     </View>
   );
@@ -143,7 +208,13 @@ const styles = StyleSheet.create({
   lottieView: {
     width: '100%',
     height: '100%',
-  }
+  },
+  fallbackView: {
+    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
 });
 
-export default PlantCompanion; 
+export default PlantCompanion;

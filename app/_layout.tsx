@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
@@ -10,14 +10,14 @@ import { SubscriptionProvider } from '@/context/SubscriptionContext';
 import { useFonts } from 'expo-font';
 import { Nunito_400Regular, Nunito_600SemiBold, Nunito_700Bold } from '@expo-google-fonts/nunito';
 import { SplashScreen } from 'expo-router';
-import setupCryptoPolyfill from '@/utils/cryptoPolyfill';
 import { initializeStorage, getData, storeData, STORAGE_KEYS } from '@/utils/storage';
 import { initializeStreakData } from '@/utils/streakService';
 import { Alert } from 'react-native';
 import { supabase } from '@/utils/supabaseClient';
+import { initializeHermesGuard } from '@/utils/hermesguard';
 
-// Initialize crypto polyfill
-setupCryptoPolyfill();
+// Initialize Hermes compatibility guard immediately
+initializeHermesGuard();
 
 // Prevent splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync();
@@ -56,12 +56,28 @@ export default function RootLayout() {
             // Initialize streak data in Supabase
             try {
               await initializeStreakData();
-            } catch (streakError) {
-              console.warn('Failed to initialize streak data, continuing anyway:', streakError);
+            } catch (streakError: any) {
+              const isNetworkError = streakError?.message?.includes('Network request failed') || 
+                                   streakError?.message?.includes('fetch') ||
+                                   !navigator.onLine;
+              
+              if (isNetworkError) {
+                console.log('Network unavailable during streak initialization, will retry later');
+              } else {
+                console.warn('Failed to initialize streak data, continuing anyway:', streakError);
+              }
             }
           }
-        } catch (supabaseError) {
-          console.warn('Failed to connect to Supabase, will use local storage:', supabaseError);
+        } catch (supabaseError: any) {
+          const isNetworkError = supabaseError?.message?.includes('Network request failed') || 
+                               supabaseError?.message?.includes('fetch') ||
+                               !navigator.onLine;
+          
+          if (isNetworkError) {
+            console.log('Network unavailable, app will work offline with local storage');
+          } else {
+            console.warn('Failed to connect to Supabase, will use local storage:', supabaseError);
+          }
         }
         
         // Step 3: Verify critical data can be loaded
@@ -88,8 +104,14 @@ export default function RootLayout() {
             if (!error && count && count > 0) {
               setShowRecoveryOption(true);
             }
-          } catch (error) {
-            console.warn('Error checking for user profiles:', error);
+          } catch (recoveryError: any) {
+            const isNetworkError = recoveryError?.message?.includes('Network request failed') || 
+                                 recoveryError?.message?.includes('fetch') ||
+                                 !navigator.onLine;
+            
+            if (!isNetworkError) {
+              console.warn('Could not check for recovery data:', recoveryError);
+            }
           }
         }
         
@@ -188,8 +210,7 @@ export default function RootLayout() {
             <Stack.Screen name="edit-pledge" options={{ headerShown: false }} />
                 <Stack.Screen name="subscription" options={{ headerShown: false }} />
                 <Stack.Screen name="free-trial" options={{ headerShown: false }} />
-                <Stack.Screen name="stripe-test" options={{ headerShown: false }} />
-            <Stack.Screen name="lottie-test" options={{ headerShown: false }} />
+
             <Stack.Screen name="+not-found" options={{ headerShown: false }} />
           </Stack>
         </CompanionChatProvider>

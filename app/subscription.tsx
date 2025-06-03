@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Linking, Modal } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Modal } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter, Stack } from 'expo-router';
@@ -7,23 +7,20 @@ import { useTheme } from '@/context/ThemeContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { ArrowLeft, CheckCircle2, LockOpen, Sparkles, XCircle, AlertTriangle } from 'lucide-react-native';
-import { supabase } from '@/utils/supabaseClient';
 import { useAuth } from '@/context/AuthContext';
-import { WebView } from 'react-native-webview';
 import { GoogleSignIn } from '@/components/onboarding/GoogleSignIn';
-import { WebViewNavigation } from 'react-native-webview/lib/WebViewTypes';
 import { Session } from '@supabase/supabase-js';
-import { createDirectCheckoutUrl } from '@/utils/directStripeCheckout';
+import { purchasePremiumSubscription, checkSubscriptionStatus, restorePurchases, getProducts } from '@/utils/inAppPurchase';
 
-// Define subscription type
+// Define subscription type for Apple IAP
 interface Subscription {
   id: string;
   user_id: string;
-  stripe_customer_id: string;
-  stripe_subscription_id: string;
+  product_id: string;
+  transaction_id: string;
   status: string;
-  current_period_end: string;
-  canceled_at: string | null;
+  expires_date: string;
+  purchase_date: string;
 }
 
 export default function SubscriptionScreen() {
@@ -33,11 +30,9 @@ export default function SubscriptionScreen() {
   
   const [loading, setLoading] = useState(false);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
-  const [showWebView, setShowWebView] = useState(false);
-  const [webViewUrl, setWebViewUrl] = useState('');
   const [showLoginModal, setShowLoginModal] = useState(false);
-  const [loadingError, setLoadingError] = useState<string | null>(null);
-  const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [products, setProducts] = useState<any[]>([]);
+  const [isPremium, setIsPremium] = useState(false);
   
   useEffect(() => {
     // Debug logging to check authentication status
@@ -46,30 +41,14 @@ export default function SubscriptionScreen() {
       userId: user?.id,
       email: user?.email
     });
-    
-    // Set a timeout to prevent infinite loading
-    loadingTimeoutRef.current = setTimeout(() => {
-      if (!showWebView) {
-        setLoadingError('Payment setup is taking longer than expected.');
-        console.log('Payment initialization timeout triggered');
-      }
-    }, 5000);
 
     if (user) {
-      fetchSubscription();
-      // Automatically start the payment process
-      initiatePayment();
+      checkPremiumStatus();
+      loadProducts();
     } else {
       // Show login modal if user is not logged in
       setShowLoginModal(true);
     }
-
-    // Clean up timeout when component unmounts
-    return () => {
-      if (loadingTimeoutRef.current) {
-        clearTimeout(loadingTimeoutRef.current);
-      }
-    };
   }, [user]);
   
   // Direct login method
@@ -96,6 +75,38 @@ export default function SubscriptionScreen() {
     Alert.alert('Google Sign-In Error', error.message || 'Failed to sign in with Google');
   };
   
+  const checkPremiumStatus = async () => {
+    if (!user) return;
+    
+    try {
+      const status = await checkSubscriptionStatus();
+      setIsPremium(status.isPremium);
+      
+      if (status.isPremium && status.subscription) {
+        setSubscription({
+          id: status.subscription.transactionId,
+          user_id: user.id,
+          product_id: status.subscription.productId,
+          transaction_id: status.subscription.transactionId,
+          status: 'active',
+          expires_date: status.subscription.expiresDate,
+          purchase_date: status.subscription.purchaseDate
+        });
+      }
+    } catch (error) {
+      console.error('Error checking premium status:', error);
+    }
+  };
+
+  const loadProducts = async () => {
+    try {
+      const productList = await getProducts();
+      setProducts(productList);
+    } catch (error) {
+      console.error('Error loading products:', error);
+    }
+  };
+
   const fetchSubscription = async () => {
     if (!user) return;
     
@@ -124,168 +135,62 @@ export default function SubscriptionScreen() {
     }
   };
   
-  const handleSubscribe = async () => {
-    try {
-      setLoading(true);
-      
-      // Check if the user is logged in - if not, show login modal
-      if (!user) {
-        console.log('User not logged in, showing login modal');
-        setLoading(false);
-        setShowLoginModal(true);
-        return;
-      }
-      
-      console.log('Starting subscription process for user:', user.id);
-      
-      // Skip server-side checkout and use direct checkout immediately
-      console.log('Using direct checkout method');
-      
-      // Create direct checkout URL
-      const directUrl = createDirectCheckoutUrl(
-        subscription?.stripe_customer_id,
-        'price_premium_monthly' // Use actual price ID from your Stripe account
-      );
-      console.log('Direct checkout URL:', directUrl);
-      
-      // Use WebView for in-app checkout experience
-      setWebViewUrl(directUrl);
-      setShowWebView(true);
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      console.error('Error in subscription process:', errorMessage);
-      Alert.alert('Error', 'Could not open checkout. Please try again later.');
-    } finally {
-      setLoading(false);
-    }
+  const handleLoginSuccess = (session: Session) => {
+    console.log('Login successful, closing modal');
+    setShowLoginModal(false);
+    // The useEffect will handle checking premium status and loading products
   };
-  
-  const handleManageSubscription = async () => {
-    try {
-      setLoading(true);
-      
-      // Check if the user is logged in
-      if (!user) {
-        Alert.alert('Error', 'You must be logged in to manage your subscription');
-        return;
-      }
-      
-      // Check if we have a customer ID
-      if (!subscription?.stripe_customer_id) {
-        Alert.alert('Error', 'No active subscription found');
-        return;
-      }
-      
-      // Get a fresh auth token
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError || !sessionData?.session?.access_token) {
-        console.error('Session error:', sessionError);
-        Alert.alert('Authentication Error', 'Please log in again to continue');
-        return;
-      }
-      
-      // Get the Supabase URL from environment or fallback
-      const supabaseProjectRef = 'gtxigxwklomqdlihxjyd';
-      const portalUrl = `https://${supabaseProjectRef}.functions.supabase.co/v1/stripe-portal`;
-      
-      console.log('Calling portal endpoint:', portalUrl);
-      
-      // Call the Stripe portal endpoint
-      const response = await fetch(portalUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${sessionData.session.access_token}`,
-        },
-        body: JSON.stringify({
-          customerId: subscription.stripe_customer_id,
-          returnUrl: 'nofapapp://subscription',
-        }),
-      });
-      
-      console.log('Response status:', response.status);
-      
-      // Get the full response text for debugging
-      const responseText = await response.text();
-      console.log('Response text:', responseText);
-      
-      // Try to parse as JSON
-      let jsonResponse;
-      try {
-        jsonResponse = JSON.parse(responseText);
-        console.log('Parsed JSON response:', jsonResponse);
-      } catch (parseError) {
-        console.error('Failed to parse response as JSON:', parseError);
-        Alert.alert('Error', 'Invalid response from server');
-        return;
-      }
-      
-      if (!response.ok) {
-        console.error('Portal error:', jsonResponse);
-        Alert.alert('Error', jsonResponse.error || 'Could not access subscription management');
-        return;
-      }
-      
-      if (!jsonResponse.portalUrl) {
-        console.error('No portal URL in response:', jsonResponse);
-        Alert.alert('Error', 'No portal URL returned from server');
-        return;
-      }
-      
-      // Debug the portal URL
-      console.log('Portal URL received:', jsonResponse.portalUrl);
-      
-      // Open the WebView with the portal URL
-      setWebViewUrl(jsonResponse.portalUrl);
-      setShowWebView(true);
-      
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      console.error('Error accessing portal:', errorMessage);
-      Alert.alert('Error', `Subscription management failed: ${errorMessage}`);
-    } finally {
-      setLoading(false);
+
+  const isActive = isPremium || subscription?.status === 'active';
+
+  const handlePurchase = async () => {
+    if (!user) {
+      console.log('No user found, cannot initiate purchase');
+      return;
     }
-  };
-  
-  const handleWebViewNavigationStateChange = (newNavState: WebViewNavigation) => {
-    // Log the navigation URL for debugging
-    console.log('WebView navigating to:', newNavState.url);
+
+    setLoading(true);
     
-    // Check if the URL is your return URL
-    if (newNavState.url.startsWith('nofapapp://')) {
-      console.log('Detected return URL, closing WebView');
-      setShowWebView(false);
-      // Refresh subscription status
-      fetchSubscription();
-    }
-  };
-  
-  const isActive = subscription?.status === 'active' || subscription?.status === 'trialing';
-  
-  // Function to initiate payment immediately
-  const initiatePayment = () => {
     try {
-      const directUrl = createDirectCheckoutUrl(
-        subscription?.stripe_customer_id,
-        'price_premium_monthly'
-      );
+      console.log('Initiating premium purchase for user:', user.id);
+      const result = await purchasePremiumSubscription();
       
-      console.log('Direct checkout URL:', directUrl);
-      setWebViewUrl(directUrl);
-      setShowWebView(true);
-      
-      // Clear timeout once WebView is shown
-      if (loadingTimeoutRef.current) {
-        clearTimeout(loadingTimeoutRef.current);
+      if (result.success) {
+        console.log('Purchase successful');
+        Alert.alert('Success', 'Premium subscription activated!');
+        await checkPremiumStatus(); // Refresh status
+      } else {
+        console.error('Purchase failed:', result.error);
+        Alert.alert('Purchase Failed', result.error || 'Unable to complete purchase');
       }
     } catch (error) {
-      console.error('Error creating direct checkout URL:', error);
-      setLoadingError('Failed to create payment URL. Please try again.');
+      console.error('Error during purchase:', error);
+      Alert.alert('Error', 'Purchase failed. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
-  
+
+  const handleRestore = async () => {
+    setLoading(true);
+    
+    try {
+      const result = await restorePurchases();
+      
+      if (result.success) {
+        Alert.alert('Success', 'Purchases restored successfully!');
+        await checkPremiumStatus(); // Refresh status
+      } else {
+        Alert.alert('No Purchases Found', 'No previous purchases found to restore.');
+      }
+    } catch (error) {
+      console.error('Error restoring purchases:', error);
+      Alert.alert('Error', 'Failed to restore purchases. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Function to go back to main app
   const goToMainApp = () => {
     router.replace('/(tabs)');
@@ -300,36 +205,116 @@ export default function SubscriptionScreen() {
         }}
       />
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-        {!showWebView && (
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-            {loadingError ? (
-              <>
-                <AlertTriangle size={40} color={colors.error} style={{ marginBottom: 16 }} />
-                <Text style={{ marginBottom: 20, color: colors.text, fontSize: 16, textAlign: 'center' }}>
-                  {loadingError}
-                </Text>
-                <TouchableOpacity
-                  style={[styles.retryButton, { backgroundColor: colors.primary }]}
-                  onPress={initiatePayment}
+        {isActive ? (
+          <>
+            <View style={styles.header}>
+              <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+                <ArrowLeft size={24} color={colors.text} />
+              </TouchableOpacity>
+              <Text style={[styles.headerTitle, { color: colors.text }]}>Premium Active</Text>
+            </View>
+            
+            <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+              <Animated.View entering={FadeIn.duration(600)} style={styles.successCard}>
+                <LinearGradient
+                  colors={['#4CAF50', '#45a049']}
+                  style={styles.successGradient}
                 >
-                  <Text style={styles.buttonText}>Try Again</Text>
-                </TouchableOpacity>
+                  <CheckCircle2 size={48} color="white" />
+                  <Text style={styles.successTitle}>Premium Active!</Text>
+                  <Text style={styles.successSubtitle}>
+                    You have access to all premium features
+                  </Text>
+                </LinearGradient>
+              </Animated.View>
+              
+              <View style={styles.buttonContainer}>
                 <TouchableOpacity
-                  style={[styles.skipButton, { backgroundColor: 'transparent', borderColor: colors.border, borderWidth: 1, marginTop: 12 }]}
-                  onPress={goToMainApp}
+                  style={[styles.restoreButton, { backgroundColor: colors.surface }]}
+                  onPress={handleRestore}
+                  disabled={loading}
                 >
-                  <Text style={[styles.buttonText, { color: colors.text }]}>Continue Without Premium</Text>
+                  {loading ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <Text style={[styles.restoreButtonText, { color: colors.primary }]}>
+                      Restore Purchases
+                    </Text>
+                  )}
                 </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <ActivityIndicator size="large" color={colors.primary} />
-                <Text style={{ marginTop: 20, color: colors.text, fontSize: 16 }}>
-                  Setting up payment...
-                </Text>
-              </>
-            )}
-          </View>
+              </View>
+            </ScrollView>
+          </>
+        ) : (
+          <>
+            <View style={styles.header}>
+              <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+                <ArrowLeft size={24} color={colors.text} />
+              </TouchableOpacity>
+              <Text style={[styles.headerTitle, { color: colors.text }]}>Upgrade to Premium</Text>
+            </View>
+            
+            <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+              <Animated.View entering={FadeIn.duration(600)} style={styles.premiumCard}>
+                <LinearGradient
+                  colors={[colors.primary, colors.primaryDark || colors.primary]}
+                  style={styles.premiumGradient}
+                >
+                  <Sparkles size={48} color="white" />
+                  <Text style={styles.premiumTitle}>Unlock Premium Features</Text>
+                  <Text style={styles.premiumSubtitle}>
+                    Get unlimited access to all companion features
+                  </Text>
+                </LinearGradient>
+              </Animated.View>
+              
+              <View style={styles.featuresContainer}>
+                <View style={styles.featureItem}>
+                  <CheckCircle2 size={20} color={colors.primary} />
+                  <Text style={[styles.featureText, { color: colors.text }]}>Unlimited AI conversations</Text>
+                </View>
+                <View style={styles.featureItem}>
+                  <CheckCircle2 size={20} color={colors.primary} />
+                  <Text style={[styles.featureText, { color: colors.text }]}>Advanced progress tracking</Text>
+                </View>
+                <View style={styles.featureItem}>
+                  <CheckCircle2 size={20} color={colors.primary} />
+                  <Text style={[styles.featureText, { color: colors.text }]}>Premium companion personalities</Text>
+                </View>
+                <View style={styles.featureItem}>
+                  <CheckCircle2 size={20} color={colors.primary} />
+                  <Text style={[styles.featureText, { color: colors.text }]}>Priority support</Text>
+                </View>
+              </View>
+              
+              <View style={styles.buttonContainer}>
+                <TouchableOpacity
+                  style={[styles.purchaseButton, { backgroundColor: colors.primary }]}
+                  onPress={handlePurchase}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator size="small" color="white" />
+                  ) : (
+                    <>
+                      <LockOpen size={20} color="white" />
+                      <Text style={styles.purchaseButtonText}>Upgrade to Premium</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[styles.restoreButton, { backgroundColor: colors.surface }]}
+                  onPress={handleRestore}
+                  disabled={loading}
+                >
+                  <Text style={[styles.restoreButtonText, { color: colors.primary }]}>
+                    Restore Purchases
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </>
         )}
         
         {/* Checkout WebView Modal */}
@@ -397,14 +382,8 @@ export default function SubscriptionScreen() {
                     'Could not load the payment page in the app.', 
                     [
                       {
-                        text: 'Try Browser',
-                        onPress: async () => {
-                          const directUrl = createDirectCheckoutUrl(
-                            subscription?.stripe_customer_id,
-                            'price_premium_monthly'
-                          );
-                          await Linking.openURL(directUrl);
-                        }
+                        text: 'Try Again',
+                        onPress: () => handlePurchase()
                       },
                       {
                         text: 'Try Again',
@@ -432,14 +411,8 @@ export default function SubscriptionScreen() {
                       'There was a problem loading the checkout page.', 
                       [
                         {
-                          text: 'Try Browser',
-                          onPress: async () => {
-                            const directUrl = createDirectCheckoutUrl(
-                              subscription?.stripe_customer_id,
-                              'price_premium_monthly'
-                            );
-                            await Linking.openURL(directUrl);
-                          }
+                          text: 'Try Again',
+                        onPress: () => handlePurchase()
                         },
                         {
                           text: 'Try Again',
@@ -534,20 +507,92 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   backButton: {
-    padding: 16,
+     padding: 8,
+   },
+   premiumCard: {
+     marginHorizontal: 20,
+     marginTop: 20,
+     borderRadius: 16,
+     overflow: 'hidden',
+     elevation: 4,
+     shadowColor: '#000',
+     shadowOffset: { width: 0, height: 2 },
+     shadowOpacity: 0.25,
+     shadowRadius: 4,
+   },
+  premiumGradient: {
+    padding: 24,
+    alignItems: 'center',
   },
-  webView: {
-    flex: 1,
+  premiumTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: 'white',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  premiumSubtitle: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.9)',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  featuresContainer: {
+    marginHorizontal: 20,
+    marginTop: 24,
   },
   featureItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 16,
   },
   featureText: {
-    marginLeft: 8,
     fontSize: 16,
-    color: '#333',
+    marginLeft: 12,
+    flex: 1,
+  },
+  purchaseButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  purchaseButtonText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  successCard: {
+    marginHorizontal: 20,
+    marginTop: 20,
+    borderRadius: 16,
+    overflow: 'hidden',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+  },
+  successGradient: {
+    padding: 24,
+    alignItems: 'center',
+  },
+  successTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: 'white',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  successSubtitle: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.9)',
+    marginTop: 8,
+    textAlign: 'center',
   },
   // Modal styles
   modalOverlay: {
@@ -611,54 +656,34 @@ const styles = StyleSheet.create({
     marginHorizontal: 10,
   },
   // Content styles
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 40,
-  },
-  headerSection: {
+  header: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
+    paddingHorizontal: 4,
+    paddingVertical: 8,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    textAlign: 'center',
-  },
-  planSection: {
-    marginBottom: 24,
-  },
-  premiumCard: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    padding: 20,
-  },
-  premiumTitle: {
+  headerTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 8,
+    fontWeight: '600',
+    marginLeft: 16,
   },
-  premiumPrice: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 8,
+  content: {
+    flex: 1,
   },
-  premiumPeriod: {
-    fontSize: 18,
-    fontWeight: 'normal',
+  buttonContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 24,
   },
-  premiumDescription: {
+  restoreButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  restoreButtonText: {
     fontSize: 16,
-    color: '#FFFFFF',
-    opacity: 0.9,
-  },
-  featuresContainer: {
-    marginTop: 20,
+    fontWeight: '500',
   },
   cta: {
     alignItems: 'center',
@@ -780,4 +805,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 16,
   },
-}); 
+});

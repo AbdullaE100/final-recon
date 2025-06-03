@@ -4,9 +4,9 @@
  * https://docs.expo.dev/router/reference/initialization-files/
  */
 
-// Import the crypto initialization to ensure it's loaded early
-import '../crypto-init';
+// Import the safe crypto initialization to ensure it's loaded early
+import '../safecryptoinit';
 
-console.log('[CryptoInit in Expo Router] Crypto initialized');
+console.log('[SafeCryptoInit in Expo Router] Safe crypto initialized for Hermes');
 
-export default {}; 
+export default {};

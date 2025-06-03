@@ -82,10 +82,10 @@ const BadgeItem: React.FC<BadgeItemProps> = ({
           )}
         </View>
         <View style={styles.badgeTextContainer}>
-          <Text style={styles.badgeTitle}>
+          <Text style={styles.badgeTitle} numberOfLines={2}>
             {days ? `${days} Day${days > 1 ? 's' : ''}` : title}
           </Text>
-          <Text style={styles.badgeDescription}>
+          <Text style={styles.badgeDescription} numberOfLines={3}>
             {days ? `Maintain a ${days}-day clean streak` : description}
           </Text>
         </View>
@@ -104,17 +104,13 @@ export default function AchievementsScreen() {
     companion, 
     getCompanionStage,
     forceCheckStreakAchievements,
-    resetCompanion,
-    resetData,
     journalEntries,
     fix30DayBadge: contextFix30DayBadge
   } = useGamification();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<'badges' | 'companion'>('badges');
   const [isCheckingAchievements, setIsCheckingAchievements] = useState(false);
-  const [isResettingCompanion, setIsResettingCompanion] = useState(false);
-  const [isResettingAsNewUser, setIsResettingAsNewUser] = useState(false);
-  const [isResettingAllData, setIsResettingAllData] = useState(false);
+
   
   // Calculate progress percentage
   const progressPercentage = (points / totalPoints) * 100;
@@ -215,7 +211,7 @@ export default function AchievementsScreen() {
     
     if (companionType === 'plant') {
       return {
-        name: 'Drowsi',
+        name: companion?.name || 'Drowsi',
         descriptions: [
           "Falls asleep faster than your urges — let him nap, so you don't relapse.",
           "Growing stronger from your consistency, Drowsi now enjoys mindful eating. His noodle ritual brings focus and patience.",
@@ -224,7 +220,7 @@ export default function AchievementsScreen() {
       };
     } else if (companionType === 'fire') {
       return {
-        name: 'Snuglur',
+        name: companion?.name || 'Snuglur',
         descriptions: [
           "Warm and playful, this little creature is your constant reminder to stay strong and focused.",
           "As your discipline grows, so does Snuglur's fiery spirit, burning away temptations with newfound intensity.",
@@ -233,7 +229,7 @@ export default function AchievementsScreen() {
       };
     } else {
       return {
-        name: 'Stripes',
+        name: companion?.name || 'Stripes',
         descriptions: [
           "Half tiger, half therapist — growls when you're about to mess up.",
           "Tiger shark of sobriety — all the bite of willpower with the wet nose of accountability.",
@@ -245,86 +241,7 @@ export default function AchievementsScreen() {
   
   const companionInfo = getCompanionInfo();
   
-  // Add a function to handle companion reset
-  const handleResetCompanion = async () => {
-    setIsResettingCompanion(true);
-    try {
-      await resetCompanion();
-      console.log('Companion reset successfully');
-    } catch (error) {
-      console.error('Error resetting companion:', error);
-    } finally {
-      setIsResettingCompanion(false);
-    }
-  };
-  
-  // Add a function to handle companion reset as new user
-  const handleResetAsNewUser = async () => {
-    setIsResettingAsNewUser(true);
-    try {
-      // First reset the companion
-      await resetCompanion();
-      
-      // Then force it to be treated as a new user by updating the companion data
-      if (companion) {
-        const companionType = companion.type || 'water';
-        // Need to wait a bit for the reset to complete
-        setTimeout(async () => {
-          try {
-            // Get the current companion data after reset
-            const companionData = await getData(STORAGE_KEYS.COMPANION_DATA, null);
-            if (companionData) {
-              // Update with new user flags
-              const updatedCompanion = {
-                ...companionData as object,
-                isNewUser: true,
-                creationTime: Date.now(),
-                currentLevel: 1 // Force to level 1
-              };
-              // Save the updated data
-              await storeData(STORAGE_KEYS.COMPANION_DATA, updatedCompanion);
-              console.log('Successfully reset as new user');
-              
-              // Force a refresh by reloading the app
-              // This is a bit of a hack but it will ensure state is properly updated
-              if (Platform.OS === 'web') {
-                window.location.reload();
-              }
-            }
-          } catch (error) {
-            console.error('Error updating companion data:', error);
-          } finally {
-            setIsResettingAsNewUser(false);
-          }
-        }, 500);
-      } else {
-        setIsResettingAsNewUser(false);
-      }
-    } catch (error) {
-      console.error('Error resetting as new user:', error);
-      setIsResettingAsNewUser(false);
-    }
-  };
-  
-  // Add a handler for resetting all user data
-  const handleResetAllData = async () => {
-    if (isResettingAllData) return;
-    
-    setIsResettingAllData(true);
-    try {
-      await resetData();
-      console.log('Successfully reset all user data');
-      
-      // Force a refresh by reloading the app
-      if (Platform.OS === 'web') {
-        window.location.reload();
-      }
-    } catch (error) {
-      console.error('Error resetting all data:', error);
-    } finally {
-      setIsResettingAllData(false);
-    }
-  };
+
   
   // Fix streak badges in UI
   const streakBadges = [
@@ -659,38 +576,7 @@ export default function AchievementsScreen() {
             </Text>
           </View>
           
-          {/* Add Reset Companion Button */}
-          <TouchableOpacity 
-            style={styles.resetCompanionButton}
-            onPress={handleResetCompanion}
-            disabled={isResettingCompanion}
-          >
-            <Text style={styles.resetCompanionButtonText}>
-              {isResettingCompanion ? 'Resetting...' : 'Reset Companion (Testing)'}
-            </Text>
-          </TouchableOpacity>
-          
-          {/* Add Start as New User Button */}
-          <TouchableOpacity 
-            style={styles.startAsNewUserButton}
-            onPress={handleResetAsNewUser}
-            disabled={isResettingAsNewUser}
-          >
-            <Text style={styles.startAsNewUserButtonText}>
-              {isResettingAsNewUser ? 'Processing...' : 'Start as New User'}
-            </Text>
-          </TouchableOpacity>
-          
-          {/* Add Reset ALL Data Button */}
-          <TouchableOpacity 
-            style={styles.resetAllDataButton}
-            onPress={handleResetAllData}
-            disabled={isResettingAllData}
-          >
-            <Text style={styles.resetAllDataButtonText}>
-              {isResettingAllData ? 'Resetting All Data...' : 'Reset All Data & Badges'}
-            </Text>
-          </TouchableOpacity>
+
         </View>
       </LinearGradient>
     </View>
@@ -894,9 +780,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 6,
     elevation: 8,
-    minHeight: 160,
-    justifyContent: 'center',
-    aspectRatio: 1, // Ensure all badges have the same aspect ratio
+    minHeight: 180,
+    justifyContent: 'space-between',
+    paddingVertical: 20,
   },
   badgeIconContainer: {
     marginBottom: 12,
@@ -906,8 +792,9 @@ const styles = StyleSheet.create({
   badgeTextContainer: {
     width: '100%',
     alignItems: 'center',
-    flex: 1,
     justifyContent: 'center',
+    marginTop: 8,
+    paddingHorizontal: 4,
   },
   lockedBadge: {
     width: 64,
@@ -932,19 +819,18 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   badgeTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
     color: '#FFFFFF',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   badgeDescription: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '400',
     color: 'rgba(255,255,255,0.7)',
     textAlign: 'center',
-    lineHeight: 18,
-    flexWrap: 'wrap',
+    lineHeight: 16,
   },
   companionContainer: {
     marginTop: 20,
@@ -1080,42 +966,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#FFFFFF',
   },
-  resetCompanionButton: {
-    backgroundColor: '#FF3B30',
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  resetCompanionButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  startAsNewUserButton: {
-    backgroundColor: '#4CD964',
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  startAsNewUserButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  resetAllDataButton: {
-    backgroundColor: '#FF0000',
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  resetAllDataButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
+
 });
 
 // Helper function to extract number from string (e.g. "90 Day Champion" -> 90)

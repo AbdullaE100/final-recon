@@ -19,11 +19,9 @@ jobs:
       - name: Deploy Edge Functions
         run: |
           supabase login --token ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          supabase functions deploy stripe-webhooks --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
-          supabase functions deploy stripe-checkout --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
-          supabase functions deploy stripe-portal --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+          echo "No Stripe functions to deploy - using Apple IAP instead"
           supabase functions deploy _shared --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
         
       - name: Deploy Database Migrations
         run: |
-          supabase db push --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} 
+          supabase db push --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}

@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  StyleSheet, 
-  View, 
-  Text, 
-  FlatList, 
-  TouchableOpacity, 
-  TextInput, 
+import {
+  StyleSheet,
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  TextInput,
   KeyboardAvoidingView,
   Platform,
   Animated,
@@ -13,7 +13,8 @@ import {
   Pressable,
   ActivityIndicator,
   Modal,
-  ScrollView
+  ScrollView,
+  Keyboard
 } from 'react-native';
 import { useGamification } from '@/context/GamificationContext';
 import { useTheme } from '@/context/ThemeContext';
@@ -30,30 +31,28 @@ import {
   Smile,
   Frown,
   Meh,
-  Flame
+  BookOpen
 } from 'lucide-react-native';
 import JournalEntry from '@/components/journal/JournalEntry';
 import { formatDate } from '@/utils/dateUtils';
 import { LinearGradient } from 'expo-linear-gradient';
-import LottieView from 'lottie-react-native';
 import * as Haptics from 'expo-haptics';
 import { JournalEntry as JournalEntryType } from '@/types/gamification';
 import { BlurView } from 'expo-blur';
+import { StatusBar } from 'expo-status-bar';
 
 const { width } = Dimensions.get('window');
 
 // Predefined tags
 const JOURNAL_TAGS = [
-  'Urge',
-  'Victory',
-  'Struggle',
-  'Insight',
-  'Trigger',
-  'Progress',
-  'Relapse',
-  'Gratitude',
-  'Motivation',
-  'Health',
+  'Reflection', 
+  'Challenge', 
+  'Trigger', 
+  'Success', 
+  'Motivation', 
+  'Learning',
+  'Feelings',
+  'Goal'
 ];
 
 // Mood options
@@ -149,15 +148,16 @@ export default function JournalScreen() {
   
   // Handle adding entry
   const handleAddEntry = () => {
-    if (entryText.trim().length > 0) {
-      // Create entry with mood and tags if selected
-      const entryWithMeta = {
-        content: entryText,
+    const hasValidContent = entryText.trim().length > 0 || selectedMood;
+    
+    if (hasValidContent) {
+      // Create entry with mood and tags
+      const entryOptions = {
         mood: selectedMood || undefined,
-        tags: selectedTags.length > 0 ? selectedTags : undefined
+        tags: selectedTags.length > 0 ? selectedTags : undefined,
       };
       
-      addJournalEntry(entryText);
+      addJournalEntry(entryText, entryOptions);
       
       // Haptic feedback
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -179,7 +179,7 @@ export default function JournalScreen() {
     setSelectedTags([]);
     setIsWriting(false);
   };
-
+  
   // Toggle tag selection
   const toggleTag = (tag: string) => {
     setSelectedTags(prev => 
@@ -195,6 +195,9 @@ export default function JournalScreen() {
   // Toggle mood selection
   const selectMood = (mood: string) => {
     setSelectedMood(prev => prev === mood ? '' : mood);
+    
+    // Dismiss keyboard when mood is selected
+    Keyboard.dismiss();
     
     // Haptic feedback
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -230,6 +233,11 @@ export default function JournalScreen() {
   
   // Render journal entry form
   const renderEntryForm = () => (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ flex: 1 }}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+    >
     <Animated.View style={[entryFormStyle, styles.formContainer, { backgroundColor: colors.card }]}>
       <View style={styles.formHeader}>
         <TouchableOpacity 
@@ -248,127 +256,35 @@ export default function JournalScreen() {
       >
           <TextInput
             style={[styles.textInput, { color: colors.text, backgroundColor: colors.inputBackground }]}
-          placeholder="What's on your mind today?"
-            placeholderTextColor={colors.placeholder}
+            placeholder="What's on your mind today?"
+            placeholderTextColor={colors.secondaryText}
             multiline
             value={entryText}
             onChangeText={setEntryText}
             autoFocus
           />
-      </LinearGradient>
-      
-      {/* Mood selector */}
-      <View style={styles.moodSelector}>
-        <Text style={[styles.sectionTitle, { color: colors.secondaryText }]}>How are you feeling?</Text>
-        <View style={styles.moodOptions}>
-          {MOOD_OPTIONS.map(mood => (
-            <TouchableOpacity
-              key={mood.key}
-              style={[
-                styles.moodOption,
-                selectedMood === mood.key && { backgroundColor: `${mood.color}20` }
-              ]}
-              onPress={() => selectMood(mood.key)}
-            >
-              <mood.icon 
-                size={24} 
-                color={selectedMood === mood.key ? mood.color : colors.secondaryText}
-              />
-              <Text 
-                style={[
-                  styles.moodLabel, 
-                  { color: selectedMood === mood.key ? mood.color : colors.secondaryText }
-                ]}
-              >
-                {mood.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-      
-      {/* Tags selector */}
-      <View style={styles.tagSelector}>
-        <Text style={[styles.sectionTitle, { color: colors.secondaryText }]}>Add tags</Text>
-        <View style={styles.tagOptions}>
-          {JOURNAL_TAGS.map(tag => (
-            <TouchableOpacity
-              key={tag}
-              style={[
-                styles.tagChip,
-                { 
-                  backgroundColor: selectedTags.includes(tag) 
-                    ? `${colors.primary}20` 
-                    : colors.cardAlt
-                }
-              ]}
-              onPress={() => toggleTag(tag)}
-            >
-              <Text 
-                style={[
-                  styles.tagText, 
-                  { 
-                    color: selectedTags.includes(tag) 
-                      ? colors.primary 
-                      : colors.secondaryText 
-                  }
-                ]}
-              >
-                {tag}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-      
-      <TouchableOpacity 
-        style={[styles.saveButton, { backgroundColor: colors.primary }]} 
-        onPress={handleAddEntry}
-      >
-        <Save size={20} color={colors.white} />
-        <Text style={styles.buttonText}>Save Entry</Text>
-      </TouchableOpacity>
-    </Animated.View>
-  );
-  
-  // Render filter modal
-  const renderFilterModal = () => (
-    <Modal 
-      visible={filterVisible}
-      animationType="fade"
-      transparent
-      onRequestClose={() => setFilterVisible(false)}
-    >
-      <BlurView intensity={30} style={styles.modalOverlay}>
-        <View style={[styles.filterModal, { backgroundColor: colors.card }]}>
-          <View style={styles.filterHeader}>
-            <Text style={[styles.filterTitle, { color: colors.text }]}>Filter Journal</Text>
-            <TouchableOpacity onPress={() => setFilterVisible(false)}>
-              <X size={24} color={colors.text} />
-            </TouchableOpacity>
-          </View>
           
-          {/* Mood filter */}
-          <View style={styles.filterSection}>
-            <Text style={[styles.filterSectionTitle, { color: colors.secondaryText }]}>By Mood</Text>
-            <View style={styles.moodFilterOptions}>
+          {/* Mood selector */}
+          <View style={styles.moodSelector}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>How are you feeling?</Text>
+            <View style={styles.moodOptions}>
               {MOOD_OPTIONS.map(mood => (
                 <TouchableOpacity
                   key={mood.key}
                   style={[
-                    styles.moodFilterOption,
-                    selectedMoodFilter === mood.key && { backgroundColor: `${mood.color}20` }
+                    styles.moodOption,
+                    selectedMood === mood.key && { backgroundColor: `${mood.color}20` }
                   ]}
-                  onPress={() => setSelectedMoodFilter(prev => prev === mood.key ? null : mood.key)}
+                  onPress={() => selectMood(mood.key)}
                 >
                   <mood.icon 
                     size={20} 
-                    color={selectedMoodFilter === mood.key ? mood.color : colors.secondaryText}
+                    color={selectedMood === mood.key ? mood.color : colors.secondaryText} 
                   />
                   <Text 
                     style={[
-                      styles.moodFilterLabel, 
-                      { color: selectedMoodFilter === mood.key ? mood.color : colors.secondaryText }
+                      styles.moodLabel, 
+                      { color: selectedMood === mood.key ? mood.color : colors.secondaryText }
                     ]}
                   >
                     {mood.label}
@@ -378,32 +294,28 @@ export default function JournalScreen() {
             </View>
           </View>
           
-          {/* Tag filter */}
-          <View style={styles.filterSection}>
-            <Text style={[styles.filterSectionTitle, { color: colors.secondaryText }]}>By Tag</Text>
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.tagFilterOptions}
-            >
+          {/* Tags */}
+          <View style={styles.tagsSection}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Add tags (optional)</Text>
+            <View style={styles.tagsList}>
               {JOURNAL_TAGS.map(tag => (
                 <TouchableOpacity
                   key={tag}
                   style={[
-                    styles.tagFilterChip,
+                    styles.tagOption,
                     { 
-                      backgroundColor: selectedTagFilter === tag 
+                      backgroundColor: selectedTags.includes(tag) 
                         ? `${colors.primary}20` 
-                        : colors.cardAlt
+                        : colors.inputBackground
                     }
                   ]}
-                  onPress={() => setSelectedTagFilter(prev => prev === tag ? null : tag)}
+                  onPress={() => toggleTag(tag)}
                 >
                   <Text 
                     style={[
-                      styles.tagFilterText, 
+                      styles.tagLabel, 
                       { 
-                        color: selectedTagFilter === tag 
+                        color: selectedTags.includes(tag) 
                           ? colors.primary 
                           : colors.secondaryText 
                       }
@@ -413,229 +325,175 @@ export default function JournalScreen() {
                   </Text>
                 </TouchableOpacity>
               ))}
-            </ScrollView>
-          </View>
-          
-          {/* Date range filter - simplified */}
-          <View style={styles.filterSection}>
-            <Text style={[styles.filterSectionTitle, { color: colors.secondaryText }]}>Time Period</Text>
-            <View style={styles.dateFilterOptions}>
-              <TouchableOpacity
-                style={[
-                  styles.dateFilterChip,
-                  { 
-                    backgroundColor: dateRange.start !== null && dateRange.end === null
-                      ? `${colors.primary}20` 
-                      : colors.cardAlt
-                  }
-                ]}
-                onPress={() => {
-                  const now = Date.now();
-                  const weekAgo = now - (7 * 24 * 60 * 60 * 1000);
-                  setDateRange({ start: weekAgo, end: now });
-                }}
-              >
-                <Text 
-                  style={[
-                    styles.dateFilterText, 
-                    { 
-                      color: dateRange.start !== null
-                        ? colors.primary 
-                        : colors.secondaryText 
-                    }
-                  ]}
-                >
-                  Last 7 days
-                </Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity
-                style={[
-                  styles.dateFilterChip,
-                  { 
-                    backgroundColor: dateRange.start !== null && dateRange.end !== null
-                      ? `${colors.primary}20` 
-                      : colors.cardAlt
-                  }
-                ]}
-                onPress={() => {
-                  const now = Date.now();
-                  const monthAgo = now - (30 * 24 * 60 * 60 * 1000);
-                  setDateRange({ start: monthAgo, end: now });
-                }}
-              >
-                <Text 
-                  style={[
-                    styles.dateFilterText, 
-                    { 
-                      color: dateRange.start !== null
-                        ? colors.primary 
-                        : colors.secondaryText 
-                    }
-                  ]}
-                >
-                  Last 30 days
-                </Text>
-              </TouchableOpacity>
             </View>
           </View>
           
-          <View style={styles.filterActions}>
-            <TouchableOpacity 
-              style={[styles.resetButton, { borderColor: colors.border }]} 
-              onPress={resetFilters}
+          {/* Action buttons */}
+          <View style={styles.formActions}>
+            <TouchableOpacity
+              style={[
+                styles.actionButton, 
+                styles.saveButton, 
+                { 
+                  backgroundColor: colors.primary,
+                  opacity: !entryText.trim() && !selectedMood ? 0.5 : 1
+                }
+              ]}
+              onPress={handleAddEntry}
+              disabled={!entryText.trim() && !selectedMood}
             >
-              <Text style={[styles.resetButtonText, { color: colors.secondaryText }]}>Reset</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={[styles.applyButton, { backgroundColor: colors.primary }]} 
-              onPress={() => setFilterVisible(false)}
-            >
-              <Text style={styles.applyButtonText}>Apply Filters</Text>
+              <Text style={styles.saveButtonText}>
+                Save Entry
+              </Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </BlurView>
-    </Modal>
+      </LinearGradient>
+    </Animated.View>
+    </KeyboardAvoidingView>
   );
   
-  // Main component render
+  // Main journal screen
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <KeyboardAvoidingView 
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 64 : 0}
-      >
-        {isWriting ? (
-          renderEntryForm()
-      ) : (
+      <StatusBar style="auto" />
+      
+      {!isWriting ? (
         <>
-            <View style={styles.header}>
-              <View style={styles.titleContainer}>
-                <Text style={[styles.title, { color: colors.text }]}>Journal</Text>
-                <View style={styles.streakBadge}>
-                  <Flame size={14} color={streak > 0 ? "#FF9800" : colors.text} />
-                  <Text style={styles.streakCount}>{streak}</Text>
+          <View style={styles.header}>
+            <LinearGradient
+              colors={['rgba(33, 150, 243, 0.05)', 'transparent']}
+              style={styles.headerGradient}
+            >
+              <View style={styles.headerTitleRow}>
+                <View style={styles.headerTitleContainer}>
+                  <BookOpen size={24} color={colors.primary} style={styles.headerIcon} />
+                  <Text style={[styles.headerTitle, { color: colors.text }]}>Journal</Text>
+                </View>
+                
+                <View style={styles.headerRight}>
+                  <TouchableOpacity
+                    style={[styles.filterButton, { backgroundColor: colors.background }]}
+                    onPress={() => setFilterVisible(true)}
+                  >
+                    <Filter size={18} color={colors.text} />
+                  </TouchableOpacity>
                 </View>
               </View>
-              
-              <View style={styles.actionButtons}>
-                <TouchableOpacity 
-                  style={[styles.iconButton, { backgroundColor: colors.cardAlt }]}
-                  onPress={() => setFilterVisible(true)}
-                >
-                  <Filter size={20} color={colors.primary} />
-                </TouchableOpacity>
-              </View>
-            </View>
-            
-            {/* Filter indicators */}
-            {(selectedMoodFilter || selectedTagFilter || dateRange.start) && (
-              <View style={styles.filterIndicators}>
-                <Text style={[styles.filterIndicatorText, { color: colors.secondaryText }]}>
-                  Filtered by:
-                </Text>
-                
-                {selectedMoodFilter && (
-                  <View style={[styles.filterChip, { backgroundColor: `${colors.primary}20` }]}>
-                    <Text style={[styles.filterChipText, { color: colors.primary }]}>
-                      {MOOD_OPTIONS.find(m => m.key === selectedMoodFilter)?.label || selectedMoodFilter}
-                    </Text>
-                    <TouchableOpacity onPress={() => setSelectedMoodFilter(null)}>
-                      <X size={14} color={colors.primary} />
-                    </TouchableOpacity>
-                  </View>
-                )}
-                
-                {selectedTagFilter && (
-                  <View style={[styles.filterChip, { backgroundColor: `${colors.primary}20` }]}>
-                    <Text style={[styles.filterChipText, { color: colors.primary }]}>
-                      {selectedTagFilter}
-                    </Text>
-                    <TouchableOpacity onPress={() => setSelectedTagFilter(null)}>
-                      <X size={14} color={colors.primary} />
-                    </TouchableOpacity>
-                  </View>
-                )}
-                
-                {dateRange.start && (
-                  <View style={[styles.filterChip, { backgroundColor: `${colors.primary}20` }]}>
-                    <Text style={[styles.filterChipText, { color: colors.primary }]}>
-                      {dateRange.end ? 'Date range' : 'Recent'}
-                    </Text>
-                    <TouchableOpacity onPress={() => setDateRange({ start: null, end: null })}>
-                      <X size={14} color={colors.primary} />
-                    </TouchableOpacity>
-                  </View>
-                )}
-                
-                <TouchableOpacity onPress={resetFilters}>
-                  <Text style={[styles.clearFilters, { color: colors.primary }]}>Clear all</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-            
-          <FlatList
+              <Text style={[styles.journalDescription, { color: colors.secondaryText }]}>
+                Track your journey, reflect on your progress
+              </Text>
+            </LinearGradient>
+          </View>
+          
+          {/* Journal entries list */}
+          {filteredEntries.length > 0 ? (
+            <FlatList
               data={filteredEntries}
+              keyExtractor={(item) => item.id}
               renderItem={({ item }) => (
                 <JournalEntry
                   entry={item}
                   onDelete={() => deleteJournalEntry(item.id)}
                 />
               )}
-            keyExtractor={(item) => item.id}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.listContent}
-            ListEmptyComponent={
-              <View style={[styles.emptyState, { backgroundColor: colors.cardAlt }]}>
-                  <View style={styles.emptyAnimationContainer}>
-                    <LottieView
-                      source={require('@/assets/animations/empty-journal.json')}
-                      autoPlay
-                      loop
-                      style={styles.emptyAnimation}
-                    />
-                  </View>
-                  
-                <Text style={[styles.emptyTitle, { color: colors.text }]}>
-                    Start Your Journal Today
-                </Text>
-                <Text style={[styles.emptyText, { color: colors.secondaryText }]}>
-                    Journaling helps track your progress, identify triggers, and celebrate victories.
-                </Text>
-                  <TouchableOpacity
-                    style={[styles.emptyButton, { backgroundColor: colors.primary }]}
-                    onPress={() => setIsWriting(true)}
-                  >
-                    <PlusCircle size={20} color={colors.white} />
-                    <Text style={styles.emptyButtonText}>Write First Entry</Text>
-                  </TouchableOpacity>
+              contentContainerStyle={styles.entriesList}
+              showsVerticalScrollIndicator={false}
+            />
+          ) : (
+            <View style={styles.emptyState}>
+              <View style={styles.emptyStateIcon}>
+                <Calendar size={64} color={colors.secondaryText} />
               </View>
-            }
-          />
-          
-          <TouchableOpacity 
-            style={[styles.addButton, { backgroundColor: colors.primary }]}
-            onPress={() => setIsWriting(true)}
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                No Journal Entries Yet
+              </Text>
+              <Text style={[styles.emptyDescription, { color: colors.secondaryText }]}>
+                Start journaling to track your progress and emotions
+              </Text>
+              
+              <TouchableOpacity
+                style={[styles.emptyButton, { backgroundColor: colors.primary }]}
+                onPress={() => setIsWriting(true)}
+              >
+                <PlusCircle size={20} color="#FFFFFF" />
+                <Text style={styles.emptyButtonText}>Create First Entry</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* New entry button */}
+          {filteredEntries.length > 0 && (
+            <TouchableOpacity 
+              style={[styles.newEntryButton, { backgroundColor: colors.primary }]}
+              onPress={() => setIsWriting(true)}
+              activeOpacity={0.8}
+            >
+              <View style={styles.newEntryButtonInner}>
+                <PlusCircle size={24} color="#FFFFFF" />
+              </View>
+            </TouchableOpacity>
+          )}
+
+          {/* Filter modal */}
+          <Modal
+            visible={filterVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setFilterVisible(false)}
           >
-            <PlusCircle size={24} color={colors.white} />
-          </TouchableOpacity>
-            
-            {/* Filter modal */}
-            {filterVisible && renderFilterModal()}
+            {renderFilterModal()}
+          </Modal>
         </>
+      ) : (
+        // Journal entry form
+        renderEntryForm()
       )}
-      </KeyboardAvoidingView>
     </SafeAreaView>
   );
+  
+  // Render filter modal
+  function renderFilterModal() {
+    return (
+      <BlurView 
+        style={styles.modalOverlay}
+        intensity={Platform.OS === 'ios' ? 10 : 20}
+        tint="dark"
+      >
+        <View style={[styles.filterModal, { backgroundColor: colors.card }]}>
+          <View style={styles.filterHeader}>
+            <Text style={[styles.filterTitle, { color: colors.text }]}>Filter Journal</Text>
+            <TouchableOpacity onPress={() => setFilterVisible(false)}>
+              <X size={24} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+          
+          <TouchableOpacity
+            style={[styles.resetButton, { 
+              borderColor: colors.border,
+              backgroundColor: colors.background
+            }]}
+            onPress={resetFilters}
+          >
+            <Text style={[styles.resetButtonText, { color: colors.text }]}>Reset Filters</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.applyButton, { backgroundColor: colors.primary }]}
+            onPress={() => setFilterVisible(false)}
+          >
+            <Text style={styles.applyButtonText}>Apply Filters</Text>
+          </TouchableOpacity>
+        </View>
+      </BlurView>
+    );
+  }
 }
 
+// Update styles
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 16,
+    paddingHorizontal: 16,
   },
   centeredContainer: {
     flex: 1,
@@ -643,77 +501,116 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   header: {
+    marginBottom: 16,
+  },
+  headerGradient: {
+    paddingVertical: 16,
+    borderRadius: 16,
+  },
+  headerTitleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 4,
   },
-  titleContainer: {
+  headerTitleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  title: {
-    fontSize: 32,
+  headerIcon: {
+    marginRight: 8,
+  },
+  headerTitle: {
+    fontSize: 28,
     fontWeight: 'bold',
-    marginRight: 12,
   },
-  streakBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 152, 0, 0.15)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  streakCount: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FF9800',
-    marginLeft: 4,
-  },
-  actionButtons: {
+  headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  iconButton: {
+  journalDescription: {
+    fontSize: 16,
+    opacity: 0.8,
+    marginTop: 4,
+  },
+  filterButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  filterIndicators: {
+  entriesList: {
+    paddingBottom: 100,
+  },
+  emptyState: {
+    padding: 24,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 40,
+  },
+  emptyStateIcon: {
+    marginBottom: 24,
+    opacity: 0.6,
+  },
+  emptyTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  emptyDescription: {
+    fontSize: 16,
+    textAlign: 'center',
+    marginHorizontal: 40,
+    marginBottom: 32,
+    lineHeight: 22,
+  },
+  emptyButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    paddingVertical: 8,
-    marginBottom: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
   },
-  filterIndicatorText: {
-    fontSize: 14,
-    marginRight: 8,
-  },
-  filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginRight: 8,
-    marginBottom: 4,
-  },
-  filterChipText: {
-    fontSize: 12,
-    fontWeight: '500',
-    marginRight: 4,
-  },
-  clearFilters: {
-    fontSize: 14,
-    fontWeight: '500',
+  emptyButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
     marginLeft: 8,
   },
-  listContent: {
-    paddingBottom: 80,
+  newEntryButton: {
+    position: 'absolute',
+    bottom: 24,
+    right: 24,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 4,
+  },
+  newEntryButtonInner: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   formContainer: {
     flex: 1,
@@ -759,6 +656,7 @@ const styles = StyleSheet.create({
   },
   moodSelector: {
     marginBottom: 20,
+    marginTop: 16,
   },
   moodOptions: {
     flexDirection: 'row',
@@ -794,34 +692,72 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
+  audioPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 8,
+    marginVertical: 10,
+  },
+  audioPreviewText: {
+    marginLeft: 8,
+    flex: 1,
+    fontSize: 14,
+  },
+  removeAudioButton: {
+    padding: 4,
+  },
+  recordButton: {
+    flex: 1,
+    marginRight: 8,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 16,
+  },
+  actionButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
   saveButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
+    padding: 12,
     borderRadius: 16,
-    marginTop: 16,
   },
-  buttonText: {
+  saveButtonText: {
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
   },
-  addButton: {
-    position: 'absolute',
-    bottom: 24,
-    right: 24,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
+  tagsSection: {
+    marginBottom: 24,
+  },
+  tagsList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  tagOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  tagLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  formActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 32,
   },
   modalOverlay: {
     flex: 1,
@@ -844,70 +780,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
-  filterSection: {
-    marginBottom: 20,
-  },
-  filterSectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  moodFilterOptions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-start',
-  },
-  moodFilterOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    marginRight: 8,
-    marginBottom: 8,
-  },
-  moodFilterLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    marginLeft: 4,
-  },
-  tagFilterOptions: {
-    flexDirection: 'row',
-    paddingVertical: 4,
-  },
-  tagFilterChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    marginRight: 8,
-  },
-  tagFilterText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  dateFilterOptions: {
-    flexDirection: 'row',
-  },
-  dateFilterChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    marginRight: 8,
-  },
-  dateFilterText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  filterActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 16,
-  },
   resetButton: {
-    flex: 1,
     padding: 14,
     borderRadius: 16,
-    marginRight: 8,
+    marginBottom: 12,
     borderWidth: 1,
     alignItems: 'center',
   },
@@ -916,57 +792,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   applyButton: {
-    flex: 2,
     padding: 14,
     borderRadius: 16,
-    marginLeft: 8,
     alignItems: 'center',
   },
   applyButtonText: {
     fontSize: 16,
     fontWeight: '600',
     color: 'white',
-  },
-  emptyState: {
-    padding: 24,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 40,
-  },
-  emptyAnimation: {
-    width: 150,
-    height: 150,
-    marginBottom: 20,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  emptyText: {
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 24,
-  },
-  emptyButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 16,
-  },
-  emptyButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'white',
-    marginLeft: 8,
-  },
-  emptyAnimationContainer: {
-    position: 'relative', 
-    width: 150,
-    height: 150,
-  },
+  }
 });
