@@ -25,6 +25,7 @@ import {
   LockKeyhole,
   Trash2,
   AlertTriangle,
+  Activity,
 } from 'lucide-react-native';
 import { getData, STORAGE_KEYS, storeData, removeData, clearAllData } from '@/utils/storage';
 import { useRouter } from 'expo-router';
@@ -212,7 +213,35 @@ export default function SettingsScreen() {
         </BlurView> 
       </View>
 
-
+      {/* Developer Tools */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          Developer Tools
+        </Text>
+        
+        <BlurView intensity={12} tint="dark" style={styles.settingsCard}>
+          <TouchableOpacity 
+            style={styles.settingsRow}
+            onPress={() => router.push('/streak-tester' as any)}
+          >
+            <View style={styles.settingsLeft}>
+              <View style={[styles.iconContainer, { backgroundColor: 'rgba(52, 152, 219, 0.15)' }]}>
+                <Activity size={20} color="#3498db" />
+              </View>
+              <View>
+                <Text style={[styles.settingLabel, { color: colors.text }]}>
+                  Streak Tester
+                </Text>
+                <Text style={[styles.settingDescription, { color: colors.secondaryText }]}>
+                  Test streak functionality
+                </Text>
+              </View>
+            </View>
+            
+            <ChevronRight size={20} color={colors.secondaryText} />
+          </TouchableOpacity>
+        </BlurView>
+      </View>
 
     </ScrollView>
   );

@@ -25,7 +25,9 @@ import Animated, {
   runOnJS,
   FadeIn,
   FadeInDown,
-  SlideInDown
+  SlideInDown,
+  Easing,
+  withRepeat
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -51,6 +53,31 @@ const PLEDGE_STATEMENTS = [
   "I will celebrate each victory, no matter how small.",
   "I deserve freedom, peace, and control over my own life."
 ];
+
+const BlurredOrb = ({ style, color, blur = 40 }: { style?: any; color: string; blur?: number }) => (
+  <View style={[{
+    position: 'absolute',
+    borderRadius: 9999,
+    backgroundColor: color,
+    opacity: 0.18,
+    zIndex: 0,
+    filter: `blur(${blur}px)`
+  }, style]} />
+);
+
+const AnimatedGlowDot = ({ delay = 0 }) => {
+  const scale = useSharedValue(1);
+  useEffect(() => {
+    scale.value = withRepeat(withTiming(1.18, { duration: 1200, easing: Easing.inOut(Easing.ease) }), -1, true);
+  }, []);
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+    shadowColor: '#6E6AFF',
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+  }));
+  return <Animated.View style={[{ width: 12, height: 12, borderRadius: 6, backgroundColor: '#6E6AFF', marginRight: 12 }, animatedStyle]} />;
+};
 
 export default function MyPledgeScreen() {
   const { colors } = useTheme();
@@ -166,6 +193,10 @@ export default function MyPledgeScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar style="light" />
       
+      {/* Animated blurred orbs */}
+      <BlurredOrb style={{ top: -80, left: -60, width: 220, height: 220 }} color={'#6E6AFF'} blur={48} />
+      <BlurredOrb style={{ bottom: -60, right: -40, width: 160, height: 160 }} color={'#22D37F'} blur={36} />
+      
       {/* Animated header */}
       <Animated.View 
         style={[
@@ -200,23 +231,8 @@ export default function MyPledgeScreen() {
       >
         {/* Title container */}
         <Animated.View entering={FadeInDown.delay(200).duration(600)}>
-          {/* Try to load animation, fallback to icon if it fails */}
-          <View style={styles.titleAnimation}>
-            {/* Fallback icon if animation doesn't load */}
-            {!animationLoaded && (
-              <Ionicons name="checkmark-circle" size={80} color={colors.primary} />
-            )}
-            <LottieView
-              ref={lottieRef}
-              source={require('@/assets/animations/pledge.json')}
-              autoPlay
-              loop
-              style={[styles.lottieAnimation, {opacity: animationLoaded ? 1 : 0}]}
-              onAnimationFailure={handleAnimationError}
-              onAnimationFinish={() => setAnimationLoaded(true)}
-            />
-          </View>
-          <Text style={[styles.title, { color: colors.text }]}>My Personal Pledge</Text>
+          <Text style={styles.pledgeTitle}>YOUR PLEDGE</Text>
+          <View style={styles.pledgeUnderline} />
         </Animated.View>
         
         {/* Date display */}
@@ -229,79 +245,46 @@ export default function MyPledgeScreen() {
         
         {/* Main pledge card */}
         <Animated.View 
-          style={[styles.pledgeCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-          entering={FadeInDown.delay(400).duration(600)}
+          style={[styles.pledgeCardGlass]}
+          entering={FadeInDown.delay(400).duration(700)}
         >
-          <LinearGradient
-            colors={[colors.gradientStart, colors.gradientEnd]}
-            style={styles.cardHeader}
-          >
-            <Text style={styles.cardHeaderText}>The Pledge</Text>
-          </LinearGradient>
-          
-          {/* Rotating pledge statements */}
-          <View style={styles.statementContainer}>
-            {PLEDGE_STATEMENTS.map((statement, index) => (
-              <Animated.Text
-                key={index}
-                style={[
-                  styles.pledgeStatement,
-                  { color: colors.text, opacity: activeIndex === index ? 1 : 0 }
-                ]}
-              >
-                "{statement}"
-              </Animated.Text>
-            ))}
-          </View>
-          
-          {/* Signature section */}
-          <View style={styles.signatureSection}>
-            <Text style={[styles.signatureLabel, { color: colors.secondaryText }]}>
-              My Signature
-            </Text>
-            
-            {loadingSignature ? (
-              <ActivityIndicator size="large" color={colors.primary} />
-            ) : signature ? (
-              <Animated.View style={[styles.signatureBox, signatureAnimatedStyle]}>
-                <Image 
-                  source={{ uri: signature }} 
-                  style={styles.signatureImage}
-                  resizeMode="contain"
-                />
+          <View style={styles.pledgePointsContainer}>
+            {PLEDGE_STATEMENTS.map((statement, idx) => (
+              <Animated.View key={idx} entering={FadeInDown.delay(200 + idx * 100).duration(600)} style={styles.pledgePointRow}>
+                <AnimatedGlowDot delay={idx * 100} />
+                <Text style={styles.pledgePointText}>{statement}</Text>
               </Animated.View>
-            ) : (
-              <View style={[styles.noSignature, { borderColor: colors.border }]}>
-                <Text style={[styles.noSignatureText, { color: colors.secondaryText }]}>
-                  No signature found. Please complete the onboarding process.
-                </Text>
-              </View>
-            )}
-          </View>
-          
-          {/* Current streak display */}
-          <View style={[styles.streakSection, { backgroundColor: colors.cardAlt }]}>
-            <Text style={[styles.streakLabel, { color: colors.secondaryText }]}>
-              Current Streak
-            </Text>
-            <Text style={[styles.streakValue, { color: colors.primary }]}>
-              {streak} {streak === 1 ? 'day' : 'days'}
-            </Text>
+            ))}
           </View>
         </Animated.View>
         
-        {/* Renew button */}
-        <Animated.View entering={FadeInDown.delay(500).duration(600)}>
-          <TouchableOpacity 
-            style={[styles.renewButton, { backgroundColor: colors.accent }]}
-            onPress={() => {
-              // Animate the lottie animation to completion
-              if (lottieRef.current) {
-                lottieRef.current.play(0, 100);
-              }
-            }}
-          >
-            <Text style={styles.renewButtonText}>Renew My Commitment</Text>
+        {/* Signature card */}
+        <Animated.View style={styles.signatureCardGlass} entering={FadeInDown.delay(700).duration(700)}>
+          <Text style={styles.signatureCardTitle}>SIGN TO COMMIT</Text>
+          <View style={styles.signatureBoxGlass}>
+            {/* Signature pad or image here */}
+            {/* Add a clear button in the top right */}
+            <TouchableOpacity style={styles.clearButton}>
+              <Ionicons name="close-circle" size={22} color="#6E6AFF" />
+            </TouchableOpacity>
+            {/* ...signature pad or image... */}
+          </View>
+          <Text style={styles.signatureHint}>Draw your signature above</Text>
+          <Text style={styles.signatureSubHint}>Use your finger or stylus to sign</Text>
+        </Animated.View>
+        
+        {/* Commit button */}
+        <Animated.View entering={FadeInDown.delay(1000).duration(700)}>
+          <TouchableOpacity style={styles.commitButton}>
+            <LinearGradient
+              colors={["#6E6AFF", "#584EE0"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.commitButtonGradient}
+            >
+              <Text style={styles.commitButtonText}>I COMMIT</Text>
+              <Ionicons name="arrow-forward" size={20} color="#fff" style={{ marginLeft: 8 }} />
+            </LinearGradient>
           </TouchableOpacity>
         </Animated.View>
       </Animated.ScrollView>
@@ -350,24 +333,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
   },
-  titleAnimation: {
-    width: 120,
-    height: 120,
-    alignSelf: 'center',
-    marginBottom: -30,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  lottieAnimation: {
-    width: 120,
-    height: 120,
-    position: 'absolute',
-  },
-  title: {
+  pledgeTitle: {
     fontSize: 28,
-    fontFamily: 'Nunito-Bold',
+    fontWeight: '800',
+    color: '#fff',
     textAlign: 'center',
-    marginBottom: 5,
+    marginTop: 16,
+    letterSpacing: -0.5,
+  },
+  pledgeUnderline: {
+    width: 60,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#6E6AFF',
+    alignSelf: 'center',
+    marginTop: 6,
+    marginBottom: 18,
+    opacity: 0.8,
   },
   date: {
     fontSize: 14,
@@ -375,105 +357,114 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     textAlign: 'center',
   },
-  pledgeCard: {
+  pledgeCardGlass: {
     width: '100%',
-    borderRadius: 20,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255,255,255,0.11)',
+    padding: 28,
+    marginBottom: 32,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.13,
+    shadowRadius: 18,
+  },
+  pledgePointsContainer: {
+    width: '100%',
+    marginTop: 4,
+  },
+  pledgePointRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 18,
+  },
+  pledgePointText: {
+    fontSize: 17,
+    color: '#fff',
+    fontWeight: '500',
+    letterSpacing: -0.2,
+    flex: 1,
+  },
+  signatureCardGlass: {
+    width: '100%',
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.09)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255,255,255,0.13)',
+    padding: 24,
+    marginBottom: 32,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.13,
+    shadowRadius: 18,
+    alignItems: 'center',
+  },
+  signatureCardTitle: {
+    color: '#6E6AFF',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+    marginBottom: 12,
+  },
+  signatureBoxGlass: {
+    width: '100%',
+    height: 110,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.12)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255,255,255,0.13)',
+    marginBottom: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
     overflow: 'hidden',
-    borderWidth: 1,
-    marginBottom: 25,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.10,
     shadowRadius: 8,
-    elevation: 4,
   },
-  cardHeader: {
-    paddingVertical: 15,
-    width: '100%',
-    alignItems: 'center',
-  },
-  cardHeaderText: {
-    color: '#fff',
-    fontSize: 18,
-    fontFamily: 'Nunito-Bold',
-  },
-  statementContainer: {
-    height: 120,
-    padding: 20,
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  pledgeStatement: {
-    fontSize: 16,
-    fontFamily: 'Nunito-SemiBold',
-    textAlign: 'center',
-    lineHeight: 24,
+  clearButton: {
     position: 'absolute',
-    width: '100%',
-    left: 20,
-    right: 20,
+    top: 8,
+    right: 8,
+    zIndex: 2,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 12,
+    padding: 2,
   },
-  signatureSection: {
-    padding: 20,
-    alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(150,150,150,0.1)',
-  },
-  signatureLabel: {
+  signatureHint: {
+    color: '#6E6AFF',
     fontSize: 14,
-    fontFamily: 'Nunito-SemiBold',
-    marginBottom: 10,
+    fontWeight: '500',
+    marginTop: 2,
+    marginBottom: 2,
   },
-  signatureBox: {
+  signatureSubHint: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 13,
+    marginBottom: 2,
+  },
+  commitButton: {
     width: '100%',
-    height: 120,
-    justifyContent: 'center',
-    alignItems: 'center',
+    borderRadius: 18,
+    overflow: 'hidden',
+    shadowColor: '#6E6AFF',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
   },
-  signatureImage: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: 'transparent',
-  },
-  noSignature: {
-    width: '100%',
-    height: 100,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderStyle: 'dashed',
-    borderWidth: 1,
-    borderRadius: 10,
-    padding: 15,
-  },
-  noSignatureText: {
-    fontSize: 14,
-    fontFamily: 'Nunito-Regular',
-    textAlign: 'center',
-  },
-  streakSection: {
+  commitButtonGradient: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 15,
+    justifyContent: 'center',
+    width: '100%',
+    height: 60,
   },
-  streakLabel: {
-    fontSize: 14,
-    fontFamily: 'Nunito-SemiBold',
-  },
-  streakValue: {
-    fontSize: 18,
-    fontFamily: 'Nunito-Bold',
-  },
-  renewButton: {
-    paddingVertical: 15,
-    paddingHorizontal: 25,
-    borderRadius: 30,
-    marginTop: 10,
-  },
-  renewButtonText: {
+  commitButtonText: {
     color: '#fff',
-    fontSize: 16,
-    fontFamily: 'Nunito-Bold',
-    textAlign: 'center',
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: -0.3,
   },
 });

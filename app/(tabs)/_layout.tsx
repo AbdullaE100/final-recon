@@ -1,9 +1,9 @@
+import React, { useEffect } from 'react';
 import { Tabs } from 'expo-router';
 import { Home, BookOpen, Award, BarChart, Settings } from 'lucide-react-native';
 import { useTheme } from '@/context/ThemeContext';
 import { StyleSheet, View } from 'react-native';
 import { useAuth } from '@/context/AuthContext';
-import { useEffect } from 'react';
 import { supabase } from '@/utils/supabaseClient';
 
 export default function TabLayout() {

@@ -20,6 +20,7 @@ import Animated, {
   Easing,
   interpolate,
   withDelay,
+  withRepeat,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
@@ -574,6 +575,50 @@ const getSimplifiedTimeImpact = (hours: number): string => {
   }
 };
 
+// Animated number count-up for stats
+const AnimatedNumber = ({ value, duration = 1200, style, suffix = '' }: { value: number; duration?: number; style?: any; suffix?: string }) => {
+  const animated = useSharedValue(0);
+  useEffect(() => {
+    animated.value = withTiming(value, { duration, easing: Easing.out(Easing.cubic) });
+  }, [value]);
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: 1,
+    transform: [{ translateY: 0 }],
+  }));
+  return (
+    <Animated.Text style={[{ fontSize: 44, fontWeight: '800', color: '#fff', textAlign: 'center', letterSpacing: -1, textShadowColor: 'rgba(110,106,255,0.18)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 10 }, style, animatedStyle]}>
+      {animated.value.toFixed(0)}{suffix}
+    </Animated.Text>
+  );
+};
+
+const AnimatedRiskBadge = ({ riskLevel, color }: { riskLevel: string; color: string }) => {
+  const pulse = useSharedValue(1);
+  useEffect(() => {
+    if (riskLevel === 'High Risk') {
+      pulse.value = withRepeat(withTiming(1.08, { duration: 900, easing: Easing.inOut(Easing.ease) }), -1, true);
+    }
+  }, [riskLevel]);
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: pulse.value }],
+    shadowColor: color,
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+  }));
+  return (
+    <Animated.View style={[styles.riskBadgeWrapper, animatedStyle]}> 
+      <LinearGradient
+        colors={[color, color + '99']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.riskBadgeGradient}
+      >
+        <Text style={styles.riskBadgeText}>{riskLevel}</Text>
+      </LinearGradient>
+    </Animated.View>
+  );
+};
+
 const QuizResultsScreen: React.FC<QuizResultsScreenProps> = ({ answers, onContinue }) => {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -582,221 +627,80 @@ const QuizResultsScreen: React.FC<QuizResultsScreenProps> = ({ answers, onContin
   // Calculate data based on answers
   const timeWasted = getTimeWastedData(answers);
   const riskFactors = calculateRiskFactors(answers);
-  
-  // Calculate yearly time wasted
   const yearlyHours = Math.round(timeWasted * 365);
-  const fiveYearHours = yearlyHours * 5;
-  const tenYearHours = yearlyHours * 10;
-  
-  // Get potential achievements with recovered time
+  const weeklyHours = (timeWasted * 7);
   const potentialAchievements = getPotentialAchievements(yearlyHours).slice(0, 1);
+  const riskColor = riskFactors[0]?.color || '#FF5858';
+  const riskPercent = riskFactors[0]?.percentage || 0;
+  const riskLevel = riskPercent >= 80 ? 'High Risk' : riskPercent >= 60 ? 'Moderate Risk' : 'Low Risk';
 
-  // Get time comparison text based on user's time usage
-  const comparisonText = getComparisonText(timeWasted);
-
-  // Navigation handlers - keep just for compatibility, we don't use these
-  const goToNextSlide = () => {
-    setCurrentSlide(1);
-  };
-
-  const goToPrevSlide = () => {
-    setCurrentSlide(0);
-  };
-
-  // We don't use this anymore, but keep for compatibility
-  const maxTimeValue = Math.max(yearlyHours, Math.round(fiveYearHours / 5), Math.round(tenYearHours / 10));
+  // Animate progress bar for achievement
+  const progress = useSharedValue(0);
+  useEffect(() => {
+    progress.value = withDelay(600, withTiming(Math.min(1, yearlyHours / (potentialAchievements[0]?.timeRequired || 30)), { duration: 1200, easing: Easing.out(Easing.cubic) }));
+  }, [yearlyHours, potentialAchievements]);
+  const progressBarStyle = useAnimatedStyle(() => ({
+    width: `${Math.max(1, Math.min(100, progress.value * 100))}%`,
+  }));
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Enhanced Background gradient */}
+    <View style={[styles.container, { backgroundColor: '#0A0A0C' }]}> {/* Apple dark theme */}
+      <BackgroundParticles />
+      <View style={styles.orb1} />
+      <View style={styles.orb2} />
       <LinearGradient
-        colors={['#161D3F', '#0C1429', '#060A18']}
+        colors={["#0A0A0C", "#111116", "#13131A"]}
         start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
+        end={{ x: 1, y: 1 }}
         style={StyleSheet.absoluteFill}
       />
-      
-      <View style={[styles.slideContainer, { paddingBottom: insets.bottom + 20, paddingTop: insets.top + 10 }]}>
-        {/* Common Title for both slides */}
-        {false && (
-          <Animated.View entering={FadeIn.duration(400).delay(200)} style={styles.titleContainer}>
-            <BlurView intensity={30} tint="dark" style={styles.titleBlur}>
-              <Text style={styles.title}>Recovery Profile</Text>
-              <Text style={styles.subtitle}>
-                Personalized insights based on your responses
-              </Text>
-            </BlurView>
-          </Animated.View>
-        )}
-        
-        {/* Slide 1: Time Impact */}
-        {currentSlide === 0 && (
-          <View style={styles.slideContent}>
-            {/* Time Impact Card */}
-            <Animated.View
-              entering={FadeInUp.duration(600).delay(300).springify()}
-              style={styles.timeCardContainer}
+      <View style={[styles.content, { paddingBottom: insets.bottom + 24, paddingTop: insets.top + 12 }]}> 
+        {/* Animated Risk Badge */}
+        <AnimatedRiskBadge riskLevel={riskLevel} color={riskColor} />
+        {/* Animated Time Circle for Weekly Time */}
+        <AnimatedTimeCircle hours={weeklyHours} />
+        {/* Animated Annual Projection */}
+        <Text style={[styles.statsLabel, { marginTop: 24 }]}>Annual Projection</Text>
+        <AnimatedNumber value={yearlyHours} duration={1400} style={{ marginTop: 0 }} suffix={' hours/year'} />
+        <Text style={styles.statsSubtext}>That's {(yearlyHours/24).toFixed(1)} days you never get back</Text>
+        {/* Emotional Headline */}
+        <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700', marginTop: 32, marginBottom: 8, textAlign: 'center', letterSpacing: -0.3 }}>Your Time is Priceless</Text>
+        <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 16, textAlign: 'center', marginBottom: 24 }}>Imagine what you could achieve with just a fraction of this time.</Text>
+        {/* Carousel for Achievements */}
+        <Animated.View entering={FadeIn.duration(900).delay(300)} style={styles.achievementCarousel}>
+          <BlurView intensity={22} tint="dark" style={styles.achievementCard}>
+            <View style={styles.achievementHeader}>
+              <Code size={28} color="#6E6AFF" style={{ marginRight: 12 }} />
+              <Text style={styles.achievementTitle}>{potentialAchievements[0]?.activity || 'Learn Basic Coding – 30 Hours'}</Text>
+            </View>
+            <Text style={styles.achievementDesc}>{potentialAchievements[0]?.description || 'Master HTML, CSS fundamentals'}</Text>
+            <View style={styles.achievementTimeRow}>
+              <Clock size={16} color="#6E6AFF" style={{ marginRight: 6 }} />
+              <Text style={styles.achievementTimeText}>{potentialAchievements[0]?.timeToComplete || '~30 hrs'}</Text>
+              <Text style={styles.achievementRepeatText}>You could do this {yearlyHours && potentialAchievements[0]?.timeRequired ? `${Math.floor(yearlyHours / potentialAchievements[0].timeRequired)}×` : '4×'}</Text>
+            </View>
+            <View style={styles.achievementProgressBarTrack}>
+              <Animated.View style={[styles.achievementProgressBar, progressBarStyle]} />
+            </View>
+          </BlurView>
+        </Animated.View>
+        {/* Motivational Subtext */}
+        <Text style={styles.motivationText}>Choose growth over guilt.</Text>
+        {/* Vibrant Button */}
+        <Animated.View entering={FadeIn.duration(1000).delay(400)}>
+          <TouchableOpacity style={styles.readyButton} onPress={onContinue} activeOpacity={0.8}>
+            <LinearGradient
+              colors={["#6E6AFF", "#584EE0"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.readyButtonGradient}
             >
-              <BlurView intensity={20} tint="dark" style={styles.timeCard}>
-                {/* Header with icon */}
-                <View style={styles.cardHeader}>
-                  <View style={styles.iconContainer}>
-                    <Clock size={20} color="#FF7E5F" />
-                  </View>
-                  <Text style={styles.cardTitle}>Time Cost Analysis</Text>
-                </View>
-                
-                {/* Enhanced time circle visualization */}
-                <AnimatedTimeCircle hours={timeWasted * 7} />
-                
-                {/* Simplified compelling message */}
-                <View style={styles.compellingMessageContainer}>
-                  <Text style={styles.compellingTitle}>
-                    {Math.round(yearlyHours)} hours per year
-                  </Text>
-                  <Text style={styles.compellingSubtitle}>
-                    of valuable time you can reclaim
-                  </Text>
-                  <View style={styles.impactHighlight}>
-                    <Text style={styles.impactHighlightText}>
-                      That's {getSimplifiedTimeImpact(yearlyHours)} of focused productivity you could use to transform your life and achieve your goals!
-                    </Text>
-                  </View>
-                  <Text style={styles.compellingCallToAction}>
-                    Thousands of users have already reclaimed their time and built healthier habits. Start your journey today!
-                  </Text>
-                </View>
-                
-                {/* Navigation button moved inside the card */}
-                <View style={styles.navButtonContainer}>
-                  <TouchableOpacity 
-                    style={styles.navButton}
-                    onPress={onContinue}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.navButtonText}>Start My Recovery Journey</Text>
-                    <ArrowRight size={18} color="#FFFFFF" style={styles.navButtonIcon} />
-                  </TouchableOpacity>
-                </View>
-              </BlurView>
-            </Animated.View>
-          </View>
-        )}
-        
-        {/* Slide 2: Risk Analysis */}
-        {currentSlide === 1 && (
-          <View style={styles.slideContent}>
-            {/* Risk Analysis Section */}
-            <Animated.View
-              entering={FadeInUp.duration(600).delay(300).springify()}
-              style={styles.riskCardContainer}
-            >
-              <BlurView intensity={20} tint="dark" style={styles.riskCard}>
-                {/* Header with icon */}
-                <View style={styles.cardHeader}>
-                  <View style={[styles.iconContainer, {backgroundColor: 'rgba(255, 82, 82, 0.15)'}]}>
-                    <AlertCircle size={20} color="#FF5252" />
-                  </View>
-                  <Text style={styles.cardTitle}>Primary Risk Factor</Text>
-                </View>
-                
-                {riskFactors.length > 0 && (
-                  <View style={styles.riskContent}>
-                    <View style={styles.riskNameRow}>
-                      <Text style={styles.riskName}>{riskFactors[0].name}</Text>
-                      <View style={styles.riskPercentageContainer}>
-                        <Text style={styles.riskPercentageValue}>{riskFactors[0].percentage}%</Text>
-                      </View>
-                    </View>
-                    
-                    <View style={styles.riskBarContainer}>
-                      <LinearGradient
-                        colors={['#FF5858', '#FF5858AA']}
-                        start={{x: 0, y: 0.5}}
-                        end={{x: 1, y: 0.5}}
-                        style={[styles.riskBarFill, {width: `${riskFactors[0].percentage}%`}]}
-                      />
-                    </View>
-                    
-                    <Text style={styles.riskDescription}>{riskFactors[0].description}</Text>
-                  </View>
-                )}
-              </BlurView>
-            </Animated.View>
-            
-            {/* Additional Risk Factors */}
-            <Animated.View
-              entering={FadeInUp.duration(600).delay(500).springify()}
-              style={styles.additionalRisksContainer}
-            >
-              <BlurView intensity={16} tint="dark" style={styles.additionalRisksCard}>
-                <Text style={styles.sectionTitle}>Additional Risk Factors</Text>
-                
-                {riskFactors.slice(1, 3).map((factor, index) => (
-                  <View key={index} style={styles.miniRiskItem}>
-                    <View style={styles.miniRiskHeader}>
-                      <View style={[styles.miniRiskDot, {backgroundColor: factor.color}]} />
-                      <Text style={styles.miniRiskName}>{factor.name}</Text>
-                      <Text style={styles.miniRiskPercent}>{factor.percentage}%</Text>
-                    </View>
-                    
-                    <View style={styles.miniRiskBarTrack}>
-                      <LinearGradient
-                        colors={[factor.color, factor.color + '99']}
-                        start={{x: 0, y: 0.5}}
-                        end={{x: 1, y: 0.5}}
-                        style={[styles.miniRiskBarFill, {width: `${factor.percentage}%`}]} 
-                      />
-                    </View>
-                  </View>
-                ))}
-              </BlurView>
-            </Animated.View>
-            
-            {/* Potential Achievement Card */}
-            <Animated.View
-              entering={FadeInUp.duration(600).delay(700).springify()}
-              style={styles.achievementCardContainer}
-            >
-              <BlurView intensity={16} tint="dark" style={styles.achievementCard}>
-                <View style={styles.cardHeader}>
-                  <View style={[styles.iconContainer, {backgroundColor: 'rgba(79, 195, 247, 0.15)'}]}>
-                    <TrendingUp size={20} color="#4FC3F7" />
-                  </View>
-                  <Text style={styles.cardTitle}>What You Could Achieve</Text>
-                </View>
-                
-                {potentialAchievements.length > 0 && (
-                  <View style={styles.achievementContent}>
-                    <View style={styles.achievementHeader}>
-                      <Text style={styles.achievementTitle}>{potentialAchievements[0].activity}</Text>
-                      <View style={styles.achievementTimeWrapper}>
-                        <Clock size={12} color="#4FC3F7" style={{marginRight: 4}} />
-                        <Text style={styles.achievementTimeText}>
-                          {potentialAchievements[0].timeToComplete}
-                        </Text>
-                      </View>
-                    </View>
-                    
-                    <Text style={styles.achievementDescription}>
-                      {potentialAchievements[0].description}
-                    </Text>
-                  </View>
-                )}
-              </BlurView>
-            </Animated.View>
-          </View>
-        )}
-        
-        {/* Pagination Indicator */}
-        <View style={styles.paginationContainer}>
-          <View style={[styles.paginationDot, currentSlide === 0 ? styles.activeDot : {}]} />
-          <View style={[styles.paginationDot, currentSlide === 1 ? styles.activeDot : {}]} />
-        </View>
+              <Text style={styles.readyButtonText}>I'm Ready</Text>
+              <ArrowRight size={20} color="#fff" style={{ marginLeft: 10 }} />
+            </LinearGradient>
+          </TouchableOpacity>
+        </Animated.View>
       </View>
-      
-      {/* Background effects */}
-      <BackgroundParticles />
     </View>
   );
 };
@@ -804,94 +708,218 @@ const QuizResultsScreen: React.FC<QuizResultsScreenProps> = ({ answers, onContin
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0D1125',
+    backgroundColor: '#0A0A0C',
   },
-  slideContainer: {
-    flex: 1,
-    width: '100%',
-    paddingHorizontal: 20,
-    paddingBottom: 20,
+  orb1: {
+    position: 'absolute',
+    top: -120,
+    left: -80,
+    width: 320,
+    height: 320,
+    borderRadius: 160,
+    backgroundColor: 'rgba(110,106,255,0.18)',
+    zIndex: 0,
+    filter: 'blur(40px)',
   },
-  slideContent: {
+  orb2: {
+    position: 'absolute',
+    bottom: -100,
+    right: -60,
+    width: 260,
+    height: 260,
+    borderRadius: 130,
+    backgroundColor: 'rgba(34,211,127,0.13)',
+    zIndex: 0,
+    filter: 'blur(32px)',
+  },
+  content: {
     flex: 1,
+    alignItems: 'center',
     justifyContent: 'center',
-  },
-  titleContainer: {
-    marginBottom: 15,
-    borderRadius: 20,
-    overflow: 'hidden',
-  },
-  titleBlur: {
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    textAlign: 'center',
-    letterSpacing: 0.2,
-    marginBottom: 8,
-    textShadowColor: 'rgba(79, 195, 247, 0.3)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 12,
-  },
-  subtitle: {
-    fontSize: 16,
-    fontWeight: '400',
-    color: 'rgba(255, 255, 255, 0.7)',
-    textAlign: 'center',
-    letterSpacing: 0.1,
-  },
-  timeCardContainer: {
     width: '100%',
+    paddingHorizontal: 20,
+    zIndex: 1,
+  },
+  riskBadgeWrapper: {
+    alignSelf: 'center',
+    marginBottom: 18,
+    marginTop: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
     borderRadius: 22,
+    overflow: 'visible',
+  },
+  riskBadgeGradient: {
+    paddingHorizontal: 32,
+    paddingVertical: 10,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 140,
+  },
+  riskBadgeText: {
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+    color: '#fff',
+    textShadowColor: 'rgba(0,0,0,0.18)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
+  },
+  statsCardWrapper: {
+    width: '100%',
+    marginBottom: 32,
+    borderRadius: 32,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+  },
+  statsCard: {
+    paddingVertical: 38,
+    paddingHorizontal: 32,
+    borderRadius: 32,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.13)',
+    alignItems: 'center',
+  },
+  statsLabel: {
+    fontSize: 18,
+    color: 'rgba(255,255,255,0.7)',
+    fontWeight: '500',
+    letterSpacing: -0.2,
+    marginTop: 6,
+    marginBottom: 2,
+    textAlign: 'center',
+  },
+  statsValue: {
+    fontSize: 44,
+    color: '#fff',
+    fontWeight: '800',
+    letterSpacing: -1,
+    textAlign: 'center',
+    textShadowColor: 'rgba(110,106,255,0.18)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 10,
+  },
+  statsUnit: {
+    fontSize: 18,
+    color: 'rgba(255,255,255,0.5)',
+    fontWeight: '400',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  statsDivider: {
+    width: '60%',
+    height: 2,
+    backgroundColor: 'rgba(255,255,255,0.09)',
+    marginVertical: 18,
+    borderRadius: 1,
+    alignSelf: 'center',
+  },
+  statsSubtext: {
+    marginTop: 18,
+    fontSize: 15,
+    color: 'rgba(255,255,255,0.6)',
+    fontStyle: 'italic',
+    alignSelf: 'center',
+    textAlign: 'center',
+  },
+  achievementCarousel: {
+    width: '100%',
+    marginBottom: 32,
+    borderRadius: 24,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    marginTop: 15,
-    elevation: 10,
-    flex: 1,
-    justifyContent: 'space-between',
+    shadowOpacity: 0.13,
+    shadowRadius: 18,
   },
-  timeCard: {
-    padding: 20,
-    borderRadius: 22,
-    backgroundColor: 'rgba(28, 32, 72, 0.95)',
-    flex: 1,
-    justifyContent: 'space-between',
+  achievementCard: {
+    padding: 28,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255,255,255,0.11)',
   },
-  cardHeader: {
+  achievementHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 22,
+    marginBottom: 10,
   },
-  iconContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255, 126, 95, 0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-    shadowColor: '#FF7E5F',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 6,
-  },
-  cardTitle: {
-    fontSize: 22,
+  achievementTitle: {
+    fontSize: 20,
     fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: 0.4,
+    color: '#fff',
+    letterSpacing: -0.3,
+  },
+  achievementDesc: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.7)',
+    marginBottom: 12,
+    fontWeight: '400',
+  },
+  achievementTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  achievementTimeText: {
+    fontSize: 16,
+    color: '#6E6AFF',
+    fontWeight: '600',
+    marginRight: 10,
+  },
+  achievementRepeatText: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.7)',
+    fontWeight: '400',
+  },
+  achievementProgressBarTrack: {
+    width: '100%',
+    height: 9,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderRadius: 5,
+    marginTop: 2,
+    marginBottom: 2,
+    overflow: 'hidden',
+  },
+  achievementProgressBar: {
+    height: 9,
+    borderRadius: 5,
+  },
+  motivationText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 16,
+    fontStyle: 'italic',
+    marginBottom: 32,
+    alignSelf: 'center',
+    textAlign: 'center',
+  },
+  readyButton: {
+    width: '100%',
+    borderRadius: 18,
+    overflow: 'hidden',
+    shadowColor: '#6E6AFF',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+  },
+  readyButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: 60,
+  },
+  readyButtonText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: -0.3,
   },
   timeCircleContainer: {
     alignItems: 'center',
@@ -930,38 +958,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     letterSpacing: 0.5,
   },
-  timeBarsContainer: {
-    marginTop: 30,
-  },
-  timeImpactHeader: {
-    marginBottom: 15,
-  },
-  timeImpactTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    letterSpacing: 0.2,
-  },
-  comparisonContainer: {
-    width: '100%',
-    borderRadius: 22,
-    overflow: 'hidden',
-    marginBottom: 22,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 10,
-  },
-  comparisonCard: {
-    padding: 22,
-    borderRadius: 22,
-    backgroundColor: 'rgba(28, 32, 72, 0.95)',
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
   percentileContainer: {
     width: 110,
     height: 110,
@@ -988,71 +984,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     marginTop: 4,
   },
-  comparisonTextContent: {
-    flex: 1,
-    marginLeft: 18,
-  },
-  comparisonTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: 'rgba(255, 255, 255, 0.8)',
-    letterSpacing: 1.0,
-    marginBottom: 8,
-  },
-  comparisonValue: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 8,
-  },
-  comparisonDetail: {
-    fontSize: 15,
-    lineHeight: 22,
-    color: 'rgba(255, 255, 255, 0.8)',
-    letterSpacing: 0.2,
-  },
-  navButtonContainer: {
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  navButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#5E5CFF',
-    paddingVertical: 16,
-    borderRadius: 16,
-    shadowColor: '#5E5CFF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  navButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '700',
-    letterSpacing: 0.4,
-  },
-  navButtonIcon: {
-    marginLeft: 10,
-  },
-  paginationContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    paddingVertical: 12,
-  },
-  paginationDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    marginHorizontal: 4,
-  },
-  activeDot: {
-    backgroundColor: '#FFFFFF',
-    width: 20,
-  },
   particlesContainer: {
     ...StyleSheet.absoluteFillObject,
     zIndex: -1,
@@ -1061,273 +992,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     backgroundColor: '#FFFFFF',
     borderRadius: 50,
-  },
-  risksOpacity: {
-    opacity: 0,
-    transform: [{ translateY: 20 }],
-  },
-  achievementsOpacity: {
-    opacity: 0,
-    transform: [{ translateY: 20 }],
-  },
-  risksStyle: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: -1,
-  },
-  achievementsStyle: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: -1,
-  },
-  riskCardContainer: {
-    width: '100%',
-    borderRadius: 22,
-    overflow: 'hidden',
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  riskCard: {
-    padding: 22,
-    borderRadius: 22,
-    backgroundColor: 'rgba(32, 35, 72, 0.5)',
-  },
-  riskContent: {
-    marginTop: 10,
-  },
-  riskNameRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  riskName: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  riskPercentageContainer: {
-    backgroundColor: 'rgba(255, 82, 82, 0.15)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  riskPercentageValue: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#FF5252',
-  },
-  riskBarContainer: {
-    height: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: 5,
-    overflow: 'hidden',
-    marginBottom: 16,
-  },
-  riskBarFill: {
-    height: '100%',
-    borderRadius: 5,
-  },
-  riskDescription: {
-    fontSize: 15,
-    lineHeight: 22,
-    color: 'rgba(255, 255, 255, 0.8)',
-  },
-  additionalRisksContainer: {
-    width: '100%',
-    borderRadius: 22,
-    overflow: 'hidden',
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  additionalRisksCard: {
-    padding: 22,
-    borderRadius: 22,
-    backgroundColor: 'rgba(32, 35, 72, 0.5)',
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    marginBottom: 16,
-  },
-  miniRiskItem: {
-    marginBottom: 14,
-  },
-  miniRiskHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  miniRiskDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  miniRiskName: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#FFFFFF',
-  },
-  miniRiskPercent: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginLeft: 8,
-  },
-  miniRiskBarTrack: {
-    height: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  miniRiskBarFill: {
-    height: '100%',
-    borderRadius: 3,
-  },
-  achievementCardContainer: {
-    width: '100%',
-    borderRadius: 22,
-    overflow: 'hidden',
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  achievementCard: {
-    padding: 22,
-    borderRadius: 22,
-    backgroundColor: 'rgba(32, 35, 72, 0.5)',
-  },
-  achievementContent: {
-    marginTop: 10,
-  },
-  achievementHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 14,
-    flexWrap: 'wrap',
-  },
-  achievementTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    marginRight: 10,
-    marginBottom: 5,
-  },
-  achievementTimeWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(79, 195, 247, 0.15)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    alignSelf: 'flex-start',
-  },
-  achievementTimeText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#4FC3F7',
-  },
-  achievementDescription: {
-    fontSize: 15,
-    lineHeight: 22,
-    color: 'rgba(255, 255, 255, 0.8)',
-  },
-  navigationRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 10,
-  },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  backButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '500',
-    marginLeft: 6,
-  },
-  continueButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    borderRadius: 16,
-    backgroundColor: '#5B5AF8',
-    shadowColor: '#5B5AF8',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    marginLeft: 12,
-  },
-  continueButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginRight: 8,
-  },
-  timeEquivalent: {
-    marginTop: -5,
-    marginBottom: 12,
-    marginLeft: 58,
-  },
-  timeEquivalentText: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontStyle: 'italic',
-  },
-  impactHighlight: {
-    marginTop: 10,
-    marginBottom: 20,
-    padding: 15,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 126, 95, 0.15)',
-    width: '100%',
-  },
-  impactHighlightText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'rgba(255, 255, 255, 0.9)',
-    textAlign: 'center',
-    lineHeight: 24,
-  },
-  compellingMessageContainer: {
-    marginTop: 20,
-    alignItems: 'center',
-  },
-  compellingTitle: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  compellingSubtitle: {
-    fontSize: 18,
-    fontWeight: '500',
-    color: 'rgba(255, 255, 255, 0.8)',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  compellingCallToAction: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginTop: 10,
-    textAlign: 'center',
-    lineHeight: 24,
   },
 });
 

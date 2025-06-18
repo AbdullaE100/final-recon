@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Pressable, Platform, ColorValue } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Pressable, Platform, ColorValue , StatusBar } from 'react-native';
 import { useGamification } from '@/context/GamificationContext';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView , useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { 
   FadeIn, 
@@ -13,8 +13,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { StatusBar } from 'react-native';
 import LottieView from 'lottie-react-native';
 import { Achievement } from '@/types/gamification';
 import { storeData, getData, STORAGE_KEYS } from '@/utils/storage';

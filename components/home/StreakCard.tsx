@@ -1,104 +1,122 @@
-import { StyleSheet, View, Text } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, Animated } from 'react-native';
+import { BlurView } from 'expo-blur';
+import { useGamification } from '@/context/GamificationContext';
 import { useTheme } from '@/context/ThemeContext';
-import { Clock } from 'lucide-react-native';
-import Animated, { useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
 
 interface StreakCardProps {
-  streak: number;
+  streak?: number;
 }
 
-export default function StreakCard({ streak }: StreakCardProps) {
+export const StreakCard: React.FC<StreakCardProps> = ({ streak: propStreak }) => {
+  const { streak: contextStreak } = useGamification();
   const { colors } = useTheme();
   
-  // Animated style for the streak counter to bounce when it changes
-  const animatedStyle = useAnimatedStyle(() => {
-    return {
-      transform: [{ scale: withSpring(1.05, { damping: 10 }) }],
-    };
-  });
-
-  let streakMessage = 'Keep going!';
-  let streakColor = colors.primary;
+  // Single source of truth for streak display
+  const [displayStreak, setDisplayStreak] = useState(propStreak ?? contextStreak ?? 0);
+  const prevStreakRef = useRef(displayStreak);
+  const animatedValue = useRef(new Animated.Value(1)).current;
   
-  if (streak === 0) {
-    streakMessage = 'Start your journey today!';
-    streakColor = colors.text;
-  } else if (streak >= 90) {
-    streakMessage = 'Incredible discipline!';
-    streakColor = colors.success;
-  } else if (streak >= 30) {
-    streakMessage = 'Amazing progress!';
-    streakColor = colors.success;
-  } else if (streak >= 7) {
-    streakMessage = 'Building strong habits!';
-    streakColor = colors.primary;
-  }
+  // Consolidate streak update logic into a single effect
+  useEffect(() => {
+    const newStreak = propStreak ?? contextStreak ?? 0;
+    
+    if (newStreak !== displayStreak) {
+      // Animate the change
+      Animated.sequence([
+        Animated.timing(animatedValue, {
+          toValue: 1.2,
+          duration: 200,
+          useNativeDriver: true
+        }),
+        Animated.timing(animatedValue, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true
+        })
+      ]).start();
+      
+      setDisplayStreak(newStreak);
+      prevStreakRef.current = newStreak;
+    }
+  }, [propStreak, contextStreak]);
+  
+  // Determine streak level and colors
+  const getStreakStyle = () => {
+    if (displayStreak === 0) {
+      return styles.streakStart;
+    } else if (displayStreak >= 90) {
+      return styles.streakMaster;
+    } else if (displayStreak >= 30) {
+      return styles.streakAdvanced;
+    } else if (displayStreak >= 7) {
+      return styles.streakIntermediate;
+    }
+    return styles.streakBeginner;
+  };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.card }]}>
-      <View style={styles.streakHeader}>
-        <Clock size={24} color={streakColor} />
-        <Text style={[styles.streakLabel, { color: colors.secondaryText }]}>
-          Current Streak
+    <BlurView intensity={20} tint="dark" style={[styles.container, { borderColor: colors.border }]}>
+      <LinearGradient
+        colors={['rgba(255,255,255,0.1)', 'rgba(255,255,255,0.05)']}
+        style={styles.gradient}
+      >
+        <View style={styles.content}>
+          <Text style={[styles.label, { color: colors.text }]}>
+            Clean Streak
         </Text>
-      </View>
-      
-      <View style={styles.streakContent}>
-        <Animated.Text 
-          style={[
-            styles.streakCounter, 
-            { color: streakColor },
-            animatedStyle
-          ]}
-        >
-          {streak}
-        </Animated.Text>
-        <Text style={[styles.streakUnit, { color: colors.secondaryText }]}>
-          {streak === 1 ? 'Day' : 'Days'}
+          <Animated.View style={{ transform: [{ scale: animatedValue }] }}>
+            <Text style={[styles.streakCount, getStreakStyle(), { color: colors.text }]}>
+              {displayStreak}
         </Text>
-      </View>
-      
-      <Text style={[styles.streakMessage, { color: colors.text }]}>
-        {streakMessage}
+          </Animated.View>
+          <Text style={[styles.label, { color: colors.text }]}>
+            {displayStreak === 1 ? 'Day' : 'Days'}
       </Text>
     </View>
+      </LinearGradient>
+    </BlurView>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
-    borderRadius: 16,
+    borderRadius: 15,
+    overflow: 'hidden',
+    borderWidth: 1,
+    marginHorizontal: 16,
+    marginVertical: 8,
+  },
+  gradient: {
+    borderRadius: 15,
+  },
+  content: {
     padding: 16,
-    marginBottom: 24,
-  },
-  streakHeader: {
-    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
   },
-  streakLabel: {
-    fontFamily: 'Nunito-SemiBold',
+  label: {
     fontSize: 16,
-    marginLeft: 8,
+    opacity: 0.8,
   },
-  streakContent: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    marginBottom: 8,
-  },
-  streakCounter: {
-    fontFamily: 'Nunito-Bold',
+  streakCount: {
     fontSize: 48,
-    lineHeight: 56,
+    fontWeight: 'bold',
+    marginVertical: 8,
   },
-  streakUnit: {
-    fontFamily: 'Nunito-Regular',
-    fontSize: 16,
-    marginLeft: 4,
-    marginBottom: 8,
+  streakStart: {
+    color: '#FFA500',
   },
-  streakMessage: {
-    fontFamily: 'Nunito-SemiBold',
-    fontSize: 16,
-  }
+  streakBeginner: {
+    color: '#4CAF50',
+  },
+  streakIntermediate: {
+    color: '#2196F3',
+  },
+  streakAdvanced: {
+    color: '#9C27B0',
+  },
+  streakMaster: {
+    color: '#F44336',
+  },
 });

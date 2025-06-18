@@ -4,7 +4,7 @@
     "slug": "clearmind-nofap",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon_fixed.png",
+    "icon": "./assets/images/newlogo.png",
     "scheme": "nofapapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": false,
@@ -22,7 +22,7 @@
     "android": {
       "package": "com.nofapapp.mobile",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/icon_fixed.png",
+        "foregroundImage": "./assets/images/newlogo.png",
         "backgroundColor": "#ffffff"
       }
     },

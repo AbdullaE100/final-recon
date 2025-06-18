@@ -21,17 +21,47 @@ import { useCompanionChat } from '@/context/CompanionChatContext';
 import { useTheme } from '@/context/ThemeContext';
 import { useGamification } from '@/context/GamificationContext';
 import { Stack, useRouter } from 'expo-router';
-import { ArrowLeft, SendHorizonal, Trash2, RefreshCw, AlertCircle, CheckCircle, Heart, Zap, AlertTriangle, Calendar, PlusCircle, BookOpen, X } from 'lucide-react-native';
+import { ArrowLeft, SendHorizonal, Trash2, RefreshCw, AlertCircle, CheckCircle, Heart, Zap, AlertTriangle, Calendar, PlusCircle, BookOpen, X, MessageCircle } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import LottieView from 'lottie-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
-import { ChatMessage, getGeminiResponse, initializeCompanionConversation } from '@/lib/gemini';
+import { ChatMessage, getAIResponse as getGeminiResponse, initializeCompanionConversation } from '@/lib/ai-service';
+import { getData, storeData, STORAGE_KEYS } from '@/utils/storage';
 
 // Unique ID for input accessory view on iOS
 const INPUT_ACCESSORY_VIEW_ID = 'companion-chat-input';
+
+interface UserPreferences {
+  therapyOptionsOptOut?: boolean;
+  quizAnswers?: {
+    challenging?: string;
+    goal?: string;
+    frequency?: string;
+    duration?: string;
+    struggle?: string;
+  };
+}
+
+interface Trigger {
+    trigger?: string;
+}
+
+interface StreakData {
+    triggers?: Trigger[];
+}
+
+interface TherapyOption {
+  id: string;
+  title: string;
+  emoji: string;
+  color: string;
+  description: string;
+  priority?: number;
+  conditions?: string[];
+}
 
 const CompanionChat = () => {
   const { colors } = useTheme();
@@ -47,7 +77,8 @@ const CompanionChat = () => {
     startDistractionPlan,
     startCognitiveReframe,
     logTrigger, 
-    getTriggers 
+    getTriggers,
+    lastMessageFailed
   } = useCompanionChat();
   const { companion, getCompanionStage, achievements, streak, addJournalEntry } = useGamification();
   const router = useRouter();
@@ -60,7 +91,7 @@ const CompanionChat = () => {
   const [showTriggerModal, setShowTriggerModal] = useState(false);
   const [showTherapyOptions, setShowTherapyOptions] = useState(false);
   const [showJournalModal, setShowJournalModal] = useState(false);
-  const [personalizedOptions, setPersonalizedOptions] = useState([]);
+  const [personalizedOptions, setPersonalizedOptions] = useState<TherapyOption[]>([]);
   const [triggerInput, setTriggerInput] = useState('');
   const [journalSummary, setJournalSummary] = useState('');
   const [commonTriggers, setCommonTriggers] = useState<string[]>([]);
@@ -72,8 +103,6 @@ const CompanionChat = () => {
   const unlockedBadgesCount = achievements.filter(badge => badge.unlocked).length;
   const companionStage = unlockedBadgesCount >= 30 ? 3 : unlockedBadgesCount >= 15 ? 2 : 1;
   const companionType = companion?.type || 'water';
-  
-  console.log("CHAT: Badge count =", unlockedBadgesCount, "Companion stage =", companionStage);
   
   // Get companion animation source based on stage and type
   const getCompanionSource = () => {
@@ -91,21 +120,21 @@ const CompanionChat = () => {
       // Snuglur animations
       switch (companionStage) {
         case 3:
-          return require('../baby monster stage 3.json');
+          return require('@/assets/lottie/baby_monster_stage3.json');
         case 2:
-          return require('../baby monster stage 2.json');
+          return require('@/assets/lottie/baby_monster_stage2.json');
         default:
-          return require('../baby monster stage 1.json');
+          return require('@/assets/lottie/baby_monster_stage1.json');
       }
     } else {
       // Stripes (Tiger) animations
       switch (companionStage) {
         case 3:
-          return require('../baby tiger stage 3.json');
+          return require('@/assets/lottie/baby_tiger_stage3.json');
         case 2:
-          return require('../baby tiger stage 2.json');
+          return require('@/assets/lottie/baby_tiger_stage2.json');
         default:
-          return require('../baby tiger stage 1.json');
+          return require('@/assets/lottie/baby_tiger_stage1.json');
       }
     }
   };
@@ -231,8 +260,31 @@ const CompanionChat = () => {
     if (!journalSummary.trim()) return;
     
     try {
-      // Create a summary entry for the journal
-      const summaryContent = `Chat Summary - ${new Date().toLocaleDateString()}\n\n${journalSummary.trim()}\n\n[Auto-generated from companion chat]`;
+      // Extract key points from the conversation
+      const keyPoints = messages
+        .filter(msg => {
+          const content = msg.content.toLowerCase();
+          // Filter out greetings, short responses, and system messages
+          return !content.match(/^(hi|hello|hey|ok|okay|thanks|thank you)$/i) &&
+                 content.length > 20 &&
+                 // Include messages that contain important content
+                 (content.includes('urge') ||
+                  content.includes('trigger') ||
+                  content.includes('feeling') ||
+                  content.includes('strategy') ||
+                  content.includes('exercise') ||
+                  content.includes('breath') ||
+                  content.includes('step') ||
+                  content.includes('notice') ||
+                  content.includes('observe'));
+        })
+        .slice(-4) // Take the last 4 important messages
+        .map(msg => msg.content.trim())
+        .filter((msg, index, self) => self.indexOf(msg) === index) // Remove duplicates
+        .map(point => `• ${point}`); // Format as bullet points
+
+      // Create the summary content
+      const summaryContent = `Chat Summary - ${new Date().toLocaleDateString()}\n\n${journalSummary.trim()}\n\nKey Points:\n${keyPoints.join('\n')}\n\n[Auto-generated from companion chat]`;
       
       addJournalEntry(summaryContent, {
         tags: ['chat-summary', 'companion'],
@@ -246,9 +298,8 @@ const CompanionChat = () => {
       setShowJournalModal(false);
       
       // Send a confirmation message to chat
-      sendMessage('I\'ve saved a summary of our conversation to your journal for future reference.');
+      sendMessage("I've saved a summary of our conversation to your journal for future reference.");
     } catch (error) {
-      console.error('Error creating journal summary:', error);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
   };
@@ -263,7 +314,7 @@ const CompanionChat = () => {
   const handleToggleTherapyOptions = async () => {
     try {
       // Check if user has opted out of therapy options
-      const userPreferences = await getData(STORAGE_KEYS.USER_PREFERENCES, {});
+      const userPreferences = await getData<UserPreferences>(STORAGE_KEYS.USER_PREFERENCES, {});
       
       if (userPreferences.therapyOptionsOptOut) {
         // User has opted out, send a supportive message instead
@@ -279,7 +330,6 @@ const CompanionChat = () => {
         }
       }
     } catch (error) {
-      console.error('Error checking opt-out preference:', error);
       // Fallback to showing therapy options
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setShowTherapyOptions(!showTherapyOptions);
@@ -354,45 +404,63 @@ const CompanionChat = () => {
   };
 
   const renderMessage = ({ item, index }: { item: ChatMessage; index: number }) => {
-    const isCompanion = item.role === 'model';
+    const isUser = item.role === 'user';
+    
+    const handleRetry = () => {
+      if (index === messages.length - 1 && lastMessageFailed) {
+        sendMessage(messages[index - 1].content, true);
+      }
+    };
     
     return (
-      <Animated.View 
-        entering={FadeIn.duration(300).delay(index * 100)}
-        style={[
+      <View style={[
           styles.messageContainer,
-          isCompanion ? styles.companionContainer : styles.userContainer
-        ]}
-      >
-        {isCompanion && (
+        isUser ? styles.userContainer : styles.companionContainer
+      ]}>
+        {!isUser && (
           <View style={styles.avatarContainer}>
             <LinearGradient
-              colors={['#272336', '#1C1627']}
+              colors={['#6366F1', '#4F46E5']}
               style={styles.avatarBackground}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
             >
+              <View style={styles.avatarAnimationContainer}>
               <LottieView
                 source={getCompanionSource()}
                 autoPlay
                 loop
                 style={styles.avatarAnimation}
               />
+              </View>
             </LinearGradient>
           </View>
         )}
         
-        <View 
-          style={[
+        <View style={[
             styles.messageBubble,
-            isCompanion 
-              ? [styles.companionBubble, { backgroundColor: '#272336' }]
-              : [styles.userBubble, { backgroundColor: colors.primary }]
-          ]}
-        >
+          isUser ? [styles.userBubble, { backgroundColor: '#6366F1' }] : 
+          [styles.companionBubble, { backgroundColor: '#1F2937' }],
+          !isUser && { borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' }
+        ]}>
+          <Text style={[
+            styles.messageText,
+            { color: isUser ? '#FFFFFF' : '#FFFFFF' }
+          ]}>
           {renderFormattedText(item.content)}
+          </Text>
+          
+          {index === messages.length - 1 && lastMessageFailed && !isUser && (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>Failed to get response</Text>
+              <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
+                <RefreshCw size={16} color="#FFFFFF" />
+                <Text style={styles.retryText}>Retry</Text>
+            </TouchableOpacity>
+            </View>
+          )}
         </View>
-      </Animated.View>
+      </View>
     );
   };
   
@@ -400,17 +468,24 @@ const CompanionChat = () => {
   const renderEmptyState = () => (
     <View style={styles.emptyStateContainer}>
       <LottieView
-        source={require('@/assets/animations/empty-chat.json')}
+        source={getCompanionSource()}
         autoPlay
         loop
-        style={styles.emptyAnimation}
+        style={styles.emptyStateAnimation}
       />
-      <Text style={[styles.emptyTitle, { color: colors.text }]}>
-        Start a conversation
+      <Text style={styles.emptyStateTitle}>
+        Chat with {companion?.name || (companionType === 'plant' ? 'Drowsi' : 
+          companionType === 'fire' ? 'Snuglur' : 'Stripes')}
       </Text>
-      <Text style={[styles.emptyText, { color: colors.secondaryText }]}>
-        Your companion is here to help with urges and provide motivation
+      <Text style={styles.emptyStateText}>
+        Your companion is here to support your recovery journey
       </Text>
+      <TouchableOpacity 
+        style={styles.startChatButton} 
+        onPress={() => sendMessage("Hello, I could use some support")}
+      >
+        <Text style={styles.startChatButtonText}>Start Conversation</Text>
+      </TouchableOpacity>
     </View>
   );
   
@@ -497,124 +572,96 @@ const CompanionChat = () => {
   // Render quick action buttons with horizontal scroll
   const renderQuickActions = () => (
     <Animated.View
-      entering={FadeIn.duration(200)}
+      entering={FadeIn.duration(300)}
       exiting={FadeOut.duration(200)}
-      style={[styles.quickActionsContainer, { backgroundColor: colors.card }]}
+      style={styles.quickActionsContainer}
     >
-      <View style={styles.quickActionsHeader}>
-        <Text style={[styles.quickActionsTitle, { color: colors.text }]}>Quick Actions</Text>
-        <TouchableOpacity
-          style={styles.closeQuickActions}
-          onPress={() => setShowQuickActions(false)}
+      <BlurView intensity={20} tint="dark" style={styles.quickActionsBlur}>
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.quickActionsScroll}
         >
-          <X size={20} color={colors.secondaryText} />
+        <TouchableOpacity
+            style={styles.quickActionButton} 
+            onPress={handleDailyCheckIn}
+        >
+            <View style={[styles.quickActionIcon, { backgroundColor: '#6366F1' }]}>
+              <Calendar size={20} color="#FFFFFF" />
+            </View>
+            <Text style={styles.quickActionText}>Daily Check-in</Text>
         </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.quickActionButton} 
+            onPress={handleUrgeManagement}
+          >
+            <View style={[styles.quickActionIcon, { backgroundColor: '#EC4899' }]}>
+              <Zap size={20} color="#FFFFFF" />
       </View>
-      
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.quickActionsScroll}
-        style={styles.quickActionsScrollView}
-      >
-        {quickActionItems.map((item) => {
-          const IconComponent = item.icon;
-          return (
+            <Text style={styles.quickActionText}>Manage Urges</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.quickActionButton} 
+            onPress={handleOpenTriggerModal}
+          >
+            <View style={[styles.quickActionIcon, { backgroundColor: '#F59E0B' }]}>
+              <AlertTriangle size={20} color="#FFFFFF" />
+            </View>
+            <Text style={styles.quickActionText}>Log Trigger</Text>
+          </TouchableOpacity>
+          
             <TouchableOpacity
-              key={item.id}
-              style={[styles.quickActionButton, { backgroundColor: item.color }]}
-              onPress={item.onPress}
-            >
-              <IconComponent size={24} color="#FFFFFF" />
-              <Text style={styles.quickActionText}>{item.label}</Text>
+            style={styles.quickActionButton} 
+            onPress={() => setShowJournalModal(true)}
+          >
+            <View style={[styles.quickActionIcon, { backgroundColor: '#10B981' }]}>
+              <BookOpen size={20} color="#FFFFFF" />
+            </View>
+            <Text style={styles.quickActionText}>Journal</Text>
             </TouchableOpacity>
-          );
-        })}
+          
+          <TouchableOpacity 
+            style={styles.quickActionButton} 
+            onPress={handleToggleTherapyOptions}
+          >
+            <View style={[styles.quickActionIcon, { backgroundColor: '#8B5CF6' }]}>
+              <Heart size={20} color="#FFFFFF" />
+            </View>
+            <Text style={styles.quickActionText}>Therapy</Text>
+          </TouchableOpacity>
       </ScrollView>
+      </BlurView>
     </Animated.View>
   );
   
   // Get personalized therapy options based on user data
-  const getPersonalizedTherapyOptions = async () => {
+  const getPersonalizedTherapyOptions = async (): Promise<TherapyOption[]> => {
     try {
-      // Get user preferences and quiz data
-      const userPreferences = await getData(STORAGE_KEYS.USER_PREFERENCES, {});
-      const streakData = await getData(STORAGE_KEYS.STREAK_DATA, { triggers: [] });
+      const userPreferences = await getData<UserPreferences>(STORAGE_KEYS.USER_PREFERENCES, {});
+      const streakData = await getData<StreakData>(STORAGE_KEYS.STREAK_DATA, { triggers: [] });
       
-      // Analyze user's main challenges and triggers
       const quizAnswers = userPreferences.quizAnswers || {};
       const recentTriggers = streakData.triggers?.slice(-10) || [];
       
-      // Base therapy options
-      const allOptions = [
-        {
-          id: 'urge_surfing',
-          title: 'Urge Surfing',
-          emoji: '🌊',
-          color: '#2196F3',
-          description: 'Learn to observe urges without acting on them',
-          priority: 0,
-          conditions: ['urges', 'beginner', 'daily_multiple', 'daily']
-        },
-        {
-          id: 'distraction',
-          title: 'Distraction Plan',
-          emoji: '🎯',
-          color: '#FF9800',
-          description: 'Activities to shift focus away from urges',
-          priority: 0,
-          conditions: ['habits', 'motivation', 'weekly', 'occasionally']
-        },
-        {
-          id: 'thought_reframing',
-          title: 'Thought Reframing',
-          emoji: '🧠',
-          color: '#9C27B0',
-          description: 'Challenge negative thoughts with CBT',
-          priority: 0,
-          conditions: ['recovery', 'years', 'year', 'mental']
-        },
-        {
-          id: 'breathing',
-          title: 'Breathing Exercise',
-          emoji: '🫁',
-          color: '#4CAF50',
-          description: 'Calm your mind with guided breathing',
-          priority: 0,
-          conditions: ['urges', 'daily_multiple', 'very_long', 'long']
-        },
-        {
-          id: 'grounding',
-          title: '5-4-3-2-1 Grounding',
-          emoji: '🌱',
-          color: '#795548',
-          description: 'Ground yourself in the present moment',
-          priority: 0,
-          conditions: ['urges', 'accountability', 'daily']
-        },
-        {
-          id: 'progressive_muscle',
-          title: 'Muscle Relaxation',
-          emoji: '💪',
-          color: '#E91E63',
-          description: 'Release tension through progressive relaxation',
-          priority: 0,
-          conditions: ['energy', 'very_long', 'long', 'years']
-        }
+      const allOptions: TherapyOption[] = [
+        { id: 'urge_surfing', title: 'Urge Surfing', emoji: '🌊', color: '#2196F3', description: 'Learn to observe urges without acting on them', priority: 0, conditions: ['urges', 'beginner', 'daily_multiple', 'daily'] },
+        { id: 'distraction', title: 'Distraction Plan', emoji: '🎯', color: '#FF9800', description: 'Activities to shift focus away from urges', priority: 0, conditions: ['habits', 'motivation', 'weekly', 'occasionally'] },
+        { id: 'thought_reframing', title: 'Thought Reframing', emoji: '🧠', color: '#9C27B0', description: 'Challenge negative thoughts with CBT', priority: 0, conditions: ['recovery', 'years', 'year', 'mental'] },
+        { id: 'breathing', title: 'Breathing Exercise', emoji: '🫁', color: '#4CAF50', description: 'Calm your mind with guided breathing', priority: 0, conditions: ['urges', 'daily_multiple', 'very_long', 'long'] },
+        { id: 'grounding', title: '5-4-3-2-1 Grounding', emoji: '🌱', color: '#795548', description: 'Ground yourself in the present moment', priority: 0, conditions: ['urges', 'accountability', 'daily'] },
+        { id: 'progressive_muscle', title: 'Muscle Relaxation', emoji: '💪', color: '#E91E63', description: 'Release tension through progressive relaxation', priority: 0, conditions: ['energy', 'very_long', 'long', 'years'] }
       ];
       
-      // Calculate priority scores based on user data
       allOptions.forEach(option => {
         let score = 0;
+        if (quizAnswers.challenging && option.conditions?.includes(quizAnswers.challenging)) score += 3;
+        if (quizAnswers.goal && option.conditions?.includes(quizAnswers.goal)) score += 2;
+        if (quizAnswers.frequency && option.conditions?.includes(quizAnswers.frequency)) score += 2;
+        if (quizAnswers.duration && option.conditions?.includes(quizAnswers.duration)) score += 1;
+        if (quizAnswers.struggle && option.conditions?.includes(quizAnswers.struggle)) score += 1;
         
-        // Quiz-based scoring
-        if (quizAnswers.challenging && option.conditions.includes(quizAnswers.challenging)) score += 3;
-        if (quizAnswers.goal && option.conditions.includes(quizAnswers.goal)) score += 2;
-        if (quizAnswers.frequency && option.conditions.includes(quizAnswers.frequency)) score += 2;
-        if (quizAnswers.duration && option.conditions.includes(quizAnswers.duration)) score += 1;
-        if (quizAnswers.struggle && option.conditions.includes(quizAnswers.struggle)) score += 1;
-        
-        // Trigger-based scoring
         const triggerKeywords = recentTriggers.map(t => t.trigger?.toLowerCase() || '').join(' ');
         if (triggerKeywords.includes('stress') && option.id === 'breathing') score += 2;
         if (triggerKeywords.includes('bored') && option.id === 'distraction') score += 2;
@@ -624,43 +671,18 @@ const CompanionChat = () => {
         option.priority = score;
       });
       
-      // Sort by priority and return top 4
       return allOptions
-        .sort((a, b) => b.priority - a.priority)
+        .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
         .slice(0, 4);
         
     } catch (error) {
       console.error('Error getting personalized therapy options:', error);
       // Fallback to default options
       return [
-        {
-          id: 'urge_surfing',
-          title: 'Urge Surfing',
-          emoji: '🌊',
-          color: '#2196F3',
-          description: 'Learn to observe urges without acting on them'
-        },
-        {
-          id: 'distraction',
-          title: 'Distraction Plan',
-          emoji: '🎯',
-          color: '#FF9800',
-          description: 'Activities to shift focus away from urges'
-        },
-        {
-          id: 'thought_reframing',
-          title: 'Thought Reframing',
-          emoji: '🧠',
-          color: '#9C27B0',
-          description: 'Challenge negative thoughts with CBT'
-        },
-        {
-          id: 'breathing',
-          title: 'Breathing Exercise',
-          emoji: '🫁',
-          color: '#4CAF50',
-          description: 'Calm your mind with guided breathing'
-        }
+        { id: 'urge_surfing', title: 'Urge Surfing', emoji: '🌊', color: '#2196F3', description: 'Learn to observe urges without acting on them', priority: 0, conditions: [] },
+        { id: 'distraction', title: 'Distraction Plan', emoji: '🎯', color: '#FF9800', description: 'Activities to shift focus away from urges', priority: 0, conditions: [] },
+        { id: 'thought_reframing', title: 'Thought Reframing', emoji: '🧠', color: '#9C27B0', description: 'Challenge negative thoughts with CBT', priority: 0, conditions: [] },
+        { id: 'breathing', title: 'Breathing Exercise', emoji: '🫁', color: '#4CAF50', description: 'Calm your mind with guided breathing', priority: 0, conditions: [] }
       ];
     }
   };
@@ -672,10 +694,10 @@ const CompanionChat = () => {
         handleStartUrgeSurfing();
         break;
       case 'distraction':
-        handleStartDistraction();
+        handleStartDistractionPlan();
         break;
       case 'thought_reframing':
-        handleStartThoughtReframing();
+        handleStartReframing();
         break;
       case 'breathing':
         handleStartBreathing();
@@ -694,7 +716,7 @@ const CompanionChat = () => {
   // Handle opt-out preference
   const handleOptOut = async () => {
     try {
-      const userPreferences = await getData(STORAGE_KEYS.USER_PREFERENCES, {});
+      const userPreferences = await getData<UserPreferences>(STORAGE_KEYS.USER_PREFERENCES, {});
       const updatedPreferences = {
         ...userPreferences,
         therapyOptionsOptOut: true
@@ -704,7 +726,7 @@ const CompanionChat = () => {
       
       // Send a message acknowledging the opt-out
       const optOutMessage = "I understand you'd prefer not to see therapy options. You can always ask me directly for help with techniques like 'help me with urge surfing' or 'I need a distraction plan' whenever you need support.";
-      await sendMessage(optOutMessage);
+      await sendMessage(optOutMessage, false);
     } catch (error) {
       console.error('Error saving opt-out preference:', error);
     }
@@ -754,7 +776,7 @@ const CompanionChat = () => {
               onPress={() => setShowTherapyOptions(false)}
               activeOpacity={0.7}
             >
-              <Text style={[styles.closeTherapyText, { color: colors.text }]}>✕</Text>
+              <Text style={[styles.closeTherapyText, { color: colors.text }]}>×</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -774,7 +796,7 @@ const CompanionChat = () => {
               <Text style={styles.therapyOptionDescription}>
                 {option.description}
               </Text>
-              {option.priority > 3 && (
+              {option.priority && option.priority > 3 && (
                 <View style={styles.recommendedBadge}>
                   <Text style={styles.recommendedText}>Recommended</Text>
                 </View>
@@ -835,7 +857,7 @@ const CompanionChat = () => {
               </Text>
               
               <ScrollView style={styles.commonTriggersContainer}>
-                {commonTriggers.map((trigger, index) => (
+                {commonTriggers.map((trigger: string, index: number) => (
                   <TouchableOpacity
                     key={`trigger-${index}`}
                     style={[styles.commonTriggerItem, { borderBottomColor: colors.border }]}
@@ -923,30 +945,23 @@ const CompanionChat = () => {
   );
   
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <StatusBar barStyle="dark-content" />
+    <SafeAreaView style={[styles.container, { backgroundColor: '#000000' }]}>
+      <LinearGradient colors={['#121212', '#000000']} style={StyleSheet.absoluteFillObject} />
       
-      <Stack.Screen 
-        options={{
-          title: 'Companion Chat',
-          headerShown: false,
-        }}
-      />
-      
-      <View style={[styles.header, { backgroundColor: colors.background }]}>
+      <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => router.back()}
         >
-          <ArrowLeft size={24} color={colors.text} />
+          <ArrowLeft size={24} color="#FFFFFF" />
         </TouchableOpacity>
         
         <View style={styles.titleContainer}>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>
+          <Text style={styles.headerTitle}>
             {companion?.name && companion.name !== '' ? companion.name : (companionType === 'plant' ? 'Drowsi' : 
              companionType === 'fire' ? 'Snuglur' : 'Stripes')}
           </Text>
-          <Text style={[styles.headerSubtitle, { color: colors.secondaryText }]}>
+          <Text style={styles.headerSubtitle}>
             Your companion
           </Text>
         </View>
@@ -955,15 +970,16 @@ const CompanionChat = () => {
           style={styles.resetButton}
           onPress={handleResetConfirm}
         >
-          <Trash2 size={20} color={colors.secondaryText} />
+          <Trash2 size={20} color="rgba(255, 255, 255, 0.6)" />
         </TouchableOpacity>
       </View>
 
       <KeyboardAvoidingView
         style={styles.keyboardAvoidingView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={0} // Adjust this offset as needed
+        keyboardVerticalOffset={0}
       >
+        <View style={styles.chatContainer}>
         <FlatList
           ref={flatListRef}
           data={messages}
@@ -977,21 +993,21 @@ const CompanionChat = () => {
           ListEmptyComponent={renderEmptyState}
           onContentSizeChange={scrollToBottom}
         />
-
-        <View
-          style={[
-            styles.inputContainer,
-            { backgroundColor: colors.card, paddingBottom: Math.max(insets.bottom, 4) }
-          ]}
-        >
-
+        </View>
           
           <View style={styles.inputWrapper}>
+          <TouchableOpacity 
+            style={styles.quickActionsToggle} 
+            onPress={handleToggleQuickActions}
+          >
+            <PlusCircle size={24} color="#6366F1" />
+          </TouchableOpacity>
+          
             <TextInput
               ref={inputRef}
-              style={[styles.input, { backgroundColor: colors.cardAlt, color: colors.text }]}
+            style={styles.input}
               placeholder="Type a message..."
-              placeholderTextColor={colors.placeholder}
+            placeholderTextColor="rgba(255, 255, 255, 0.5)"
               value={inputMessage}
               onChangeText={setInputMessage}
               multiline
@@ -1002,7 +1018,6 @@ const CompanionChat = () => {
             <TouchableOpacity
               style={[
                 styles.sendButton,
-                { backgroundColor: colors.primary },
                 inputMessage.trim() === '' && styles.disabledButton
               ]}
               onPress={handleSendMessage}
@@ -1018,7 +1033,6 @@ const CompanionChat = () => {
           
           {showQuickActions && renderQuickActions()}
           {showTherapyOptions && renderTherapyOptions()}
-        </View>
       </KeyboardAvoidingView>
       
       {/* Confirm reset dialog */}
@@ -1042,9 +1056,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,0,0,0.1)',
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
   backButton: {
     width: 40,
@@ -1057,12 +1071,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   headerSubtitle: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '500',
+    color: 'rgba(255, 255, 255, 0.6)',
   },
   resetButton: {
     width: 40,
@@ -1073,6 +1089,10 @@ const styles = StyleSheet.create({
   },
   keyboardAvoidingView: {
     flex: 1,
+  },
+  chatContainer: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
   messageList: {
     paddingHorizontal: 16,
@@ -1091,36 +1111,43 @@ const styles = StyleSheet.create({
   },
   companionContainer: {
     alignSelf: 'flex-start',
+    maxWidth: '85%',
   },
   userContainer: {
     alignSelf: 'flex-end',
     flexDirection: 'row-reverse',
+    maxWidth: '85%',
   },
   avatarContainer: {
     marginRight: 8,
   },
   avatarBackground: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
   },
+  avatarAnimationContainer: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   avatarAnimation: {
-    width: 50,
-    height: 50,
+    width: 60,
+    height: 60,
   },
   messageBubble: {
-    maxWidth: '80%',
-    borderRadius: 20,
+    borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   companionBubble: {
     borderTopLeftRadius: 4,
@@ -1130,61 +1157,147 @@ const styles = StyleSheet.create({
   },
   messageText: {
     fontSize: 16,
-    lineHeight: 22,
+    lineHeight: 24,
+    fontWeight: '400',
   },
-  inputContainer: {
-    paddingHorizontal: 12,
-    paddingTop: 4,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(0,0,0,0.05)',
+  errorContainer: {
+    marginTop: 8,
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  errorText: {
+    color: '#EF4444',
+    fontSize: 14,
+  },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(239, 68, 68, 0.5)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  retryText: {
+    color: '#FFFFFF',
+    marginLeft: 4,
+    fontSize: 12,
+    fontWeight: '600',
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    position: 'relative',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: '#121212',
+  },
+  quickActionsToggle: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
   },
   input: {
     flex: 1,
+    backgroundColor: '#1F2937',
     borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    paddingRight: 40,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     fontSize: 16,
-    maxHeight: 100,
-    marginRight: 6,
-    minHeight: 36,
+    color: '#FFFFFF',
+    maxHeight: 120,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   sendButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#6366F1',
     justifyContent: 'center',
     alignItems: 'center',
-    position: 'relative',
+    marginLeft: 8,
   },
   disabledButton: {
-    opacity: 0.5,
+    backgroundColor: 'rgba(99, 102, 241, 0.5)',
+  },
+  quickActionsContainer: {
+    position: 'absolute',
+    bottom: 70,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 16,
+  },
+  quickActionsBlur: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  quickActionsScroll: {
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+  },
+  quickActionButton: {
+    alignItems: 'center',
+    marginHorizontal: 8,
+    width: 80,
+  },
+  quickActionIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  quickActionText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   emptyStateContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    padding: 20,
   },
-  emptyAnimation: {
-    width: 200,
-    height: 200,
+  emptyStateAnimation: {
+    width: 150,
+    height: 150,
     marginBottom: 20,
   },
-  emptyTitle: {
-    fontSize: 20,
+  emptyStateTitle: {
+    fontSize: 24,
     fontWeight: '700',
-    marginBottom: 8,
+    color: '#FFFFFF',
+    marginBottom: 12,
     textAlign: 'center',
   },
-  emptyText: {
+  emptyStateText: {
     fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.6)',
     textAlign: 'center',
-    lineHeight: 24,
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  startChatButton: {
+    backgroundColor: '#6366F1',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  startChatButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
   confirmOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -1245,123 +1358,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
-  },
-
-  quickActionsContainer: {
-    position: 'absolute',
-    bottom: 70,
-    left: 16,
-    right: 16,
-    borderRadius: 16,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-    maxHeight: 140,
-  },
-  quickActionsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  quickActionsTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  closeQuickActions: {
-    padding: 4,
-  },
-  quickActionsScrollView: {
-    flexGrow: 0,
-  },
-  quickActionsScroll: {
-    paddingRight: 16,
-  },
-  quickActionButton: {
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-    borderRadius: 12,
-    minWidth: 90,
-    marginRight: 12,
-  },
-  quickActionText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
-    marginTop: 6,
-    textAlign: 'center',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  triggerModalContainer: {
-    width: '80%',
-    borderRadius: 16,
-    padding: 24,
-    alignItems: 'center',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  modalSubtitle: {
-    fontSize: 16,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  triggerInput: {
-    width: '100%',
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 16,
-    marginBottom: 16,
-  },
-  triggerSubmitButton: {
-    width: '100%',
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  triggerSubmitText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  commonTriggersTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 12,
-    alignSelf: 'flex-start',
-  },
-  commonTriggersContainer: {
-    width: '100%',
-    maxHeight: 200,
-    marginBottom: 16,
-  },
-  commonTriggerItem: {
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    width: '100%',
-  },
-  commonTriggerText: {
-    fontSize: 16,
-  },
-  modalCancelButton: {
-    padding: 12,
-  },
-  cancelText: {
-    fontSize: 16,
-    fontWeight: '500',
   },
   therapyOptionsContainer: {
     position: 'absolute',
@@ -1518,6 +1514,73 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  triggerModalContainer: {
+    width: '80%',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    fontSize: 16,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  triggerInput: {
+    width: '100%',
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 16,
+    marginBottom: 16,
+  },
+  triggerSubmitButton: {
+    width: '100%',
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  triggerSubmitText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  commonTriggersTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+    alignSelf: 'flex-start',
+  },
+  commonTriggersContainer: {
+    width: '100%',
+    maxHeight: 200,
+    marginBottom: 16,
+  },
+  commonTriggerItem: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    width: '100%',
+  },
+  commonTriggerText: {
+    fontSize: 16,
+  },
+  modalCancelButton: {
+    padding: 12,
+  },
+  cancelText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 

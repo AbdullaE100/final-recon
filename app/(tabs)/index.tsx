@@ -12,6 +12,8 @@ import {
   Platform,
   KeyboardAvoidingView,
   Alert,
+  ActivityIndicator,
+  Button,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
@@ -30,12 +32,12 @@ import { BlurView } from 'expo-blur';
 import { Calendar, Clock, Check, Calendar as CalendarIcon, AlertTriangle, Flame } from 'lucide-react-native';
 import { useGamification } from '@/context/GamificationContext';
 import { useTheme } from '@/context/ThemeContext';
+import { useStreak } from '@/context/StreakContext';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import BrainMetrics from '@/components/home/BrainMetrics';
 import StreakCalendar from '@/components/home/StreakCalendar';
-import { setFailsafeStreakValue } from '@/utils/streakService';
+import { setFailsafeStreakValue , loadStreakData } from '@/utils/streakService';
 import { storeData, STORAGE_KEYS, getData } from '@/utils/storage';
-import { loadStreakData } from '@/utils/streakService';
 import useAchievementNotification from '@/hooks/useAchievementNotification';
 import LottieView from 'lottie-react-native';
 import CompanionChatPrompt from '@/components/home/CompanionChatPrompt';
@@ -136,30 +138,27 @@ const DatePickerModal = ({
 // Card that shows streak info and allows editing
 const StreakCard = () => {
   const { colors } = useTheme();
-  const { streak, setStreak, companion, getCompanionStage, achievements } = useGamification();
+  const gamification = useGamification();
   const [isDatePickerVisible, setDatePickerVisible] = useState(false);
   const [isRelapseModalVisible, setRelapseModalVisible] = useState(false);
-  const [localStreak, setLocalStreak] = useState(streak);
+  const [localStreak, setLocalStreak] = useState(gamification?.streak ?? 0);
   const [isUpdating, setIsUpdating] = useState(false);
   const [intentionalReset, setIntentionalReset] = useState(false);
   const animation = useStreakAnimation(localStreak);
   const { showAchievement } = useAchievementNotification();
-  
-  // Create a persistent ref at component level to track streak values
-  const streakValueRef = React.useRef(streak > 0 ? streak : localStreak);
-  
-  // Add a backup timestamp to help detect and prevent race conditions
+  const streakValueRef = React.useRef(gamification?.streak ?? 0);
   const lastUpdateTimestamp = React.useRef(Date.now());
-  
-  // Force a re-render if needed
   const [forceRender, setForceRender] = useState(0);
+
+  if (!gamification) {
+    return null; // Or a loading indicator
+  }
+  const { streak, setStreak, companion, getCompanionStage, achievements } = gamification;
   
   // Get companion stage - directly calculate based on badge count for most reliable results
   const unlockedBadgesCount = achievements.filter(badge => badge.unlocked).length;
   const companionStage = unlockedBadgesCount >= 30 ? 3 : unlockedBadgesCount >= 15 ? 2 : 1;
   const companionType = companion?.type || 'water';
-  
-  
   
   // Get companion animation source based on stage and type
   const getCompanionSource = () => {
@@ -198,11 +197,8 @@ const StreakCard = () => {
   
   // Keep local state in sync with context
   useEffect(() => {
-    
-    
     // Prevent streaks of 0 from overriding valid streak values 
     if (streak === 0 && streakValueRef.current > 0 && !intentionalReset) {
-      
       return;
     }
     
@@ -235,8 +231,6 @@ const StreakCard = () => {
   // Safety recovery mechanism - if streak gets reset unintentionally, restore from ref
   useEffect(() => {
     if (localStreak === 0 && streakValueRef.current > 0 && !intentionalReset) {
-      
-      
       // Schedule recovery to avoid immediate state conflicts
       const recoveryTimer = setTimeout(() => {
         setLocalStreak(streakValueRef.current);
@@ -329,7 +323,7 @@ const StreakCard = () => {
       await setStreak(validatedStreakDays, normalizedDate.getTime());
       
       // Show immediate visual feedback through haptics
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       
       // Replace the Alert with the custom achievement notification
       showAchievement({
@@ -348,7 +342,6 @@ const StreakCard = () => {
       // Small delay to ensure UI updates after animation completes
       setTimeout(() => {
         if (localStreak !== streakToRestore) {
-          
           setLocalStreak(streakToRestore);
           setForceRender(prev => prev + 1);
         }
@@ -362,7 +355,6 @@ const StreakCard = () => {
       setTimeout(() => {
         try {
           loadStreakData().then(() => {
-            
             // Only update if we're losing our value - otherwise keep the local value
             if (isUpdating && streakValueRef.current !== 0) {
               setLocalStreak(streakValueRef.current);
@@ -418,7 +410,6 @@ const StreakCard = () => {
         
         // If we've processed a relapse in the last 5 seconds, skip this one
         if (currentTimestamp - lastRelapseTime < 5000) {
-          
           // Still close the modal to avoid UI being stuck
           setRelapseModalVisible(false);
           return;
@@ -433,7 +424,6 @@ const StreakCard = () => {
       
       // If streak is already 0, don't process again
       if (localStreak === 0) {
-        
         setRelapseModalVisible(false);
         return;
       }
@@ -446,8 +436,6 @@ const StreakCard = () => {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       }
       
-      
-      
       // Get the current date to use as relapse date
       const relapseDate = new Date();
       
@@ -459,10 +447,35 @@ const StreakCard = () => {
       
       // Store the relapse date in storage for the calendar to pick up
       try {
+        // Get the streak data to save the previous streak's start date
+        const streakData = await getData(STORAGE_KEYS.STREAK_DATA, { 
+          streak: 0, 
+          lastCheckIn: 0,
+          startDate: Date.now()
+        });
+        
+        // Save the current streak's start date to streak history
+        if (localStreak > 0 && streakData.startDate) {
+          const startDate = new Date(streakData.startDate);
+          // Store it in a new storage key for historical streak starts
+          const streakStartsKey = 'clearmind:streak-starts-history';
+          const existingStarts = await getData<Date[]>(streakStartsKey, []);
+          // Add the start date if it doesn't already exist
+          if (!existingStarts.some(d => 
+            new Date(d).toDateString() === startDate.toDateString()
+          )) {
+            const updatedStarts = [...existingStarts, startDate];
+            await storeData(streakStartsKey, updatedStarts);
+            console.log('Saved previous streak start date:', startDate.toDateString());
+          }
+        }
+        
         // Store an explicit flag indicating an intentional relapse has occurred
         await storeData(STORAGE_KEYS.INTENTIONAL_RELAPSE, {
           date: relapseDate.getTime(),
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          previousStreak: localStreak,
+          previousStartDate: streakData.startDate
         });
         
         // Get existing relapse dates if any
@@ -485,8 +498,6 @@ const StreakCard = () => {
       // Update the ref value to 0 to prevent recovery mechanisms
       streakValueRef.current = 0;
       
-      
-      
       // Reset streak in context - wrap in try/catch to ensure UI stays responsive
       try {
         // Pass the current date to ensure the relapse is recorded with the right date
@@ -495,8 +506,6 @@ const StreakCard = () => {
       } catch (streakError) {
         console.error('Error resetting streak:', streakError);
       }
-      
-      
       
       // Show feedback to the user - wrap in try/catch to prevent crashes
       try {
@@ -522,7 +531,6 @@ const StreakCard = () => {
       // Always reset updating flag, even if there's an error
       setTimeout(() => {
         setIsUpdating(false);
-        
       }, 500);
     }
   };
@@ -771,97 +779,50 @@ const DailyQuote = () => {
 // Main component
 export default function HomeScreen() {
   const { colors } = useTheme();
+  const gamification = useGamification();
   const insets = useSafeAreaInsets();
-  const { streak, setStreak } = useGamification();
+  const [username, setUsername] = useState('');
+  const [isUsernameModalVisible, setUsernameModalVisible] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(false);
+  const { setStreakStartDate, recordRelapse } = useStreak();
 
-  // Add state for username
-  const [username, setUsername] = useState<string>('');
-  // Add a loading state
-  const [isLoading, setIsLoading] = useState(true);
-  
-  // Load username and streak data on component mount
   useEffect(() => {
     const loadUserData = async () => {
+      if (!gamification) return;
       try {
-        setIsLoading(true);
-        
-        // Load user preferences to get username
-        interface UserPreferences {
-          username?: string;
-          [key: string]: any;
-        }
-        
-        const userPreferences = await getData<UserPreferences>(STORAGE_KEYS.USER_PREFERENCES, {});
+        const userPreferences = await getData(STORAGE_KEYS.USER_PREFERENCES, {});
         if (userPreferences && userPreferences.username) {
           setUsername(userPreferences.username);
         }
-        
-        
-        
-        // First try to get the streak data from storage
-        const streakData = await getData(STORAGE_KEYS.STREAK_DATA, { 
-          streak: 0, 
-          lastCheckIn: 0,
-          startDate: Date.now()
-        });
-        
-        
-        
-        // If we have a valid streak, ensure it's set in the context
-        if (streakData && typeof streakData.streak === 'number' && !isNaN(streakData.streak) && streakData.streak > 0) {
-          if (streakData.streak !== streak) {
-            
-            
-            // Use the startDate from storage if available
-            const startDate = streakData.startDate || (() => {
-              const date = new Date();
-              date.setDate(date.getDate() - streakData.streak);
-              return date.getTime();
-            })();
-            
-            // Set the streak with the correct start date
-            await setStreak(streakData.streak, startDate);
-          }
-        }
-        
-        // Also load streak data from the service as a double-check
         await loadStreakData();
-        
-        // Additional safety check - if the streak is 0 but should be non-zero
-        // For example if this value was overridden by a race condition
-        if (streak === 0) {
-          const backupData = await getData(STORAGE_KEYS.STREAK_DATA, {
-            streak: 0,
-            lastCheckIn: 0,
-            startDate: Date.now()
-          });
-          if (backupData && typeof backupData.streak === 'number' && !isNaN(backupData.streak) && backupData.streak > 0) {
-            
-            await setStreak(backupData.streak, backupData.startDate);
-          }
-        }
       } catch (error) {
         console.error('Error loading user data:', error);
-      } finally {
-        setIsLoading(false);
       }
     };
-    
     loadUserData();
-  }, []);
+  }, [gamification]);
 
-  // Get personalized greeting
-  const getPersonalizedGreeting = () => {
-    const greeting = getGreeting();
-    return `${greeting}, ${username || 'Friend'}!`;
-  };
 
-  // Determine StatusBar style based on text color (simple heuristic for light/dark background)
+
+
+
+  if (!gamification || gamification.isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  const {
+    getPersonalizedGreeting,
+  } = gamification;
+
   const barStyle = colors.text === '#FFFFFF' || colors.text === '#FFF' || colors.text.toLowerCase() === '#ffffff' ? 'light-content' : 'dark-content';
-  
+
   return (
-    <KeyboardAvoidingView 
-      style={{ flex: 1 }} 
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <ScrollView
@@ -877,7 +838,7 @@ export default function HomeScreen() {
         
         <View style={styles.headerContainer}>
           <Text style={[styles.greetingText, { color: colors.text }]}>
-            {getPersonalizedGreeting()}
+            {getPersonalizedGreeting(username)}
           </Text>
         </View>
 

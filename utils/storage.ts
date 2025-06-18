@@ -159,6 +159,12 @@ const encrypt = (data: any): string => {
  */
 const saveBackup = async (key: string, value: any): Promise<void> => {
   try {
+    // Check if key is undefined or null
+    if (key === undefined || key === null) {
+      console.error('Backup storage error: Key is undefined or null');
+      return; // Silently fail - this is just a backup
+    }
+    
     const backupKey = `${key}:backup`;
     const jsonValue = JSON.stringify(value);
     await AsyncStorage.setItem(backupKey, jsonValue);
@@ -173,6 +179,12 @@ const saveBackup = async (key: string, value: any): Promise<void> => {
  */
 const loadBackup = async (key: string): Promise<any> => {
   try {
+    // Check if key is undefined or null
+    if (key === undefined || key === null) {
+      console.error('Backup retrieval error: Key is undefined or null');
+      return null;
+    }
+    
     const backupKey = `${key}:backup`;
     const jsonValue = await AsyncStorage.getItem(backupKey);
     if (!jsonValue) return null;
@@ -229,6 +241,12 @@ const decrypt = (encryptedData: string, key: string): any => {
  */
 export const storeData = async (key: string, value: any): Promise<void> => {
   try {
+    // Check if key is undefined or null
+    if (key === undefined || key === null) {
+      console.error('Storage error: Key is undefined or null');
+      throw new Error('Invalid key - must be a string. Key: ' + key);
+    }
+    
     if (Platform.OS === 'web') {
       await webStorage.setItem(key, value);
     } else {
@@ -244,6 +262,11 @@ export const storeData = async (key: string, value: any): Promise<void> => {
     
     // Try one more time with plain JSON as a last resort
     try {
+      // Check if key is undefined or null again for the fallback
+      if (key === undefined || key === null) {
+        console.error('Fallback storage error: Key is undefined or null');
+        throw new Error('Invalid key - must be a string. Key: ' + key);
+      }
       
       const jsonValue = JSON.stringify(value);
       await AsyncStorage.setItem(key, jsonValue);
@@ -259,6 +282,12 @@ export const storeData = async (key: string, value: any): Promise<void> => {
  */
 export const getData = async <T>(key: string, defaultValue: T): Promise<T> => {
   try {
+    // Check if key is undefined or null
+    if (key === undefined || key === null) {
+      console.error('Retrieval error: Key is undefined or null');
+      return defaultValue;
+    }
+    
     if (Platform.OS === 'web') {
       const value = await webStorage.getItem(key);
       return value === null ? defaultValue : value;
@@ -300,6 +329,12 @@ export const getData = async <T>(key: string, defaultValue: T): Promise<T> => {
  */
 export const removeData = async (key: string): Promise<void> => {
   try {
+    // Check if key is undefined or null
+    if (key === undefined || key === null) {
+      console.error('Removal error: Key is undefined or null');
+      throw new Error('Invalid key - must be a string. Key: ' + key);
+    }
+    
     if (Platform.OS === 'web') {
       await webStorage.removeItem(key);
     } else {
@@ -337,19 +372,27 @@ export const clearAllData = async (): Promise<void> => {
  * Storage keys used throughout the app
  */
 export const STORAGE_KEYS = {
-  USER_DATA: 'clearmind:user-data',
-  STREAK_DATA: 'clearmind:streak-data',
-  JOURNAL_ENTRIES: 'clearmind:journal-entries',
+  USER_DATA: 'clearmind:user_data',
+  STREAK_DATA: 'clearmind:streak_data',
+  CALENDAR_HISTORY: 'clearmind:calendar_history',
+  STREAK_START_DATE: 'clearmind:streak_start_date',
+  JOURNAL_ENTRIES: 'clearmind:journal_entries',
   CHALLENGES: 'clearmind:challenges',
+  ACTIVE_CHALLENGES: 'clearmind:active_challenges',
   ACHIEVEMENTS: 'clearmind:achievements',
   SETTINGS: 'clearmind:settings',
   ONBOARDING_COMPLETED: 'clearmind:onboarding-completed',
   USER_PREFERENCES: 'clearmind:user-preferences',
   COMPANION_DATA: 'clearmind:companion-data',
-  DEVICE_ID: 'clearmind:device-id',
-  RELAPSE_HISTORY: 'clearmind:relapse-history',
-  INTENTIONAL_RELAPSE: 'clearmind:intentional-relapse',
   COMPANION_CHAT_HISTORY: 'clearmind:companion-chat-history',
   COMPANION_UNREAD_MESSAGE: 'clearmind:companion-unread-message',
-  PURCHASES: 'clearmind:purchases-data',
+  ACTIVITY_LOG: 'clearmind:activity-log',
+  ACTIVITY_STATS: 'clearmind:activity-stats',
+  LAST_CHECKIN: 'clearmind:last-checkin',
+  LAST_SYNC: 'clearmind:last-sync',
+  WIDGET_DATA: 'clearmind:widget-data',
+  BACKUP_DATA: 'clearmind:backup-data',
+  RELAPSE_HISTORY: 'clearmind:relapse-history',
+  INTENTIONAL_RELAPSE: 'clearmind:intentional-relapse',
+  DEVICE_ID: 'clearmind:device-id'
 };

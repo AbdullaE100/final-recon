@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Pressable } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, Pressable, Modal } from 'react-native';
 import { useTheme } from '@/context/ThemeContext';
 import { formatDate, formatRelativeTime } from '@/utils/dateUtils';
 import { JournalEntry as JournalEntryType } from '@/types/gamification';
-import { ChevronDown, ChevronUp, Trash2, Tag, ThumbsUp, Clock, Smile, Meh, Frown, Mic } from 'lucide-react-native';
+import { ChevronDown, ChevronUp, Trash2, Tag, ThumbsUp, Clock, Smile, Meh, Frown, Mic, AlertCircle } from 'lucide-react-native';
 import Animated, { FadeIn, FadeOut, SlideInRight, SlideOutLeft } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import { BlurView } from 'expo-blur';
 
 interface JournalEntryProps {
   entry: JournalEntryType;
@@ -16,6 +17,7 @@ interface JournalEntryProps {
 export default function JournalEntry({ entry, onDelete }: JournalEntryProps) {
   const { colors } = useTheme();
   const [expanded, setExpanded] = useState(false);
+  const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   
   const toggleExpand = () => {
     setExpanded(!expanded);
@@ -28,145 +30,142 @@ export default function JournalEntry({ entry, onDelete }: JournalEntryProps) {
     );
   };
   
+  const handleDelete = () => {
+    setShowConfirmDelete(false);
+    onDelete();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+  
   const relativeTime = formatRelativeTime(entry.timestamp);
   const fullDate = formatDate(entry.timestamp);
   
-  // Get mood icon based on mood value
-  const getMoodIcon = () => {
+  const getMoodData = () => {
     switch(entry.mood) {
-      case 'great':
-      case 'good':
-        return <Smile size={16} color="#4CAF50" />;
-      case 'neutral':
-        return <Meh size={16} color="#FFC107" />;
-      case 'bad':
-      case 'awful':
-        return <Frown size={16} color="#F44336" />;
-      default:
-        return null;
+      case 'great': return { Icon: Smile, color: '#4CAF50', name: 'Great' };
+      case 'good': return { Icon: Smile, color: '#8BC34A', name: 'Good' };
+      case 'neutral': return { Icon: Meh, color: '#FFC107', name: 'Neutral' };
+      case 'bad': return { Icon: Meh, color: '#FF9800', name: 'Bad' };
+      case 'awful': return { Icon: Frown, color: '#F44336', name: 'Awful' };
+      default: return { Icon: null, color: '#FFFFFF', name: '' };
     }
   };
+
+  const Mood = getMoodData();
+  const MoodIcon = Mood.Icon;
   
-  // Get a nice display name for mood
-  const getMoodName = () => {
-    switch(entry.mood) {
-      case 'great': return 'Great';
-      case 'good': return 'Good';
-      case 'neutral': return 'Neutral';
-      case 'bad': return 'Bad';
-      case 'awful': return 'Awful';
-      default: return '';
-    }
-  };
-  
-  // Get background color based on mood
+  // Get background colors based on mood
   const getMoodGradient = () => {
     switch(entry.mood) {
       case 'great': 
-        return ['rgba(76, 175, 80, 0.12)', 'rgba(76, 175, 80, 0.03)'] as const;
+        return ['#1F2937', '#0D1B2A'] as const;
       case 'good': 
-        return ['rgba(139, 195, 74, 0.12)', 'rgba(139, 195, 74, 0.03)'] as const;
+        return ['#1F2937', '#0D1B2A'] as const;
       case 'neutral': 
-        return ['rgba(255, 193, 7, 0.12)', 'rgba(255, 193, 7, 0.03)'] as const;
+        return ['#1F2937', '#0D1B2A'] as const;
       case 'bad': 
-        return ['rgba(255, 152, 0, 0.12)', 'rgba(255, 152, 0, 0.03)'] as const;
+        return ['#1F2937', '#0D1B2A'] as const;
       case 'awful': 
-        return ['rgba(244, 67, 54, 0.12)', 'rgba(244, 67, 54, 0.03)'] as const;
+        return ['#1F2937', '#0D1B2A'] as const;
       default:
-        return ['rgba(33, 150, 243, 0.08)', 'rgba(33, 150, 243, 0.02)'] as const;
+        return ['#1F2937', '#0D1B2A'] as const;
     }
   };
 
   return (
     <Animated.View 
-      style={[styles.container]}
+      style={styles.container}
       entering={SlideInRight.duration(300)}
       exiting={SlideOutLeft.duration(200)}
     >
-      <LinearGradient
-        colors={getMoodGradient()}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.gradientContainer, { backgroundColor: colors.card }]}
-      >
+      <LinearGradient colors={getMoodGradient()} style={StyleSheet.absoluteFillObject} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} />
         <Pressable 
-          style={[styles.contentContainer, { backgroundColor: colors.card }]}
+        style={styles.pressableContainer}
           onPress={toggleExpand}
-          android_ripple={{ color: 'rgba(0, 0, 0, 0.05)', borderless: false }}
+        android_ripple={{ color: 'rgba(255, 255, 255, 0.1)' }}
         >
       <View style={styles.header}>
             <View style={styles.headerLeft}>
-              {entry.mood && getMoodIcon()}
-        <Text style={[styles.date, { color: colors.text }]}>
-                {relativeTime} {entry.mood && `· Feeling ${getMoodName()}`}
+            {MoodIcon && <MoodIcon size={20} color={Mood.color} />}
+            <Text style={[styles.date, { marginLeft: MoodIcon ? 8 : 0 }]}>
+              {relativeTime}
+              {Mood.name && ` · Feeling ${Mood.name}`}
         </Text>
             </View>
-            
-        <TouchableOpacity
-          onPress={toggleExpand}
-          style={styles.expandButton}
-              hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
-        >
-          {expanded ? (
-                <ChevronUp size={18} color={colors.primary} />
-          ) : (
-                <ChevronDown size={18} color={colors.primary} />
-          )}
-        </TouchableOpacity>
+          <ChevronDown size={20} color="rgba(255, 255, 255, 0.6)" style={{ transform: [{ rotate: expanded ? '180deg' : '0deg' }] }} />
       </View>
       
       <Text 
-        style={[styles.content, { color: colors.text }]}
+          style={styles.content}
         numberOfLines={expanded ? undefined : 3}
       >
         {entry.content}
       </Text>
           
-          {entry.tags && entry.tags.length > 0 && (
+        {expanded ? (
+          <Animated.View entering={FadeIn} exiting={FadeOut} style={styles.footer}>
             <View style={styles.tagsContainer}>
-              <Tag size={14} color={colors.secondaryText} style={styles.tagIcon} />
-              <View style={styles.tagsList}>
-                {entry.tags.map((tag, index) => (
-                  <View 
-                    key={tag} 
-                    style={[styles.tag, { backgroundColor: `${colors.primary}15` }]}
-                  >
-                    <Text style={[styles.tagText, { color: colors.primary }]}>
-                      {tag}
-                    </Text>
+              {entry.tags && entry.tags.length > 0 && (
+                <>
+                  <Tag size={16} color="rgba(255, 255, 255, 0.6)" style={{ marginRight: 6 }} />
+                  {entry.tags?.map((tag) => (
+                    <View key={tag} style={styles.tag}>
+                      <Text style={styles.tagText}>{tag}</Text>
                   </View>
                 ))}
-              </View>
+                </>
+              )}
             </View>
-          )}
-      
-      {expanded && (
-        <Animated.View 
-          style={styles.footer}
-              entering={FadeIn.duration(200)}
-              exiting={FadeOut.duration(150)}
-        >
-              <View style={styles.footerDate}>
-                <Clock size={14} color={colors.secondaryText} />
-          <Text style={[styles.fullDate, { color: colors.secondaryText }]}>
-            {fullDate}
-          </Text>
+            <TouchableOpacity onPress={() => setShowConfirmDelete(true)} style={styles.deleteButton}>
+              <Trash2 size={16} color="#F43F5E" />
+              <Text style={styles.deleteText}>Delete</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        ) : (
+          entry.tags && entry.tags.length > 0 && (
+            <View style={[styles.tagsContainer, { marginTop: 12 }]}>
+              <Tag size={16} color="rgba(255, 255, 255, 0.6)" style={{ marginRight: 6 }} />
+              {entry.tags.slice(0, 3).map((tag) => (
+                <View key={tag} style={styles.tag}>
+                  <Text style={styles.tagText}>{tag}</Text>
               </View>
-          
-          <TouchableOpacity 
-            onPress={onDelete}
-                style={[styles.deleteButton, { backgroundColor: `${colors.error}15` }]}
-                hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
-          >
-            <Trash2 size={16} color={colors.error} />
-            <Text style={[styles.deleteText, { color: colors.error }]}>
-              Delete
+              ))}
+              {entry.tags.length > 3 && <Text style={{ color: "rgba(255, 255, 255, 0.6)" }}>...</Text>}
+            </View>
+          )
+        )}
+      </Pressable>
+
+      <Modal
+        visible={showConfirmDelete}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowConfirmDelete(false)}
+      >
+        <BlurView intensity={30} tint="dark" style={styles.confirmOverlay}>
+          <View style={styles.confirmDialog}>
+            <LinearGradient colors={['#1F2937', '#111827']} style={StyleSheet.absoluteFillObject} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} />
+            <AlertCircle size={24} color="#F43F5E" style={{ marginBottom: 16 }} />
+            <Text style={styles.confirmTitle}>Delete Entry?</Text>
+            <Text style={styles.confirmText}>
+              This action cannot be undone.
             </Text>
+            <View style={styles.confirmButtons}>
+              <TouchableOpacity
+                style={[styles.confirmButton, { borderColor: 'rgba(255, 255, 255, 0.2)' }]}
+                onPress={() => setShowConfirmDelete(false)}
+              >
+                <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.confirmButton, { backgroundColor: '#F43F5E', borderColor: '#F43F5E' }]}
+                onPress={handleDelete}
+              >
+                <Text style={{ color: 'white', fontWeight: '600' }}>Delete</Text>
           </TouchableOpacity>
-        </Animated.View>
-      )}
-        </Pressable>
-      </LinearGradient>
+            </View>
+          </View>
+        </BlurView>
+      </Modal>
     </Animated.View>
   );
 }
@@ -176,24 +175,11 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 16,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
-  gradientContainer: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    borderWidth: 0.5,
-    borderColor: 'rgba(0,0,0,0.05)',
-  },
-  contentContainer: {
+  pressableContainer: {
     padding: 16,
-    borderRadius: 16,
   },
   header: {
     flexDirection: 'row',
@@ -209,85 +195,97 @@ const styles = StyleSheet.create({
   date: {
     fontSize: 14,
     fontWeight: '500',
-    marginLeft: 6,
-  },
-  audioIndicator: {
-    backgroundColor: 'rgba(0, 120, 255, 0.1)',
-    borderRadius: 12,
-    padding: 4,
-    marginLeft: 8,
-  },
-  expandButton: {
-    padding: 4,
+    color: '#FFFFFF',
   },
   content: {
-    fontSize: 16,
-    lineHeight: 24,
+    fontSize: 15,
+    lineHeight: 22,
     fontWeight: '400',
+    marginBottom: 12,
+    color: 'rgba(255, 255, 255, 0.9)',
   },
-  audioPreview: {
+  footer: {
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    borderRadius: 8,
-    padding: 8,
-    marginTop: 10,
-  },
-  audioPreviewText: {
-    fontSize: 13,
-    marginLeft: 6,
   },
   tagsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    marginTop: 12,
-  },
-  tagIcon: {
-    marginRight: 6,
-  },
-  tagsList: {
     flex: 1,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
   },
   tag: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 8,
     marginRight: 6,
     marginBottom: 6,
+    backgroundColor: 'rgba(99, 102, 241, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(99, 102, 241, 0.3)',
   },
   tagText: {
     fontSize: 12,
-    fontWeight: '500',
-  },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 16,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(0, 0, 0, 0.06)',
-  },
-  footerDate: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  fullDate: {
-    fontSize: 12,
-    marginLeft: 4,
+    fontWeight: '600',
+    color: '#6366F1',
   },
   deleteButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 8,
+    backgroundColor: 'rgba(244, 63, 94, 0.1)',
   },
   deleteText: {
-    fontSize: 12,
+    marginLeft: 6,
     fontWeight: '600',
-    marginLeft: 4,
-  }
+    color: '#F43F5E',
+  },
+  // Confirmation Modal Styles
+  confirmOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  confirmDialog: {
+    width: '80%',
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    overflow: 'hidden',
+  },
+  confirmTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    color: '#FFFFFF',
+  },
+  confirmText: {
+    textAlign: 'center',
+    marginBottom: 24,
+    fontSize: 16,
+    lineHeight: 22,
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
+  confirmButtons: {
+    flexDirection: 'row',
+    width: '100%',
+  },
+  confirmButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    marginHorizontal: 6,
+  },
 });

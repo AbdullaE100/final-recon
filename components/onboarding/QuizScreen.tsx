@@ -39,20 +39,22 @@ const questions = [
     id: 'frequency',
     question: 'How often do you watch porn?',
     options: [
-      { id: 'daily_multiple', text: 'Multiple times daily' },
-      { id: 'daily', text: 'Daily' },
-      { id: 'weekly', text: 'Few times a week' },
-      { id: 'occasionally', text: 'Occasionally' },
+      { id: 'daily', text: 'Every day or almost daily' },
+      { id: 'frequent', text: '4-6 times per week' },
+      { id: 'moderate', text: '2-3 times per week' },
+      { id: 'occasional', text: 'A few times per month (2-4)' },
+      { id: 'rare', text: 'Once a month or less' },
+      { id: 'none', text: "I don't watch porn anymore" },
     ],
   },
   {
     id: 'duration',
     question: 'How long do your sessions typically last?',
     options: [
-      { id: 'short', text: '15-30 minutes' },
-      { id: 'medium', text: '30-60 minutes' },
-      { id: 'long', text: '1-2 hours' },
-      { id: 'very_long', text: 'More than 2 hours' },
+      { id: 'brief', text: 'Less than 20 minutes' },
+      { id: 'moderate', text: '20-45 minutes' },
+      { id: 'extended', text: '45-90 minutes' },
+      { id: 'prolonged', text: '90+ minutes' },
     ],
   },
   {
@@ -69,20 +71,20 @@ const questions = [
     id: 'struggle',
     question: 'How long have you been struggling?',
     options: [
-      { id: 'beginner', text: 'Just starting my journey' },
-      { id: 'months', text: 'A few months' },
-      { id: 'year', text: 'About a year' },
-      { id: 'years', text: 'Several years' },
+      { id: 'beginner', text: 'Less than 6 months' },
+      { id: 'intermediate', text: '6 months to 2 years' },
+      { id: 'advanced', text: '2-5 years' },
+      { id: 'chronic', text: '5+ years' },
     ],
   },
   {
     id: 'challenging',
     question: 'What do you find most challenging?',
     options: [
-      { id: 'urges', text: 'Fighting urges and cravings' },
-      { id: 'habits', text: 'Breaking bad habits' },
-      { id: 'accountability', text: 'Staying accountable' },
-      { id: 'motivation', text: 'Maintaining motivation' },
+      { id: 'urges', text: 'Managing urges and triggers' },
+      { id: 'habits', text: 'Breaking ingrained patterns' },
+      { id: 'accountability', text: 'Maintaining accountability' },
+      { id: 'motivation', text: 'Sustaining long-term change' },
     ],
   }
 ];
@@ -423,7 +425,7 @@ const QuizScreen: React.FC<QuizScreenProps> = ({ onComplete }) => {
       {/* Animated gradient background */}
       <Animated.View style={[StyleSheet.absoluteFill, gradientAnimatedStyle]}>
         <LinearGradient
-          colors={['#151933', '#1A2340', '#0E102A']}
+          colors={['#0A0A0C', '#111116', '#13131A']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={StyleSheet.absoluteFill}
@@ -441,16 +443,21 @@ const QuizScreen: React.FC<QuizScreenProps> = ({ onComplete }) => {
 
       {/* Question content - now with enhanced animations */}
       <Animated.View style={[styles.questionContainer, animatedStyle]}>
-        <BlurView intensity={10} tint="dark" style={styles.questionBlurContainer}>
+        <BlurView intensity={15} tint="dark" style={styles.questionBlurContainer}>
           <Sparkles 
-            color="#4F46E5" 
+            color="#6E6AFF" 
             size={24} 
             style={styles.sparkleIcon} 
           />
           
-        <Text style={[styles.question, { color: colors.text }]}>
-          {questions[currentQuestion].question}
-        </Text>
+          <Text style={[styles.question, { 
+            color: '#FFFFFF',
+            fontSize: 28,
+            fontWeight: '700',
+            letterSpacing: -0.5,
+          }]}>
+            {questions[currentQuestion].question}
+          </Text>
 
           <View style={styles.optionsContainer}>
             {questions[currentQuestion].options.map((option) => {
@@ -458,39 +465,39 @@ const QuizScreen: React.FC<QuizScreenProps> = ({ onComplete }) => {
               const isBeingSelected = selectedOption === option.id;
               
               return (
-            <TouchableOpacity
-              key={option.id}
-              style={[
-                styles.optionItem,
-                {
+                <TouchableOpacity
+                  key={option.id}
+                  style={[
+                    styles.optionItem,
+                    {
                       backgroundColor: isSelected
-                        ? colors.primary
-                        : 'rgba(255, 255, 255, 0.08)',
+                        ? '#6E6AFF'
+                        : 'rgba(255, 255, 255, 0.06)',
                       borderColor: isSelected
-                      ? colors.primary
-                        : 'rgba(255, 255, 255, 0.12)',
+                        ? '#6E6AFF'
+                        : 'rgba(255, 255, 255, 0.08)',
                       transform: [{ scale: isBeingSelected ? 1.02 : 1 }],
-                },
-              ]}
-              onPress={() =>
-                handleSelect(questions[currentQuestion].id, option.id)
-              }
-                  activeOpacity={0.8}
-            >
-              <Text
-                style={[
-                  styles.optionText,
-                  {
+                    },
+                  ]}
+                  onPress={() => handleSelect(questions[currentQuestion].id, option.id)}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.optionText,
+                      {
                         color: isSelected
                           ? '#FFFFFF'
                           : 'rgba(255, 255, 255, 0.85)',
+                        fontSize: 17,
                         fontWeight: isSelected ? '600' : '400',
-                  },
-                ]}
-              >
-                {option.text}
-              </Text>
-            </TouchableOpacity>
+                        letterSpacing: -0.2,
+                      },
+                    ]}
+                  >
+                    {option.text}
+                  </Text>
+                </TouchableOpacity>
               );
             })}
           </View>
@@ -526,6 +533,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingTop: 40,
+    backgroundColor: '#0A0A0C',
   },
   particlesContainer: {
     ...StyleSheet.absoluteFillObject,
@@ -555,12 +563,13 @@ const styles = StyleSheet.create({
   },
   questionBlurContainer: {
     flex: 1,
-    padding: 20,
+    padding: 24,
     borderRadius: 24,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
     justifyContent: 'space-between',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
   },
   sparkleIcon: {
     alignSelf: 'center',
@@ -580,7 +589,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     marginBottom: 12,
     borderWidth: 1,
-    elevation: 2,
+    height: 56,
+    justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,

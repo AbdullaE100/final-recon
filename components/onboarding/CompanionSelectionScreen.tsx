@@ -5,8 +5,7 @@ import { useTheme } from '@/context/ThemeContext';
 import Animated, { FadeIn, FadeOut, useSharedValue, useAnimatedStyle, interpolate, Extrapolate } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useGamification } from '@/context/GamificationContext';
-import { Companion } from '@/types/companion';
-import { EVOLUTION_THRESHOLDS, BOND_THRESHOLDS } from '@/types/companion';
+import { Companion , EVOLUTION_THRESHOLDS, BOND_THRESHOLDS } from '@/types/companion';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = width * 0.8;

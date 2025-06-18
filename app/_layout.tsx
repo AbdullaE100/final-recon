@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useRouter , SplashScreen } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { ThemeProvider } from '@/context/ThemeContext';
@@ -9,12 +9,12 @@ import { AuthProvider } from '@/context/AuthContext';
 import { SubscriptionProvider } from '@/context/SubscriptionContext';
 import { useFonts } from 'expo-font';
 import { Nunito_400Regular, Nunito_600SemiBold, Nunito_700Bold } from '@expo-google-fonts/nunito';
-import { SplashScreen } from 'expo-router';
 import { initializeStorage, getData, storeData, STORAGE_KEYS } from '@/utils/storage';
-import { initializeStreakData } from '@/utils/streakService';
+import { initializeStreakData, checkAndAdjustStreak } from '@/utils/streakService';
 import { Alert } from 'react-native';
 import { supabase } from '@/utils/supabaseClient';
 import { initializeHermesGuard } from '@/utils/hermesguard';
+import { StreakProvider } from '@/context/StreakContext';
 
 // Initialize Hermes compatibility guard immediately
 initializeHermesGuard();
@@ -56,6 +56,15 @@ export default function RootLayout() {
             // Initialize streak data in Supabase
             try {
               await initializeStreakData();
+              
+              // Explicitly check and adjust streak if needed
+              try {
+                console.log('Checking and adjusting streak based on last check-in date...');
+                const adjustedData = await checkAndAdjustStreak();
+                console.log(`Streak status: ${adjustedData.streak} days (last check-in: ${new Date(adjustedData.lastCheckIn).toLocaleDateString()})`);
+              } catch (adjustError) {
+                console.warn('Error adjusting streak:', adjustError);
+              }
             } catch (streakError: any) {
               const isNetworkError = streakError?.message?.includes('Network request failed') || 
                                    streakError?.message?.includes('fetch') ||
@@ -197,24 +206,26 @@ export default function RootLayout() {
     <ThemeProvider>
       <AuthProvider>
         <SubscriptionProvider>
-      <GamificationProvider>
-        <CompanionChatProvider>
-          <StatusBar style="light" />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
-            <Stack.Screen name="recover" options={{ headerShown: false, gestureEnabled: false }} />
-            <Stack.Screen name="companion-chat" options={{ headerShown: false }} />
-            <Stack.Screen name="companions-demo" options={{ headerShown: false }} />
-            <Stack.Screen name="my-pledge" options={{ headerShown: false }} />
-            <Stack.Screen name="edit-pledge" options={{ headerShown: false }} />
-                <Stack.Screen name="subscription" options={{ headerShown: false }} />
-                <Stack.Screen name="free-trial" options={{ headerShown: false }} />
-
-            <Stack.Screen name="+not-found" options={{ headerShown: false }} />
-          </Stack>
-        </CompanionChatProvider>
-      </GamificationProvider>
+          <GamificationProvider>
+            <StreakProvider>
+              <CompanionChatProvider>
+                <StatusBar style="light" />
+                <Stack screenOptions={{ headerShown: false }}>
+                  <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                  <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
+                  <Stack.Screen name="recover" options={{ headerShown: false, gestureEnabled: false }} />
+                  <Stack.Screen name="companion-chat" options={{ headerShown: false }} />
+                  <Stack.Screen name="companions-demo" options={{ headerShown: false }} />
+                  <Stack.Screen name="my-pledge" options={{ headerShown: false }} />
+                  <Stack.Screen name="edit-pledge" options={{ headerShown: false }} />
+                  <Stack.Screen name="subscription" options={{ headerShown: false }} />
+                  <Stack.Screen name="free-trial" options={{ headerShown: false }} />
+                  <Stack.Screen name="streak-tester" options={{ headerShown: false }} />
+                  <Stack.Screen name="+not-found" options={{ headerShown: false }} />
+                </Stack>
+              </CompanionChatProvider>
+            </StreakProvider>
+          </GamificationProvider>
         </SubscriptionProvider>
       </AuthProvider>
     </ThemeProvider>

@@ -1,14 +1,14 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { ChatMessage, getGeminiResponse, initializeCompanionConversation } from '@/lib/gemini';
+import { ChatMessage, getAIResponse as getGeminiResponse, initializeCompanionConversation } from '@/lib/ai-service';
 import { storeData, getData, STORAGE_KEYS } from '@/utils/storage';
-import { Alert } from 'react-native';
+import { Alert, TouchableOpacity, Text } from 'react-native';
 import { useGamification } from './GamificationContext';
 
 // Define interface for the context
 interface CompanionChatContextType {
   messages: ChatMessage[];
   isLoading: boolean;
-  sendMessage: (message: string) => Promise<void>;
+  sendMessage: (message: string, isRetry?: boolean) => Promise<void>;
   resetConversation: () => Promise<void>;
   hasUnreadMessage: boolean;
   markAsRead: () => void;
@@ -20,6 +20,7 @@ interface CompanionChatContextType {
   startDistractionPlan: () => Promise<void>;
   startCognitiveReframe: () => Promise<void>;
   getCrisisResources: () => Promise<string[]>;
+  lastMessageFailed: boolean;
 }
 
 // Interface for tracking triggers
@@ -56,17 +57,19 @@ const CompanionChatContext = createContext<CompanionChatContextType>({
   startDistractionPlan: async () => {},
   startCognitiveReframe: async () => {},
   getCrisisResources: async () => [],
+  lastMessageFailed: false,
 });
 
 // Storage keys
 const CHAT_HISTORY_KEY = STORAGE_KEYS.COMPANION_CHAT_HISTORY;
 const UNREAD_MESSAGE_KEY = STORAGE_KEYS.COMPANION_UNREAD_MESSAGE;
-const STREAK_DATA_KEY = 'clearmind:streak-data';
+const STREAK_DATA_KEY = STORAGE_KEYS.STREAK_DATA;
 
 export const CompanionChatProvider: React.FC<{children: React.ReactNode}> = ({ children }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasUnreadMessage, setHasUnreadMessage] = useState(false);
+  const [lastMessageFailed, setLastMessageFailed] = useState(false);
   const gamification = useGamification();
   
   // Load chat history on mount
@@ -177,20 +180,21 @@ export const CompanionChatProvider: React.FC<{children: React.ReactNode}> = ({ c
   };
   
   // Send a message to the companion
-  const sendMessage = async (message: string) => {
+  const sendMessage = async (message: string, isRetry = false) => {
     if (!message.trim()) return;
     
-    // Add user message to the chat
+    // If it's a retry, we remove the previous error message
+    const currentMessages = isRetry ? messages.slice(0, -1) : messages;
+
     const userMessage: ChatMessage = {
       role: 'user',
       content: message
     };
     
-    const updatedMessages = [...messages, userMessage];
+    const updatedMessages = [...currentMessages, userMessage];
     setMessages(updatedMessages);
-    
-    // Show loading state
     setIsLoading(true);
+    setLastMessageFailed(false); // Reset error state on new message
     
     try {
       // Check for crisis keywords to provide immediate safety resources
@@ -232,13 +236,9 @@ export const CompanionChatProvider: React.FC<{children: React.ReactNode}> = ({ c
         await handleRelapse();
       }
       
-      // Get messages excluding the system prompt for display
-      const displayMessages = [...messages];
-      
-      // Get response from Gemini
+      const displayMessages = [...currentMessages];
       const response = await getGeminiResponse(message, displayMessages);
       
-      // Add companion's response
       const companionMessage: ChatMessage = {
         role: 'model',
         content: response
@@ -246,33 +246,22 @@ export const CompanionChatProvider: React.FC<{children: React.ReactNode}> = ({ c
       
       const finalMessages = [...updatedMessages, companionMessage];
       setMessages(finalMessages);
-      
-      // Save to storage
       await storeData(CHAT_HISTORY_KEY, finalMessages);
-      
-      // Mark as unread
       setHasUnreadMessage(true);
       await storeData(UNREAD_MESSAGE_KEY, true);
     } catch (error) {
       console.error('Error sending message:', error);
       
-      // Create a fallback response that's more helpful
-      const fallbackMessage: ChatMessage = {
+      const errorMessage: ChatMessage = {
         role: 'model',
-        content: "I'm having trouble connecting right now. Try taking a few deep breaths, drinking some water, or going for a quick walk to help with your urge. Remember why you started this journey, and that this moment of discomfort is temporary."
+        content: "My circuits are a bit busy right now. Please try again in a moment.",
+        isError: true, // Add error flag
       };
       
-      const finalMessages = [...updatedMessages, fallbackMessage];
+      const finalMessages = [...updatedMessages, errorMessage];
       setMessages(finalMessages);
-      
-      // Save to storage
+      setLastMessageFailed(true); // Set error state
       await storeData(CHAT_HISTORY_KEY, finalMessages);
-      
-      // Mark as unread
-      setHasUnreadMessage(true);
-      await storeData(UNREAD_MESSAGE_KEY, true);
-      
-      // No need to show alert as we've already added a fallback message
     } finally {
       setIsLoading(false);
     }
@@ -445,9 +434,12 @@ export const CompanionChatProvider: React.FC<{children: React.ReactNode}> = ({ c
         triggers: [],
         relapses: [],
       });
+
+      // Ensure triggers array exists
+      const currentTriggers = streakData.triggers || [];
       
       // Check if this trigger already exists
-      const existingTriggerIndex = streakData.triggers.findIndex(
+      const existingTriggerIndex = currentTriggers.findIndex(
         t => t.trigger.toLowerCase() === trigger.toLowerCase()
       );
       
@@ -455,7 +447,7 @@ export const CompanionChatProvider: React.FC<{children: React.ReactNode}> = ({ c
       
       if (existingTriggerIndex >= 0) {
         // Increment count for existing trigger
-        updatedTriggers = [...streakData.triggers];
+        updatedTriggers = [...currentTriggers];
         updatedTriggers[existingTriggerIndex] = {
           ...updatedTriggers[existingTriggerIndex],
           count: updatedTriggers[existingTriggerIndex].count + 1,
@@ -464,7 +456,7 @@ export const CompanionChatProvider: React.FC<{children: React.ReactNode}> = ({ c
       } else {
         // Add new trigger
         updatedTriggers = [
-          ...streakData.triggers,
+          ...currentTriggers,
           {
             trigger,
             timestamp: new Date().toISOString(),
@@ -483,7 +475,7 @@ export const CompanionChatProvider: React.FC<{children: React.ReactNode}> = ({ c
       await storeData(STREAK_DATA_KEY, updatedData);
       
       // Send message to the companion about the trigger
-      await sendMessage(`I'm experiencing a trigger: ${trigger}`);
+      await sendMessage(`I'm experiencing a trigger: ${trigger}`, false);
     } catch (error) {
       console.error('Error logging trigger:', error);
     }
@@ -532,7 +524,7 @@ export const CompanionChatProvider: React.FC<{children: React.ReactNode}> = ({ c
       const checkInPrompt = `I want to do my daily check-in for day ${newStreak} of my NoFap journey.`;
       
       // Send the message to the companion
-      await sendMessage(checkInPrompt);
+      await sendMessage(checkInPrompt, false);
     } catch (error) {
       console.error('Error prompting daily check-in:', error);
     }
@@ -542,7 +534,7 @@ export const CompanionChatProvider: React.FC<{children: React.ReactNode}> = ({ c
   const startUrgeManagement = async () => {
     try {
       // Send a message to trigger urge management
-      await sendMessage("I'm having a strong urge right now and need help managing it.");
+      await sendMessage("I'm having a strong urge right now and need help managing it.", false);
     } catch (error) {
       console.error('Error starting urge management:', error);
     }
@@ -552,7 +544,7 @@ export const CompanionChatProvider: React.FC<{children: React.ReactNode}> = ({ c
   const startUrgeSurfing = async () => {
     try {
       // Send a message to trigger urge surfing flow
-      await sendMessage("I want to try urge surfing to manage my urge");
+      await sendMessage("I want to try urge surfing to manage my urge", false);
     } catch (error) {
       console.error('Error starting urge surfing:', error);
     }
@@ -562,7 +554,7 @@ export const CompanionChatProvider: React.FC<{children: React.ReactNode}> = ({ c
   const startDistractionPlan = async () => {
     try {
       // Send a message to trigger distraction plan flow
-      await sendMessage("I'd like to try a distraction to manage my urge");
+      await sendMessage("I'd like to try a distraction to manage my urge", false);
     } catch (error) {
       console.error('Error starting distraction plan:', error);
     }
@@ -572,7 +564,7 @@ export const CompanionChatProvider: React.FC<{children: React.ReactNode}> = ({ c
   const startCognitiveReframe = async () => {
     try {
       // Send a message to trigger cognitive reframing
-      await sendMessage("I'm feeling like I'm a failure and can't do this");
+      await sendMessage("I'm feeling like I'm a failure and can't do this", false);
     } catch (error) {
       console.error('Error starting cognitive reframe:', error);
     }
@@ -629,7 +621,8 @@ Would you like me to help you connect with one of these resources now?`;
         startUrgeSurfing,
         startDistractionPlan,
         startCognitiveReframe,
-        getCrisisResources
+        getCrisisResources,
+        lastMessageFailed,
       }}
     >
       {children}
