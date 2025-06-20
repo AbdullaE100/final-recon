@@ -26,9 +26,11 @@ import {
   Trash2,
   AlertTriangle,
   Activity,
+  RefreshCw,
 } from 'lucide-react-native';
 import { getData, STORAGE_KEYS, storeData, removeData, clearAllData } from '@/utils/storage';
 import { useRouter } from 'expo-router';
+import { useStreak } from '@/context/StreakContext';
 
 
 
@@ -36,6 +38,7 @@ export default function SettingsScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { resetCalendar } = useStreak();
 
 
   
@@ -240,6 +243,50 @@ export default function SettingsScreen() {
             
             <ChevronRight size={20} color={colors.secondaryText} />
           </TouchableOpacity>
+        </BlurView>
+      </View>
+
+      {/* Reset Streak & Calendar */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          Reset Streak & Calendar
+        </Text>
+        
+        <BlurView intensity={12} tint="dark" style={styles.settingsCard}>
+          <TouchableOpacity 
+            style={styles.settingsRow}
+            onPress={() => 
+              Alert.alert( 
+                'Reset Streak & Calendar', 
+                'Are you sure you want to reset your streak and calendar data? This action cannot be undone.', 
+                [ 
+                  { 
+                    text: 'Cancel', 
+                    style: 'cancel', 
+                  }, 
+                  { 
+                    text: 'Reset', 
+                    onPress: async () => { 
+                      await resetCalendar();
+                      Alert.alert('Success', 'Your streak and calendar have been reset.');
+                    }, 
+                    style: 'destructive', 
+                  }, 
+                ], 
+                { cancelable: true } 
+              ) 
+            } 
+          > 
+            <View style={styles.settingsLeft}> 
+              <View style={[styles.iconContainer, { backgroundColor: 'rgba(231, 76, 60, 0.15)' }]}> 
+                <RefreshCw size={20} color="#e74c3c" /> 
+              </View> 
+              <Text style={[styles.settingLabel, { color: colors.text }]}> 
+                Reset Streak & Calendar
+              </Text> 
+            </View> 
+            <ChevronRight size={20} color={colors.secondaryText} /> 
+          </TouchableOpacity> 
         </BlurView>
       </View>
 

@@ -10,7 +10,7 @@ import { SubscriptionProvider } from '@/context/SubscriptionContext';
 import { useFonts } from 'expo-font';
 import { Nunito_400Regular, Nunito_600SemiBold, Nunito_700Bold } from '@expo-google-fonts/nunito';
 import { initializeStorage, getData, storeData, STORAGE_KEYS } from '@/utils/storage';
-import { initializeStreakData, checkAndAdjustStreak } from '@/utils/streakService';
+import { initializeStreakData, checkAndAdjustStreak, scheduleDailyStreakCheck } from '@/utils/streakService';
 import { Alert } from 'react-native';
 import { supabase } from '@/utils/supabaseClient';
 import { initializeHermesGuard } from '@/utils/hermesguard';
@@ -62,6 +62,9 @@ export default function RootLayout() {
                 console.log('Checking and adjusting streak based on last check-in date...');
                 const adjustedData = await checkAndAdjustStreak();
                 console.log(`Streak status: ${adjustedData.streak} days (last check-in: ${new Date(adjustedData.lastCheckIn).toLocaleDateString()})`);
+                
+                // Initialize the daily streak check scheduler
+                scheduleDailyStreakCheck();
               } catch (adjustError) {
                 console.warn('Error adjusting streak:', adjustError);
               }

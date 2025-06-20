@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { getData, storeData, STORAGE_KEYS } from './storage';
 import { Platform, NativeModules } from 'react-native';
+import { format, differenceInDays, startOfDay, isAfter, isBefore } from 'date-fns';
 
 // Add type declarations for the window object at the top level
 declare global {
@@ -150,7 +151,12 @@ const getFailsafeStreakValue = async (): Promise<number | null> => {
     
     // Try app storage as final check
     try {
-      const localData = await getData(STORAGE_KEYS.STREAK_DATA, { streak: 0, lastCheckIn: 0, startDate: 0 });
+      const localData = await getData(STORAGE_KEYS.STREAK_DATA, {
+        streak: 0,
+        lastCheckIn: 0,
+        startDate: 0,
+        hourCount: 0
+      });
       if (localData && typeof localData.streak === 'number') {
         console.log('Found streak in app storage:', localData.streak);
         return localData.streak;
@@ -243,7 +249,8 @@ export const setFailsafeStreakValue = async (value: number): Promise<void> => {
       const currentData = await getData(STORAGE_KEYS.STREAK_DATA, { 
         streak: value, 
         lastCheckIn: currentTime,
-        startDate: value > 0 ? currentTime - ((value - 1) * 24 * 60 * 60 * 1000) : currentTime 
+        startDate: value > 0 ? currentTime - ((value - 1) * 24 * 60 * 60 * 1000) : currentTime,
+        hourCount: 0
       });
       
       // Create a streak data structure, preserving as much as possible
@@ -280,789 +287,553 @@ export const setFailsafeStreakValue = async (value: number): Promise<void> => {
 };
 
 /**
- * Initialize Supabase with default data if needed
+ * Initialize streak data for a user
  */
 export const initializeStreakData = async (userId = DEFAULT_USER_ID): Promise<void> => {
   try {
-    // First, check for existing data
-    const { data, error } = await supabase
-      .from('streaks')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
-      
-    if (error && error.code !== 'PGRST116') {
-      // An error occurred that is NOT "no rows returned"
-      console.error('Failed to check for existing streak data:', error);
-    }
+    // Check if data already exists
+    const existingData = await getData(STORAGE_KEYS.STREAK_DATA, null);
     
-    if (!data) {
-      // No data exists, create an initial record
-      const initialStreak: StreakData = {
+    if (!existingData) {
+      console.log('No streak data found, initializing with defaults');
+      const now = Date.now();
+      const initialData: StreakData = {
         streak: 0,
-        lastCheckIn: Date.now(),
-        startDate: Date.now(),
+        lastCheckIn: now,
+        startDate: now,
         hourCount: 0
       };
       
-      await saveStreakData(initialStreak, userId);
-      console.log('Initialized streak data for new user');
-      } else {
-      console.log('Streak data already exists, checking for needed adjustments');
+      await storeData(STORAGE_KEYS.STREAK_DATA, initialData);
+      console.log('Streak data initialized successfully');
       
-      // Check and adjust the streak if needed
+      // Also initialize calendar history
+      await storeData(STORAGE_KEYS.CALENDAR_HISTORY, {});
+      
+      // Initialize streak start date
+      await storeData(STORAGE_KEYS.STREAK_START_DATE, new Date(now).toISOString());
+      
+      // Update widget if available
+      await updateWidgetStreakData(0, now, now);
+    } else {
+      console.log('Streak data already exists, checking for needed adjustments');
       await checkAndAdjustStreak(userId);
     }
-    
-    hasInitializedData = true;
   } catch (error) {
     console.error('Failed to initialize streak data:', error);
-    // Still set the flag to prevent re-initialization
-    hasInitializedData = true;
   }
 };
 
 /**
- * Saves streak data both locally and to Supabase
+ * Save streak data for a user
  */
 export const saveStreakData = async (data: StreakData, userId = DEFAULT_USER_ID): Promise<void> => {
   try {
-    // Validate streak data before saving (prevent incorrect values)
-    const validData = {
-      ...data,
-      // Ensure streak is a non-negative number
-      streak: Math.max(0, Number(data.streak) || 0)
+    // Validate the data before saving
+    const validData: StreakData = {
+      streak: typeof data.streak === 'number' ? Math.max(0, data.streak) : 0,
+      lastCheckIn: typeof data.lastCheckIn === 'number' ? data.lastCheckIn : Date.now(),
+      startDate: typeof data.startDate === 'number' ? data.startDate : Date.now(),
+      hourCount: typeof data.hourCount === 'number' ? Math.max(0, data.hourCount) : 0
     };
     
-    // First save to local storage for immediate access
+    // Save to local storage
     await storeData(STORAGE_KEYS.STREAK_DATA, validData);
     
-    // Then attempt to save to Supabase
-    try {
-      const { error } = await supabase
-        .from('streaks')
-        .upsert(
-          { 
-            user_id: userId,
-            streak: validData.streak,
-            last_check_in: new Date(validData.lastCheckIn).toISOString(),
-            start_date: new Date(validData.startDate).toISOString(),
-            updated_at: new Date().toISOString()
-          },
-          { onConflict: 'user_id' }
-        );
-        
-      if (error) {
-        console.error('Error saving streak to Supabase:', error);
-        
-        // If upsert fails, try insert as fallback
-        if (error.code === 'PGRST116') {
-          console.log('Attempting insert instead of upsert');
-          const { error: insertError } = await supabase
-            .from('streaks')
-            .insert([
-              { 
-                user_id: userId,
-                streak: validData.streak,
-                last_check_in: new Date(validData.lastCheckIn).toISOString(),
-                start_date: new Date(validData.startDate).toISOString(),
-                updated_at: new Date().toISOString()
-              }
-            ]);
-            
-          if (insertError) {
-            console.error('Insert fallback also failed:', insertError);
-          }
-        }
-      }
-    } catch (supabaseError) {
-      console.error('Failed to connect to Supabase:', supabaseError);
-      // Continue with local storage only
-    }
+    // Update widget
+    await updateWidgetStreakData(validData.streak, validData.startDate, validData.lastCheckIn);
+    
+    // Sync with backend if available
+    syncWithSupabase(validData, userId);
+    
   } catch (error) {
     console.error('Failed to save streak data:', error);
-    // Still keep local data even if remote sync fails
   }
 };
 
 /**
- * Updates the streak count and saves to both local storage and Supabase
+ * Update streak value
  */
 export const updateStreak = async (newStreak: number, userId = DEFAULT_USER_ID, specifiedStartDate?: number): Promise<void> => {
   try {
-    // Validate streak value to prevent accidental resets
-    if (newStreak === undefined || newStreak === null || isNaN(newStreak)) {
-      console.error('Invalid streak value, aborting update:', newStreak);
+    // Ensure streak is a valid number
+    if (typeof newStreak !== 'number' || isNaN(newStreak)) {
+      console.error('Invalid streak value:', newStreak);
       return;
     }
     
-    // Additional validation to ensure it's a properly formatted number
-    const validatedStreak = Number(newStreak);
-    if (isNaN(validatedStreak)) {
-      console.error('Invalid streak value after conversion, aborting update:', newStreak);
-      return;
-    }
+    // Ensure streak is not negative
+    const validStreak = Math.max(0, newStreak);
     
-    // CRITICAL: Add prevention for redundant updates
-    // When setting streak to 0 repeatedly, check if we've already done this recently
-    if (validatedStreak === 0) {
-      try {
-        const lastResetTime = await AsyncStorage.getItem(LAST_RESET_TIME_KEY);
-        if (lastResetTime) {
-          const lastReset = parseInt(lastResetTime, 10);
-          const now = Date.now();
-          // If we did a reset in the last 5 seconds, skip this update
-          if (now - lastReset < 5000) {
-            console.log('Skipping redundant streak reset - already reset recently');
-            return;
-          }
-        }
-        // Record this reset time
-        await AsyncStorage.setItem(LAST_RESET_TIME_KEY, Date.now().toString());
-      } catch (e) {
-        // Continue even if this check fails
-        console.error('Error checking recent resets:', e);
-      }
-    }
+    // Get current data
+    const currentData = await getData(STORAGE_KEYS.STREAK_DATA, {
+      streak: 0,
+      lastCheckIn: Date.now(),
+      startDate: Date.now(),
+      hourCount: 0
+    });
     
-    console.log(`Updating streak to ${validatedStreak} days${specifiedStartDate ? ' with specified start date: ' + new Date(specifiedStartDate).toISOString() : ''}`);
-    
-    // Store this value in a global variable for emergency recovery
-    const globalStreakRef = { current: validatedStreak };
-    
-    // CRITICAL: Save the streak value in multiple backup locations first
-    await setFailsafeStreakValue(validatedStreak);
-    
-    // Important: Set this global flag to prevent auto-reset
-    hasInitializedData = true;
-    
-    // Get current data (only for reference)
-    const currentData = await loadStreakData(userId);
-    
-    // Store previous streak for recovery if needed
-    const previousStreak = currentData.streak;
-    console.log(`Previous streak: ${previousStreak}, updating to: ${validatedStreak}`);
-    
-    // Calculate hours for the current streak period
+    // Calculate new start date if not specified
     const now = Date.now();
-    const currentHours = validatedStreak > 0 ? 
-      calculateHoursBetween(currentData.startDate, now) :
-      0;
+    let startDate = specifiedStartDate;
     
-    // Calculate start date for the streak
-    let startDate: number;
-    
-    if (specifiedStartDate) {
-      const normalizedDate = new Date(specifiedStartDate);
-      normalizedDate.setHours(0, 0, 0, 0);
-      startDate = normalizedDate.getTime();
-    } else if (validatedStreak === 0) {
-      const currentData = await loadStreakData(userId);
-      if (currentData.startDate && Date.now() - currentData.startDate < 48 * 60 * 60 * 1000) {
-        startDate = currentData.startDate;
-      } else {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      startDate = today.getTime();
-      }
-    } else {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const millisecondsPerDay = 24 * 60 * 60 * 1000;
-      startDate = today.getTime() - ((validatedStreak - 1) * millisecondsPerDay);
+    if (!startDate && validStreak > 0) {
+      // Calculate start date based on streak (days ago)
+      const startOfToday = startOfDay(new Date()).getTime();
+      startDate = startOfToday - (validStreak - 1) * 24 * 60 * 60 * 1000;
+    } else if (!startDate) {
+      // If streak is 0, start date is now
+      startDate = now;
     }
     
-    // Create updated data object with new values
+    // Create updated data
     const updatedData: StreakData = {
-      streak: validatedStreak,
+      streak: validStreak,
       lastCheckIn: now,
-      startDate,
-      hourCount: currentHours
+      startDate: startDate,
+      hourCount: currentData.hourCount || 0
     };
     
-    // Add protection against 0 resets - store emergency recovery data
-    if (isWebEnvironment) {
-      try {
-        // Store emergency recovery data to prevent accidental resets
-        window.localStorage.setItem('EMERGENCY_STREAK_VALUE', String(validatedStreak));
-        window.localStorage.setItem('EMERGENCY_STREAK_TIME', String(Date.now()));
-      } catch (e) {
-        console.error('Failed to set emergency recovery data:', e);
-      }
+    // Save the updated data
+    await saveStreakData(updatedData, userId);
+    
+    // Also update the streak start date in ISO format for the calendar
+    if (validStreak > 0) {
+      await storeData(STORAGE_KEYS.STREAK_START_DATE, new Date(startDate).toISOString());
+    } else {
+      // If streak is 0, clear the start date
+      await storeData(STORAGE_KEYS.STREAK_START_DATE, null);
     }
     
-    // CRITICAL: Use immediate async approach to make UI updates faster
-    const storagePromise = storeData(STORAGE_KEYS.STREAK_DATA, updatedData);
+    console.log(`Streak updated to ${validStreak} days`);
     
-    // If we're in a web environment, also update localStorage directly for immediate access
-    if (isWebEnvironment) {
-      try {
-        window.localStorage.setItem('STREAK_FORCE_VALUE', String(validatedStreak));
-        window.localStorage.setItem('LAST_MANUAL_STREAK_TIME', String(Date.now()));
-        
-        // Additional redundancy for start date
-        window.localStorage.setItem('STREAK_START_DATE', String(startDate));
-      } catch (e) {
-        console.error('Failed to set localStorage streak value:', e);
-      }
-    }
-    
-    // Wait for primary storage to complete
-    await storagePromise;
-    console.log(`Streak ${validatedStreak} saved to local storage, start date: ${new Date(startDate).toISOString()}`);
-    
-    // Then sync with Supabase in the background for additional redundancy
-    syncWithSupabase(updatedData, userId);
-    
-    // Set up emergency recovery for potential race conditions
-    // This helps prevent random resets to 0 after alerts are dismissed
-    setTimeout(async () => {
-      try {
-        // Check if we need to recover the streak value
-        const latestData = await getData(STORAGE_KEYS.STREAK_DATA, updatedData);
-        
-        if (latestData.streak === 0 && globalStreakRef.current > 0) {
-          console.warn('Emergency recovery needed: Streak reset to 0 detected');
-          const recoveryData = {
-            ...latestData,
-            streak: globalStreakRef.current,
-            lastCheckIn: Date.now(),
-            startDate
-          };
-          
-          await storeData(STORAGE_KEYS.STREAK_DATA, recoveryData);
-          console.log(`Emergency recovery completed, restored streak to ${globalStreakRef.current}`);
-        }
-      } catch (recoveryError) {
-        console.error('Error in emergency recovery:', recoveryError);
-      }
-    }, 2000);
-    
-    console.log(`Streak successfully updated to ${validatedStreak} days, start date: ${new Date(startDate).toLocaleDateString()}`);
   } catch (error) {
     console.error('Failed to update streak:', error);
   }
 };
 
-// Helper function to sync with Supabase without blocking UI updates
+/**
+ * Sync streak data with Supabase backend
+ */
 const syncWithSupabase = (data: StreakData, userId = DEFAULT_USER_ID) => {
-  // Use a fire-and-forget approach to updating Supabase with retry logic
-  setTimeout(async () => {
-    let retryCount = 0;
-    const maxRetries = 3;
-    const retryDelay = 2000; // 2 seconds
-
-    const attemptSync = async (): Promise<void> => {
-      try {
-        const { error } = await supabase
-          .from('streaks')
-          .upsert(
-            { 
-              user_id: userId,
-              streak: data.streak,
-              last_check_in: new Date(data.lastCheckIn).toISOString(),
-              start_date: new Date(data.startDate).toISOString(),
-              updated_at: new Date().toISOString()
-            },
-            { onConflict: 'user_id' }
-          );
-          
-        if (error) {
-          throw error;
-        }
-        console.log('Successfully synced streak to Supabase in background');
-      } catch (syncError: any) {
-        retryCount++;
-        
-        // Check if it's a network error
-        const isNetworkError = syncError?.message?.includes('Network request failed') || 
-                              syncError?.message?.includes('fetch') ||
-                              syncError?.code === 'NETWORK_ERROR' ||
-                              !navigator.onLine;
-        
-        if (isNetworkError && retryCount < maxRetries) {
-          console.log(`Network error detected, retrying sync in ${retryDelay}ms (attempt ${retryCount}/${maxRetries})`);
-          setTimeout(attemptSync, retryDelay * retryCount); // Exponential backoff
-        } else if (retryCount >= maxRetries) {
-          console.warn('Background Supabase sync failed after max retries. Data saved locally.');
-        } else {
-          console.error('Background Supabase sync failed:', syncError);
-        }
+  if (!userId || userId === DEFAULT_USER_ID) {
+    return; // Don't sync for anonymous users
+  }
+  
+  const attemptSync = async (): Promise<void> => {
+    try {
+      // Check if we have a valid user session
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !sessionData.session) {
+        console.log('No valid session for Supabase sync');
+        return;
       }
-    };
-
-    await attemptSync();
-  }, 100);
+      
+      // Upsert streak data
+      const { error } = await supabase
+        .from('user_streaks')
+        .upsert({
+          user_id: userId,
+          streak: data.streak,
+          last_check_in: new Date(data.lastCheckIn).toISOString(),
+          start_date: new Date(data.startDate).toISOString(),
+          hour_count: data.hourCount,
+          updated_at: new Date().toISOString()
+        });
+      
+      if (error) {
+        console.error('Failed to sync streak data with Supabase:', error);
+      } else {
+        console.log('Successfully synced streak data with Supabase');
+      }
+    } catch (error) {
+      console.error('Error during Supabase sync:', error);
+    }
+  };
+  
+  // Fire and forget - don't wait for completion
+  attemptSync();
 };
 
 /**
- * Loads streak data from Supabase, falls back to local if offline
+ * Load streak data from storage or backend
  */
 export const loadStreakData = async (userId = DEFAULT_USER_ID): Promise<StreakData> => {
   try {
-    // First try to load from Supabase if available
-    try {
-      if (typeof supabase !== 'undefined') {
-        console.log('Attempting to load streak data from Supabase first...');
-        const { data, error } = await supabase
-          .from('streaks')
-          .select('*')
-          .eq('user_id', userId)
-          .single();
-          
-        if (data && !error) {
-          console.log('Successfully loaded streak data from Supabase');
-          // Convert Supabase data format to local format
-          const supabaseData: StreakData = {
-            streak: data.streak,
-            lastCheckIn: new Date(data.last_check_in).getTime(),
-            startDate: new Date(data.start_date).getTime(),
-            hourCount: data.hour_count || 0
-          };
-          
-          // Also update local storage with the Supabase data for offline access
-          await storeData(STORAGE_KEYS.STREAK_DATA, supabaseData);
-          
-          return supabaseData;
-        } else {
-          console.log('No data found in Supabase or error occurred, falling back to local storage');
-        }
-      }
-    } catch (supabaseError) {
-      console.warn('Failed to load from Supabase, falling back to local storage:', supabaseError);
-    }
+    let streakData: StreakData | null = null;
     
-    // Fall back to local storage if Supabase fails or is unavailable
-    // Default streak data
-    const defaultData: StreakData = {
-      streak: 0, // ALWAYS ensure default streak is 0
-      lastCheckIn: 0,
-      startDate: Date.now(),
-      hourCount: 0
-    };
-    
-    // FAILSAFE: Check if we have a manually set streak value in our backup storage
-    const manualStreak = await getFailsafeStreakValue();
-    if (manualStreak !== null) {
-      console.log(`FAILSAFE: Using manually set streak from backup: ${manualStreak}`);
-      // Construct streak data based on the manual value
-      const now = Date.now();
-      const manualData: StreakData = {
-        streak: manualStreak,
-        lastCheckIn: now,
-        startDate: manualStreak > 0 ? now - ((manualStreak - 1) * 24 * 60 * 60 * 1000) : now,
-        hourCount: 0
-      };
-      
-      // Update local storage to be consistent
-      await storeData(STORAGE_KEYS.STREAK_DATA, manualData);
-      
-      // Return the manually set value immediately
-      return manualData;
-    }
-    
-    // First ensure we have tried to initialize Supabase data
-    await initializeStreakData(userId);
-    
-    try {
-      // Try to get local data for faster response
-      const localData = await getData(STORAGE_KEYS.STREAK_DATA, defaultData);
-      
-      // Validate the local data to ensure streak is correct
-      if (typeof localData.streak !== 'number' || isNaN(localData.streak) || localData.streak < 0) {
-        console.warn('Invalid streak value detected in local storage:', localData.streak);
-        localData.streak = 0; // Reset to 0 if invalid
-        await storeData(STORAGE_KEYS.STREAK_DATA, localData);
-      }
-      
-      // Also store this value in our failsafe backups
-      await setFailsafeStreakValue(localData.streak);
-      
-      // Track the last known timestamp when this function was called
-      // This helps prevent Supabase data from overriding newer local changes
-      const loadTimestamp = Date.now();
-      if (isWebEnvironment) {
-        try {
-          window.localStorage.setItem('LAST_STREAK_LOAD_TIME', loadTimestamp.toString());
-        } catch (e) {
-          console.error('Error saving load timestamp:', e);
-        }
-      }
-      
-      // Only wait for Supabase if we have a connection
+    // Try to load from Supabase first if we have a valid user
+    if (userId && userId !== DEFAULT_USER_ID) {
       try {
-        const { data, error } = await supabase
-          .from('streaks')
-          .select('*')
-          .eq('user_id', userId)
-          .single();
-          
-        if (error) {
-          console.log('No data in Supabase or offline, using local data:', error);
-          return localData;
-        }
+        console.log('Attempting to load streak data from Supabase first...');
+        const { data: sessionData } = await supabase.auth.getSession();
         
-        if (data) {
-          // Convert Supabase data to our format
-          const streakData: StreakData = {
-            streak: Math.max(0, Number(data.streak) || 0), // Ensure valid streak value
-            lastCheckIn: new Date(data.last_check_in).getTime(),
-            startDate: new Date(data.start_date).getTime(),
-            hourCount: data.hour_count || 0
-          };
+        if (sessionData.session) {
+          const { data, error } = await supabase
+            .from('user_streaks')
+            .select('*')
+            .eq('user_id', userId)
+            .single();
           
-          // IMPORTANT: Check with our failsafe backup - if it's higher than 
-          // Supabase streak, it was manually set by user and we should trust it
-          const failsafeStreak = await getFailsafeStreakValue();
-          if (failsafeStreak !== null && failsafeStreak > streakData.streak) {
-            console.log(`FAILSAFE: Manual streak (${failsafeStreak}) is higher than Supabase streak (${streakData.streak}), using manual value`);
-            localData.streak = failsafeStreak;
-            await saveStreakData(localData, userId);
-            return localData;
-          }
-          
-          // Check if any updates were made to streak while we were fetching from Supabase
-          // This prevents Supabase data from overriding user actions during this function call
-          let hasNewerLocalChanges = false;
-          if (isWebEnvironment) {
-            try {
-              const lastUpdateTimeStr = window.localStorage.getItem(LAST_UPDATE_TIME_KEY);
-              if (lastUpdateTimeStr) {
-                const lastUpdateTime = parseInt(lastUpdateTimeStr, 10);
-                if (lastUpdateTime > loadTimestamp) {
-                  console.log('Detected newer local changes during Supabase fetch, prioritizing local data');
-                  hasNewerLocalChanges = true;
-                }
-              }
-            } catch (e) {
-              console.error('Error checking for newer changes:', e);
+          if (!error && data) {
+            console.log('Successfully loaded streak data from Supabase');
+            
+            // Convert dates to timestamps
+            streakData = {
+              streak: data.streak || 0,
+              lastCheckIn: new Date(data.last_check_in).getTime(),
+              startDate: new Date(data.start_date).getTime(),
+              hourCount: data.hour_count || 0
+            };
+            
+            // Save to local storage for offline access
+            await storeData(STORAGE_KEYS.STREAK_DATA, streakData);
+            
+            // Update streak start date in ISO format for the calendar
+            if (streakData.streak > 0) {
+              await storeData(STORAGE_KEYS.STREAK_START_DATE, new Date(streakData.startDate).toISOString());
             }
           }
-          
-          // Also check AsyncStorage for potential timestamp
-          try {
-            const asyncLastUpdateTimeStr = await AsyncStorage.getItem(LAST_UPDATE_TIME_KEY);
-            if (asyncLastUpdateTimeStr) {
-              const asyncLastUpdateTime = parseInt(asyncLastUpdateTimeStr, 10);
-              if (asyncLastUpdateTime > loadTimestamp) {
-                console.log('Detected newer changes in AsyncStorage during Supabase fetch, prioritizing local data');
-                hasNewerLocalChanges = true;
-              }
-            }
-          } catch (e) {
-            // Ignore AsyncStorage errors for web environments
-          }
-          
-          if (hasNewerLocalChanges) {
-            return localData;
-          }
-          
-          // Compare the data more carefully:
-          // If local data has a more recent lastCheckIn time, it's likely newer
-          // OR if local streak value is different from what we have in Supabase,
-          // this means an explicit user action changed it and should be trusted
-          if (localData.lastCheckIn > streakData.lastCheckIn || 
-              localData.streak !== streakData.streak) {
-            console.log('Local data is newer or contains an explicit user update, updating Supabase');
-            await saveStreakData(localData, userId);
-            return localData;
-          }
-          
-          // Only if Supabase data is definitively newer, use it to update local
-          if (streakData.lastCheckIn > localData.lastCheckIn) {
-            console.log('Supabase data is newer, updating local storage');
-            await storeData(STORAGE_KEYS.STREAK_DATA, streakData);
-            // Also update failsafe storage
-            await setFailsafeStreakValue(streakData.streak);
-            return streakData;
-          }
-          
-          // If timestamps are identical, prioritize the one with higher streak
-          // This is a fallback that tends to benefit the user
-          if (streakData.lastCheckIn === localData.lastCheckIn && 
-              streakData.streak > localData.streak) {
-            console.log('Equal timestamps but Supabase has higher streak, using Supabase data');
-            await storeData(STORAGE_KEYS.STREAK_DATA, streakData);
-            // Also update failsafe storage
-            await setFailsafeStreakValue(streakData.streak);
-            return streakData;
-          }
         }
-      } catch (supabaseError: any) {
-        // Check if it's a network error and handle it gracefully
-        const isNetworkError = supabaseError?.message?.includes('Network request failed') || 
-                              supabaseError?.message?.includes('fetch') ||
-                              supabaseError?.code === 'NETWORK_ERROR' ||
-                              !navigator.onLine;
-        
-        if (isNetworkError) {
-          console.log('Network unavailable, using local data. Sync will retry automatically.');
-        } else {
-          console.error('Failed to load data from Supabase, using local data:', supabaseError);
-        }
+      } catch (supabaseError) {
+        console.error('Error loading streak data from Supabase:', supabaseError);
       }
-      
-      // Default to using local data in any other case
-      return localData;
-    } catch (error) {
-      console.error('Failed to load streak data:', error);
-      
-      // If all else fails, try one more time to get data from failsafe backups
-      const finalFailsafeStreak = await getFailsafeStreakValue();
-      if (finalFailsafeStreak !== null) {
-        const now = Date.now();
-        return {
-          streak: finalFailsafeStreak,
-          lastCheckIn: now,
-          startDate: finalFailsafeStreak > 0 ? now - ((finalFailsafeStreak - 1) * 24 * 60 * 60 * 1000) : now,
-          hourCount: 0
-        };
-      }
-      
-      // Last resort - return default data
-      return defaultData;
     }
+    
+    // If we couldn't load from Supabase, try local storage
+    if (!streakData) {
+      console.log('Loading streak data from local storage...');
+      streakData = await getData(STORAGE_KEYS.STREAK_DATA, defaultData);
+    }
+    
+    // Validate and fix any issues with the data
+    const validatedData = validateStreakData(streakData);
+    
+    // Check if the streak needs to be adjusted based on last check-in
+    return checkAndAdjustStreak(userId, validatedData);
+    
   } catch (error) {
     console.error('Failed to load streak data:', error);
-    return await loadStreakData(userId);
+    return defaultData;
   }
 };
 
 /**
- * Performs daily check-in and updates streak
+ * Validate streak data to ensure it has all required fields with correct types
+ */
+const validateStreakData = (data: any): StreakData => {
+  const now = Date.now();
+  
+  // Create a valid data object with defaults for missing fields
+  const validData: StreakData = {
+    streak: typeof data?.streak === 'number' && !isNaN(data.streak) ? Math.max(0, data.streak) : 0,
+    lastCheckIn: typeof data?.lastCheckIn === 'number' && !isNaN(data.lastCheckIn) ? data.lastCheckIn : now,
+    startDate: typeof data?.startDate === 'number' && !isNaN(data.startDate) ? data.startDate : now,
+    hourCount: typeof data?.hourCount === 'number' && !isNaN(data.hourCount) ? Math.max(0, data.hourCount) : 0
+  };
+  
+  return validData;
+};
+
+/**
+ * Perform a check-in to maintain or increment streak
  */
 export const performCheckIn = async (userId = DEFAULT_USER_ID): Promise<void> => {
   try {
-    // First check if streak needs adjustment
-    const adjustedData = await checkAndAdjustStreak(userId);
+    // Get current streak data
+    const data = await loadStreakData(userId);
     
-    // Get current date at midnight in user's timezone
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-    const todayStartTime = todayStart.getTime();
-    
-    // Get the last check-in date at midnight in user's timezone
-    const lastCheckIn = new Date(adjustedData.lastCheckIn);
-    const lastCheckInStart = new Date(
-      lastCheckIn.getFullYear(),
-      lastCheckIn.getMonth(),
-      lastCheckIn.getDate(),
-      0, 0, 0, 0
-    ).getTime();
+    const now = Date.now();
+    const today = startOfDay(new Date()).getTime();
+    const lastCheckInDay = startOfDay(new Date(data.lastCheckIn)).getTime();
     
     // Calculate days since last check-in
-    const daysSinceLastCheckIn = Math.floor((todayStartTime - lastCheckInStart) / (24 * 60 * 60 * 1000));
+    const daysSinceLastCheckIn = differenceInDays(today, lastCheckInDay);
     
-    console.log(`Performing check-in. Days since last check-in: ${daysSinceLastCheckIn}`);
-    console.log(`Current streak: ${adjustedData.streak}`);
-    console.log(`Last check-in: ${new Date(lastCheckInStart).toLocaleString()}`);
+    let newStreak = data.streak;
+    let newStartDate = data.startDate;
+    let newHourCount = data.hourCount;
     
-    // If already checked in today, do nothing
-    if (daysSinceLastCheckIn === 0) {
-      console.log('Already checked in today');
-      return;
+    // Add hours since last check-in
+    const hoursSinceLastCheckIn = calculateHoursBetween(data.lastCheckIn, now);
+    newHourCount += hoursSinceLastCheckIn;
+    
+    console.log(`Performing check-in. Current streak: ${newStreak}, days since last: ${daysSinceLastCheckIn}`);
+    console.log(`Current start date: ${new Date(data.startDate).toISOString()}`);
+    
+    // If this is the first check-in (streak is 0), start a new streak
+    if (newStreak === 0) {
+      newStreak = 1;
+      newStartDate = today;
+      console.log('Starting new streak');
+    }
+    // If checked in today already, maintain streak
+    else if (daysSinceLastCheckIn === 0) {
+      console.log('Already checked in today, maintaining streak');
+      // No changes to streak or start date
+    }
+    // If checked in yesterday, increment streak
+    else if (daysSinceLastCheckIn === 1) {
+      newStreak += 1;
+      console.log(`Checked in one day after last check-in, incrementing streak to ${newStreak}`);
+      // CRITICAL FIX: Do not change the start date when incrementing streak
+      // The start date should remain the same as we're continuing the streak
+    }
+    // If missed 1 day, allow grace period but don't increment
+    else if (daysSinceLastCheckIn === 2) {
+      console.log('Missed one day, using grace period to maintain streak');
+      // No changes to streak or start date with grace period
+    }
+    // If missed more than 1 day, reset streak
+    else {
+      console.log(`${daysSinceLastCheckIn} days since last check-in, resetting streak`);
+      newStreak = 1;
+      newStartDate = today;
     }
     
-    // If exactly one day has passed, increment streak
-    if (daysSinceLastCheckIn === 1) {
-      const updatedData: StreakData = {
-        streak: adjustedData.streak + 1,
-        lastCheckIn: todayStartTime,
-        startDate: adjustedData.startDate,
-        hourCount: adjustedData.hourCount + calculateHoursBetween(adjustedData.lastCheckIn, todayStartTime)
-      };
-      
-      // Update all streak values synchronously to ensure consistency
-      console.log(`Incrementing streak from ${adjustedData.streak} to ${updatedData.streak}`);
-      
-      // Use failsafe to update all storage locations
-      await setFailsafeStreakValue(updatedData.streak);
-      
-      // Store the updated streak data with standard mechanism
-      await saveStreakData(updatedData, userId);
-      
-      // Try to update widgets
-      try {
-        await updateWidgetStreakData(updatedData.streak, updatedData.startDate, updatedData.lastCheckIn);
-      } catch (widgetError) {
-        console.warn('Failed to update widget, but streak was still updated:', widgetError);
-      }
-      
-      console.log(`Check-in complete. New streak: ${updatedData.streak} days, start date: ${new Date(updatedData.startDate).toLocaleDateString()}`);
-      return;
-    }
-    
-    // If more than one day has passed, start a new streak
-    const newData: StreakData = {
-      streak: 1, // Start new streak at 1
-      lastCheckIn: todayStartTime,
-      startDate: todayStartTime,
-      hourCount: 0
+    // Update streak data
+    const updatedData: StreakData = {
+      streak: newStreak,
+      lastCheckIn: now,
+      startDate: newStartDate,
+      hourCount: newHourCount
     };
     
-    console.log(`Starting new streak after ${daysSinceLastCheckIn} days missed`);
+    // Debug logging
+    console.log(`Updated streak data:
+      - Streak: ${newStreak}
+      - Start date: ${format(new Date(newStartDate), 'yyyy-MM-dd')}
+      - Last check-in: ${format(new Date(now), 'yyyy-MM-dd HH:mm:ss')}
+    `);
     
-    // Use failsafe to update all storage locations
-    await setFailsafeStreakValue(1);
+    // Save updated data
+    await saveStreakData(updatedData, userId);
     
-    // Store the updated streak data
-    await saveStreakData(newData, userId);
+    // Also update the streak start date in ISO format for the calendar
+    await storeData(STORAGE_KEYS.STREAK_START_DATE, new Date(newStartDate).toISOString());
     
-    // Try to update widgets
-    try {
-      await updateWidgetStreakData(1, newData.startDate, newData.lastCheckIn);
-    } catch (widgetError) {
-      console.warn('Failed to update widget, but streak was still updated:', widgetError);
-    }
+    console.log(`Check-in successful. Current streak: ${newStreak} days`);
     
-    console.log('New streak started:', {
-      streak: 1,
-      startDate: new Date(todayStartTime).toLocaleString(),
-      daysMissed: daysSinceLastCheckIn
-    });
   } catch (error) {
     console.error('Failed to perform check-in:', error);
   }
 };
 
-// Add this code to update the iOS widget data
+/**
+ * Update widget with current streak data
+ */
 export const updateWidgetStreakData = async (streak: number, startDate: number, lastCheckIn: number) => {
   try {
-    // Check if the WidgetUpdater module actually exists before trying to use it
-    if (Platform.OS === 'ios' && WidgetUpdater && typeof WidgetUpdater.updateWidget === 'function') {
-      console.log(`Updating widget with streak: ${streak}, startDate: ${startDate}, lastCheckIn: ${lastCheckIn}`);
+    // Update widget if on iOS
+    if (Platform.OS === 'ios') {
       await WidgetUpdater.updateWidget(streak, startDate, lastCheckIn);
-    return true;
-    } else {
-      // Either not on iOS or the module isn't properly initialized
-      console.log('Widget updates skipped - module not available');
-      return true;
     }
   } catch (error) {
-    console.error('Error updating widget data:', error);
-    return false;
-  } finally {
-    // Always log success to prevent blocking the app flow
-    console.log('Widget data updated successfully');
+    console.log('Failed to update widget:', error);
   }
 };
 
-export const setStreak = async (value: number, relapseDate?: number): Promise<void> => {
-  // ... existing code ...
-  
-  // Add this before the end of the function
+/**
+ * Set streak to a specific value
+ */
+export const setStreak = async (value: number, startDateTimestamp?: number): Promise<void> => {
   try {
-    // Get the current timestamp
-    const currentTime = relapseDate || Date.now();
+    // Ensure value is a valid number
+    if (typeof value !== 'number' || isNaN(value)) {
+      console.error('Invalid streak value:', value);
+      return;
+    }
     
-    // Calculate streak start date - current date minus (streak - 1) days
-    const startDate = value > 0 
-      ? currentTime - ((value - 1) * 24 * 60 * 60 * 1000) 
-      : currentTime;
+    // Ensure value is not negative
+    const validValue = Math.max(0, value);
     
-    // Update widget data
-    await updateWidgetStreakData(value, startDate, currentTime);
+    // Update streak
+    await updateStreak(validValue, DEFAULT_USER_ID, startDateTimestamp);
+    
   } catch (error) {
-    console.error('Error updating widget data:', error);
+    console.error('Failed to set streak:', error);
   }
-  
-  // ... end of function
 };
 
-// Add this function to check and adjust the streak based on the last check-in date
-export const checkAndAdjustStreak = async (userId = DEFAULT_USER_ID): Promise<StreakData> => {
+/**
+ * Check and adjust streak based on last check-in date
+ */
+export const checkAndAdjustStreak = async (userId = DEFAULT_USER_ID, loadedData?: StreakData): Promise<StreakData> => {
   try {
-    // Load current streak data
-    const data = await loadStreakData(userId);
+    // Get current data if not provided
+    const data = loadedData || await getData(STORAGE_KEYS.STREAK_DATA, defaultData);
     
-    // Get current date at midnight in user's timezone
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-    const todayStartTime = todayStart.getTime();
+    // Validate the data
+    const validData = validateStreakData(data);
     
-    // Get the last check-in date at midnight in user's timezone
-    const lastCheckIn = new Date(data.lastCheckIn);
-    const lastCheckInStart = new Date(
-      lastCheckIn.getFullYear(),
-      lastCheckIn.getMonth(),
-      lastCheckIn.getDate(),
-      0, 0, 0, 0
-    ).getTime();
+    const now = Date.now();
+    const today = startOfDay(new Date()).getTime();
+    const lastCheckInDay = startOfDay(new Date(validData.lastCheckIn)).getTime();
     
     // Calculate days since last check-in
-    const daysSinceLastCheckIn = Math.floor((todayStartTime - lastCheckInStart) / (24 * 60 * 60 * 1000));
+    const daysSinceLastCheckIn = differenceInDays(today, lastCheckInDay);
     
     console.log(`Days since last check-in: ${daysSinceLastCheckIn}`);
-    console.log(`Last check-in: ${new Date(lastCheckInStart).toLocaleString()}`);
-    console.log(`Current streak: ${data.streak}`);
-    console.log(`Start date: ${new Date(data.startDate).toLocaleDateString()}`);
+    console.log(`Last check-in: ${format(new Date(validData.lastCheckIn), 'dd/MM/yyyy, p')}`);
+    console.log(`Current streak: ${validData.streak}`);
+    console.log(`Start date: ${format(new Date(validData.startDate), 'dd/MM/yyyy')}`);
     
-    // If already checked in today, no adjustment needed
+    let updatedData = { ...validData };
+    
+    // Check if the start date is in the future
+    if (isAfter(new Date(validData.startDate), new Date())) {
+      console.log('Start date is in the future, fixing to today');
+      updatedData.startDate = today;
+      
+      // If start date was in the future, reset the streak to 0
+      updatedData.streak = 0;
+    }
+    
+    // If last check-in was today, no adjustment needed for streak value
     if (daysSinceLastCheckIn === 0) {
-      console.log('Already checked in today, no streak adjustment needed');
-      return data;
+      console.log('Checked in today, no adjustment needed');
+      
+      // Just update last check-in time to ensure it's current
+      updatedData.lastCheckIn = now;
+      
+      // CRITICAL FIX: If the start date is not properly set based on streak, fix it
+      if (updatedData.streak > 0) {
+        const expectedStartDate = today - ((updatedData.streak - 1) * 24 * 60 * 60 * 1000);
+        
+        // If start date is more than 12 hours off from where it should be, correct it
+        if (Math.abs(updatedData.startDate - expectedStartDate) > 12 * 60 * 60 * 1000) {
+          console.log('Fixing start date to match streak value');
+          console.log(`Old start date: ${format(new Date(updatedData.startDate), 'dd/MM/yyyy')}`);
+          console.log(`New start date: ${format(new Date(expectedStartDate), 'dd/MM/yyyy')}`);
+          updatedData.startDate = expectedStartDate;
+        }
+      }
     }
-    
-    // If exactly 1 day has passed, the user can still maintain their streak with a check-in
-    if (daysSinceLastCheckIn === 1) {
+    // If last check-in was yesterday, streak is current
+    else if (daysSinceLastCheckIn === 1) {
       console.log('One day since last check-in, streak can be maintained with check-in today');
-      return data;
+      
+      // Update last check-in time
+      updatedData.lastCheckIn = now;
+      
+      // CRITICAL FIX: Ensure the start date remains correct
+      // For a continuing streak, the start date should not change
     }
-    
-    // If more than 1 day has passed, reset streak to 0
-    if (daysSinceLastCheckIn > 1) {
+    // If missed 1 day, allow grace period but don't increment
+    else if (daysSinceLastCheckIn === 2) {
+      console.log('Two days since last check-in, grace period applies');
+      
+      // Update last check-in time
+      updatedData.lastCheckIn = now;
+      
+      // CRITICAL FIX: Ensure the start date remains correct for the grace period
+      // For a streak with grace period, the start date should also not change
+    }
+    // If missed more than 1 day, reset streak
+    else if (daysSinceLastCheckIn > 2) {
       console.log(`${daysSinceLastCheckIn} days since last check-in, resetting streak`);
       
-      // Create updated data with reset streak
-      const resetData: StreakData = {
-        streak: 0,
-        lastCheckIn: todayStartTime,
-        startDate: todayStartTime,
-        hourCount: data.hourCount || 0 // Preserve hour count or default to 0
-      };
+      // Reset streak to 0
+      updatedData.streak = 0;
       
-      // Save the reset data
-      await saveStreakData(resetData, userId);
+      // Update last check-in time
+      updatedData.lastCheckIn = now;
       
-      // Also update failsafe storage
-      await setFailsafeStreakValue(0);
+      // Reset start date to today
+      updatedData.startDate = today;
+    }
+    // If last check-in is in the future (device time changed), fix it
+    else if (daysSinceLastCheckIn < 0) {
+      console.log('Last check-in is in the future, fixing to today');
       
-      console.log('Streak reset due to missed check-ins');
-      return resetData;
+      // Fix last check-in to current time
+      updatedData.lastCheckIn = now;
+      
+      // CRITICAL FIX: Do not change the start date or streak value
+      // This preserves the streak if the device time was temporarily wrong
     }
     
-    // Default case - return original data
-    return data;
+    // Save if changes were made
+    if (JSON.stringify(updatedData) !== JSON.stringify(validData)) {
+      await saveStreakData(updatedData, userId);
+    }
+    
+    console.log(`Streak status: ${updatedData.streak} days (last check-in: ${format(new Date(updatedData.lastCheckIn), 'dd/MM/yyyy')})`);
+    console.log(`Start date: ${format(new Date(updatedData.startDate), 'dd/MM/yyyy')}`);
+    console.log('Data verification and recovery complete');
+    
+    return updatedData;
+    
   } catch (error) {
-    console.error('Error checking and adjusting streak:', error);
-    throw error;
+    console.error('Failed to check and adjust streak:', error);
+    return defaultData;
   }
 };
 
-// FOR TESTING ONLY: Function to simulate time passage for testing streak functionality
+/**
+ * Simulate time passed for testing
+ */
 export const simulateTimePassed = async (daysToAdd: number): Promise<StreakData> => {
   try {
-    // Get current streak data
-    const currentData = await loadStreakData();
+    // Get current data
+    const data = await getData(STORAGE_KEYS.STREAK_DATA, defaultData);
     
-    // Calculate new lastCheckIn time by subtracting days
-    const lastCheckIn = new Date(currentData.lastCheckIn);
-    lastCheckIn.setDate(lastCheckIn.getDate() - daysToAdd);
+    // Simulate time passed by adjusting last check-in
+    const simulatedLastCheckIn = data.lastCheckIn - (daysToAdd * 24 * 60 * 60 * 1000);
     
-    // Update the streak data with the simulated lastCheckIn
+    // Update data with simulated last check-in
     const updatedData: StreakData = {
-      ...currentData,
-      lastCheckIn: lastCheckIn.getTime()
+      ...data,
+      lastCheckIn: simulatedLastCheckIn
     };
     
-    // Save the updated data
-    await saveStreakData(updatedData);
-    console.log(`Simulated ${daysToAdd} days passing. Last check-in now: ${new Date(updatedData.lastCheckIn).toLocaleDateString()}`);
+    // Save simulated data
+    await storeData(STORAGE_KEYS.STREAK_DATA, updatedData);
     
-    // Return the updated data
-    return updatedData;
+    // Check and adjust streak based on simulated time
+    return checkAndAdjustStreak(DEFAULT_USER_ID, updatedData);
+    
   } catch (error) {
-    console.error('Error simulating time passage:', error);
-    throw error;
+    console.error('Failed to simulate time passed:', error);
+    return defaultData;
   }
+};
+
+/**
+ * Schedule daily streak check to ensure streak updates at midnight
+ */
+export const scheduleDailyStreakCheck = () => {
+  // Get current time
+  const now = new Date();
+  
+  // Calculate time until next day (midnight)
+  const nextMidnight = new Date();
+  nextMidnight.setHours(24, 0, 5, 0); // 12:00:05 AM tomorrow
+  
+  // Calculate milliseconds until midnight
+  const msUntilMidnight = nextMidnight.getTime() - now.getTime();
+  
+  console.log(`Scheduling daily streak check in ${Math.floor(msUntilMidnight / 1000 / 60)} minutes`);
+  
+  // Schedule check
+  setTimeout(async () => {
+    console.log('Performing daily streak check');
+    
+    try {
+      // Load and check streak data
+      const data = await loadStreakData();
+      
+      // Adjust streak if needed
+      await checkAndAdjustStreak(DEFAULT_USER_ID, data);
+      
+      // Schedule next check
+      scheduleDailyStreakCheck();
+    } catch (error) {
+      console.error('Error in daily streak check:', error);
+      
+      // Retry in 10 minutes if there was an error
+      setTimeout(scheduleDailyStreakCheck, 10 * 60 * 1000);
+    }
+  }, msUntilMidnight);
 };
