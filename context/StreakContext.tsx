@@ -262,8 +262,19 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, [recomputeStreak, lastProcessedDate]);
 
+  // Track the last time forceRefresh was called to prevent infinite loops
+  const lastRefreshTimeRef = useRef(0);
+  
   // Force refresh function - defined before the AppState listener to avoid linter errors
   const forceRefresh = useCallback(async () => {
+    // Rate limiting to prevent excessive calls
+    const now = Date.now();
+    if (now - lastRefreshTimeRef.current < 1000) {  // 1 second minimum interval
+      console.log('[StreakContext] forceRefresh called too frequently, skipping to prevent loops');
+      return true;
+    }
+    lastRefreshTimeRef.current = now;
+    
     setIsLoading(true);
     
     try {
@@ -529,7 +540,7 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
       } catch (error) {
         console.error('[StreakContext] Error in date check interval:', error);
       }
-    }, 30000); // Check every 30 seconds - much less aggressive to save resources
+    }, 300000); // Check every 5 minutes instead of every 30 seconds - much less aggressive to save resources
     
     // Run an immediate check when this effect is first setup
     handleAppStateChange('active');
