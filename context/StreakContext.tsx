@@ -265,11 +265,20 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
   // Track the last time forceRefresh was called to prevent infinite loops
   const lastRefreshTimeRef = useRef(0);
   
+  // Flag to disable automatic checks during critical operations
+  const isProcessingRef = useRef(false);
+  
   // Force refresh function - defined before the AppState listener to avoid linter errors
   const forceRefresh = useCallback(async () => {
-    // Rate limiting to prevent excessive calls
+    // Skip refresh completely if we're already processing something critical
+    if (isProcessingRef.current) {
+      console.log('[StreakContext] Skipping forceRefresh during critical operation');
+      return true;
+    }
+    
+    // More aggressive rate limiting to prevent excessive calls
     const now = Date.now();
-    if (now - lastRefreshTimeRef.current < 1000) {  // 1 second minimum interval
+    if (now - lastRefreshTimeRef.current < 2000) {  // 2 second minimum interval
       console.log('[StreakContext] forceRefresh called too frequently, skipping to prevent loops');
       return true;
     }
@@ -510,6 +519,12 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
   // Add AppState listener to check for date changes and update streak
   useEffect(() => {
     const handleAppStateChange = async (nextAppState: AppStateStatus) => {
+      // Skip this completely if we're in a critical operation
+      if (isProcessingRef.current) {
+        console.log('[StreakContext] Skipping app state change handler during critical operation');
+        return;
+      }
+      
       // Only run this when the app comes to the foreground
       if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
         // Always force a calendar update to ensure we're up to date with the current date
@@ -523,8 +538,12 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     
     // Check for date changes less aggressively to avoid performance issues
-    // This is still frequent enough to catch date changes but won't cause performance issues
     const checkDateInterval = setInterval(async () => {
+      // Skip check if we're processing something critical
+      if (isProcessingRef.current) {
+        return;
+      }
+      
       try {
         // Get a fresh Date object to ensure we're using the current system time
         const freshToday = new Date();
@@ -542,8 +561,10 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
       }
     }, 300000); // Check every 5 minutes instead of every 30 seconds - much less aggressive to save resources
     
-    // Run an immediate check when this effect is first setup
-    handleAppStateChange('active');
+    // Run an immediate check when this effect is first setup, but not if we're processing
+    if (!isProcessingRef.current) {
+      handleAppStateChange('active');
+    }
     
     // Cleanup subscription and interval
     return () => {
@@ -584,8 +605,11 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
       recomputeStreak(startDay, newHistory);
   };
 
+  // Modified recordRelapse to completely avoid any callbacks
   const recordRelapse = useCallback(
     async (date: Date) => {
+      // Set processing flag to disable background operations
+      isProcessingRef.current = true;
       console.log(`[StreakContext] RECORDING RELAPSE: Date=${date.toISOString()}`);
       
       try {
@@ -666,9 +690,14 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
         console.log('[StreakContext] RELAPSE RECORDING COMPLETE');
       } catch (error) {
         console.error('[StreakContext] Error recording relapse:', error);
+      } finally {
+        // Reset the processing flag when done
+        setTimeout(() => {
+          isProcessingRef.current = false;
+        }, 5000); // Keep processing flag active for 5 seconds after completion
       }
     },
-    [] // Removed forceRefresh from dependencies
+    [] // No dependencies
   );
 
   const resetCalendar = useCallback(async () => {

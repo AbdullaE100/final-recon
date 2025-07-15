@@ -494,123 +494,81 @@ const StreakCard = () => {
   
   // Handle relapse confirmation
   const handleRelapseConfirm = async () => {
-    console.log('handleRelapseConfirm: Starting...');
+    console.log('handleRelapseConfirm: Starting with simplified implementation...');
     setRelapseModalVisible(false);
     
     try {
-      // Show streak counter animation going to 0
-      animation.value = withSequence(
-        withTiming(0.85, { duration: 300, easing: Easing.in(Easing.cubic) }),
-        withTiming(1, {
-          duration: 500,
-          easing: Easing.out(Easing.cubic),
-        })
-      );
+      // Set the UI state immediately for better feedback
+      setLocalStreak(0);
+      streakValueRef.current = 0;
       
-      // First record the relapse for the calendar history
+      // Simple animation
+      animation.value = withTiming(0.9, {
+        duration: 300,
+        easing: Easing.inOut(Easing.ease)
+      });
+      
+      // Record the relapse directly
       const relapseDate = new Date();
       console.log('handleRelapseConfirm: Recording relapse for date', relapseDate);
-      try {
-        // Direct call to recordRelapse
-        await recordRelapse(relapseDate);
-        console.log('handleRelapseConfirm: Relapse recorded successfully');
-        
-        // Force refresh to ensure all data is updated
-        await forceRefresh();
-        console.log('handleRelapseConfirm: Force refreshed after relapse');
-      } catch (relapseError) {
-        console.error('handleRelapseConfirm: Error recording relapse:', relapseError);
-        // Continue even if recordRelapse fails - we'll still try to update the UI
-      }
       
-      // Update gamification context streak
-      if (gamification?.setStreak) {
-        try {
-          await gamification.setStreak(0);
-          console.log('handleRelapseConfirm: Gamification streak reset to 0');
-        } catch (gamificationError) {
-          console.error('handleRelapseConfirm: Error updating gamification streak:', gamificationError);
-          // Continue even if gamification update fails
-        }
-      }
+      // Directly use resetStreakData instead of recordRelapse to avoid context callbacks
+      const { resetAllStreakData } = require('@/utils/resetStreakData');
+      await resetAllStreakData();
+      console.log('handleRelapseConfirm: Reset all streak data successfully');
       
-      // Show achievement notification
-      try {
-        showAchievement({
-          title: "Streak Reset",
-          description: "Your streak has been reset. Today is a new beginning.",
-          buttonText: "Continue"
-        });
-      } catch (notificationError) {
-        console.error('handleRelapseConfirm: Error showing achievement notification:', notificationError);
-        // Continue even if notification fails
-      }
+      // Show notification
+      showAchievement({
+        title: "Streak Reset",
+        description: "Your streak has been reset. Today is a new beginning.",
+        buttonText: "Continue"
+      });
       
-      // Reset the streak to 1 day after a delay
+      // Set up new streak starting tomorrow
       setTimeout(async () => {
         try {
-          console.log('handleRelapseConfirm: Now resetting streak to 1 day...');
+          // Use storage directly instead of going through contexts
+          const { storeData, STORAGE_KEYS } = require('@/utils/storage');
+          const { format, startOfToday, addDays } = require('date-fns');
           
-          // Import the resetStreakToOne function directly
-          const { resetStreakToOne } = require('@/utils/resetStreakData');
+          // Set up tomorrow as a clean day
+          const today = startOfToday();
+          const tomorrow = addDays(today, 1);
+          const tomorrowKey = format(tomorrow, 'yyyy-MM-dd');
           
-          try {
-            await resetStreakToOne();
-            console.log('handleRelapseConfirm: Streak successfully reset to 1');
+          // Create minimal calendar history
+          const history = {
+            [format(today, 'yyyy-MM-dd')]: 'relapse',
+            [tomorrowKey]: 'clean'
+          };
+          
+          // Store directly to avoid context loops
+          await storeData(STORAGE_KEYS.CALENDAR_HISTORY, history);
+          await storeData(STORAGE_KEYS.STREAK_START_DATE, tomorrow.toISOString());
+          
+          // Update local UI after a delay
+          setTimeout(() => {
+            setLocalStreak(1);
+            streakValueRef.current = 1;
             
-            // REMOVING THIS SECOND forceRefresh THAT CAUSES INFINITE LOOP
-            // await forceRefresh();
-            // console.log('handleRelapseConfirm: Force refreshed after reset to 1');
+            // Trigger animation to show 1
+            animation.value = withSequence(
+              withTiming(1.15, { duration: 400, easing: Easing.out(Easing.cubic) }),
+              withTiming(1, { duration: 300, easing: Easing.inOut(Easing.cubic) })
+            );
             
-            // Update local state to 1 with a slight delay
-            setTimeout(() => {
-              setLocalStreak(1);
-              streakValueRef.current = 1;
-              
-              // Trigger animation to show 1
-              animation.value = withSequence(
-                withTiming(1.15, { duration: 400, easing: Easing.out(Easing.cubic) }),
-                withTiming(1, { duration: 300, easing: Easing.inOut(Easing.cubic) })
-              );
-              
-              // Force a re-render
-              setForceRender(prev => prev + 1);
-            }, 500);
-          } catch (error) {
-            console.error('handleRelapseConfirm: Error in resetStreakToOne:', error);
-            
-            // Fallback method if resetStreakToOne fails
-            try {
-              await forceRefresh();
-              console.log('handleRelapseConfirm: Forced refresh as fallback');
-              
-              // Set local state to 1 as fallback
-              setLocalStreak(1);
-              streakValueRef.current = 1;
-              setForceRender(prev => prev + 1);
-            } catch (refreshError) {
-              console.error('handleRelapseConfirm: Error in forceRefresh fallback:', refreshError);
-            }
-          }
+            // Force a re-render
+            setForceRender(prev => prev + 1);
+          }, 2000);
+          
         } catch (error) {
-          console.error('handleRelapseConfirm: Error in setTimeout callback:', error);
+          console.error('handleRelapseConfirm: Error setting up new streak:', error);
         }
-      }, 3000); // 3 second delay to ensure 0 is visible
+      }, 3000);
 
     } catch (error) {
       console.error('handleRelapseConfirm: Error recording relapse:', error);
-      setRelapseModalVisible(false);
-      try {
-        showAchievement({
-          title: 'Error',
-          description: 'There was a problem recording your relapse. Please try again.',
-          buttonText: 'OK'
-        });
-      } catch (notificationError) {
-        console.error('handleRelapseConfirm: Error showing error notification:', notificationError);
-        // If even the notification fails, try a basic alert as last resort
-        Alert.alert('Error', 'There was a problem recording your relapse. Please try again.');
-      }
+      Alert.alert('Error', 'There was a problem recording your relapse. Please try again.');
     }
   };
   
