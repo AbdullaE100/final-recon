@@ -27,7 +27,7 @@ import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface QuizScreenProps {
-  onComplete: (answers: Record<string, string>) => void;
+  onComplete: (answers: Record<string, string | string[]>) => void;
 }
 
 // Screen dimensions for responsive layouts
@@ -65,7 +65,18 @@ const questions = [
       { id: 'discipline', text: 'Building self-discipline' },
       { id: 'mental', text: 'Mental clarity and focus' },
       { id: 'energy', text: 'More energy and motivation' },
+      { id: 'relationships', text: 'Healthier relationships' },
+      { id: 'confidence', text: 'Boosting self-confidence' },
+      { id: 'productivity', text: 'Increased productivity' },
+      { id: 'emotional', text: 'Emotional stability' },
+      { id: 'spiritual', text: 'Spiritual growth' },
+      { id: 'happiness', text: 'Greater happiness' },
+      { id: 'resilience', text: 'Resilience to stress' },
+      { id: 'purpose', text: 'Finding purpose' },
+      { id: 'other', text: 'Other (specify later)' },
     ],
+    multi: true,
+    max: 3,
   },
   {
     id: 'struggle',
@@ -220,8 +231,8 @@ const QuizScreen: React.FC<QuizScreenProps> = ({ onComplete }) => {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [currentQuestion, setCurrentQuestion] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [selectedOption, setSelectedOption] = useState<string | null>(null);
+  const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
+  const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   
   // Animation values
   const slideAnim = useSharedValue(0);
@@ -244,17 +255,28 @@ const QuizScreen: React.FC<QuizScreenProps> = ({ onComplete }) => {
 
   // Handle selecting an answer
   const handleSelect = (questionId: string, answerId: string) => {
-    // Animate selection
-    setSelectedOption(answerId);
-    
-    // Update answers after a slight delay for better UX
-    setAnswers({ ...answers, [questionId]: answerId });
-    // Automatically move to the next question after a short delay
-    setTimeout(() => {
-      handleNext();
-    }, 300);
-    
-    // Animate button to indicate it's now available - using simpler easing functions
+    if (questions[currentQuestion].id === 'goal' && questions[currentQuestion].multi) {
+      let updated = [...selectedOptions];
+      if (updated.includes(answerId)) {
+        updated = updated.filter(id => id !== answerId);
+      } else if (updated.length < (questions[currentQuestion].max || 3)) {
+        updated.push(answerId);
+      }
+      setSelectedOptions(updated);
+      setAnswers({ ...answers, [questionId]: updated });
+      // If 3 selected, auto-advance
+      if (updated.length === (questions[currentQuestion].max || 3)) {
+        setTimeout(() => {
+          handleNext();
+        }, 300);
+      }
+    } else {
+      setSelectedOptions([answerId]);
+      setAnswers({ ...answers, [questionId]: answerId });
+      setTimeout(() => {
+        handleNext();
+      }, 300);
+    }
     buttonScale.value = withSequence(
       withTiming(1.05, { duration: 120, easing: Easing.ease }),
       withTiming(1, { duration: 120, easing: Easing.ease })
@@ -264,7 +286,11 @@ const QuizScreen: React.FC<QuizScreenProps> = ({ onComplete }) => {
   // Set current question (called after animation)
   const updateQuestion = useCallback((newIndex: number) => {
     setCurrentQuestion(newIndex);
-    setSelectedOption(answers[questions[newIndex]?.id] || null);
+    if (questions[newIndex]?.id === 'goal' && questions[newIndex].multi) {
+      setSelectedOptions(Array.isArray(answers[questions[newIndex].id]) ? (answers[questions[newIndex].id] as string[]) : []);
+    } else {
+      setSelectedOptions(answers[questions[newIndex]?.id] ? [answers[questions[newIndex]?.id] as string] : []);
+    }
     isAnimating.current = false;
   }, [answers]);
 
@@ -371,7 +397,9 @@ const QuizScreen: React.FC<QuizScreenProps> = ({ onComplete }) => {
   };
 
   // Check if current question has been answered
-  const currentQuestionAnswered = !!answers[questions[currentQuestion].id];
+  const currentQuestionAnswered = questions[currentQuestion].id === 'goal' && questions[currentQuestion].multi
+    ? (selectedOptions.length > 0 && selectedOptions.length <= (questions[currentQuestion].max || 3))
+    : !!answers[questions[currentQuestion].id];
   
   // Gradient animated style
   const gradientAnimatedStyle = useAnimatedStyle(() => {
@@ -461,9 +489,13 @@ const QuizScreen: React.FC<QuizScreenProps> = ({ onComplete }) => {
 
           <View style={styles.optionsContainer}>
             {questions[currentQuestion].options.map((option) => {
-              const isSelected = answers[questions[currentQuestion].id] === option.id;
-              const isBeingSelected = selectedOption === option.id;
-              
+              const isMulti = questions[currentQuestion].id === 'goal' && questions[currentQuestion].multi;
+              const isSelected = isMulti
+                ? selectedOptions.includes(option.id)
+                : answers[questions[currentQuestion].id] === option.id;
+              const isBeingSelected = isMulti
+                ? false
+                : selectedOptions[0] === option.id;
               return (
                 <TouchableOpacity
                   key={option.id}
@@ -477,10 +509,12 @@ const QuizScreen: React.FC<QuizScreenProps> = ({ onComplete }) => {
                         ? '#6E6AFF'
                         : 'rgba(255, 255, 255, 0.08)',
                       transform: [{ scale: isBeingSelected ? 1.02 : 1 }],
+                      opacity: isMulti && !isSelected && selectedOptions.length >= (questions[currentQuestion].max || 3) ? 0.5 : 1,
                     },
                   ]}
                   onPress={() => handleSelect(questions[currentQuestion].id, option.id)}
                   activeOpacity={0.7}
+                  disabled={isMulti && !isSelected && selectedOptions.length >= (questions[currentQuestion].max || 3)}
                 >
                   <Text
                     style={[
@@ -500,6 +534,21 @@ const QuizScreen: React.FC<QuizScreenProps> = ({ onComplete }) => {
                 </TouchableOpacity>
               );
             })}
+            {/* Show Next button for multi-select if 1 or 2 selected */}
+            {questions[currentQuestion].id === 'goal' && questions[currentQuestion].multi && selectedOptions.length > 0 && selectedOptions.length < (questions[currentQuestion].max || 3) && (
+              <TouchableOpacity
+                style={{
+                  marginTop: 18,
+                  backgroundColor: '#6E6AFF',
+                  borderRadius: 12,
+                  paddingVertical: 14,
+                  alignItems: 'center',
+                }}
+                onPress={handleNext}
+              >
+                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 17 }}>Next</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </BlurView>
       </Animated.View>
@@ -583,11 +632,12 @@ const styles = StyleSheet.create({
   },
   optionsContainer: {
     flex: 1,
+    paddingBottom: 32,
   },
   optionItem: {
     padding: 16,
     borderRadius: 16,
-    marginBottom: 12,
+    marginBottom: 20,
     borderWidth: 1,
     height: 56,
     justifyContent: 'center',

@@ -89,7 +89,15 @@ export const retrieveUserData = async (username: string): Promise<boolean> => {
     
     // Store the data locally
     if (userData.user_data) await storeData(STORAGE_KEYS.USER_DATA, userData.user_data);
-    if (userData.streak_data) await storeData(STORAGE_KEYS.STREAK_DATA, userData.streak_data);
+    if (userData.streak_data) {
+      const deviceId = userData.device_id;
+      if (deviceId) {
+        const userStreakKey = `${STORAGE_KEYS.STREAK_DATA}:${deviceId}`;
+        await storeData(userStreakKey, userData.streak_data);
+      } else {
+        await storeData(STORAGE_KEYS.STREAK_DATA, userData.streak_data);
+      }
+    }
     if (userData.journal_entries) await storeData(STORAGE_KEYS.JOURNAL_ENTRIES, userData.journal_entries);
     if (userData.achievements) await storeData(STORAGE_KEYS.ACHIEVEMENTS, userData.achievements);
     if (userData.preferences) await storeData(STORAGE_KEYS.USER_PREFERENCES, userData.preferences);

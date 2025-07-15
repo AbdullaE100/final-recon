@@ -1,0 +1,64 @@
+
+// ===== FIX SCRIPT FOR STREAK CONTEXT ISSUES =====
+// Apply these changes to your code manually to fix the issues
+
+// 1. First, add this state variable to the StreakProvider component:
+// Add after the other state variables (around line 86-90)
+const [lastProcessedDate, setLastProcessedDate] = useState<string>("");
+
+// 2. In the updateCalendarForNewDay function, add this date check to prevent infinite loops:
+// Add at the beginning of the function body
+const today = new Date();
+today.setHours(0, 0, 0, 0); // Start of day
+const todayStr = format(today, DATE_FMT);
+
+// Check if we have already processed this date
+if (todayStr === lastProcessedDate) {
+  return; // Skip if already processed this date
+}
+
+// Update the last processed date
+setLastProcessedDate(todayStr);
+
+// 3. Fix the recordRelapse function to prevent crash when setting up new streak:
+// Replace the entire setTimeout block with this:
+setTimeout(async () => {
+  try {
+    // Set tomorrow as the new streak start date
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    // Create a fresh copy of the history to avoid referencing stale data
+    const updatedHistory = await getData(STREAK_STORAGE_KEYS.CALENDAR_HISTORY, {});
+    
+    // Mark today as the relapse day
+    updatedHistory[key] = "relapse";
+    
+    // Mark tomorrow as clean to start the new streak
+    const tomorrowKey = format(tomorrow, DATE_FMT);
+    updatedHistory[tomorrowKey] = "clean";
+    
+    console.log(`[StreakContext] Setting up new streak starting from tomorrow (${tomorrowKey})`);
+    
+    // Save the updated history and start date
+    await Promise.all([
+      storeData(STREAK_STORAGE_KEYS.CALENDAR_HISTORY, updatedHistory),
+      storeData(STREAK_STORAGE_KEYS.STREAK_START_DATE, tomorrow.toISOString())
+    ]);
+    
+    // Update local state
+    setCalendarHistory(updatedHistory);
+    setStreakStartDateState(tomorrow);
+  } catch (error) {
+    console.error("[StreakContext] Error setting up new streak:", error);
+  }
+}, 3000);
+
+// 4. In the initial load useEffect, set new users to have streak 0:
+// Modify around line 322-324 in the isNewUser block:
+setStreakState(0); // New users should have streak 0
+
+// 5. Change the interval timing to be less aggressive:
+// In the AppState effect, change interval time from 3000 to 10000:
+}, 10000); // Check every 10 seconds instead of 3
+

@@ -43,7 +43,6 @@ import { StatusBar } from 'expo-status-bar';
 import { isSameDay } from 'date-fns';
 import JournalPrompts from '@/components/journal/JournalPrompts';
 import WeeklyDigest from '@/components/journal/WeeklyDigest';
-import { generateWeeklyDigest, WeeklyDigestData } from '@/utils/journalInsights';
 
 const { width } = Dimensions.get('window');
 
@@ -70,7 +69,7 @@ const MOOD_OPTIONS = [
 
 export default function JournalScreen() {
   const { colors } = useTheme();
-  const { addJournalEntry, journalEntries, deleteJournalEntry, streak, persistentStreak, streakStartDates, relapseDates } = useGamification();
+  const gamification = useGamification();
   
   // State for journal writing
   const [isWriting, setIsWriting] = useState(false);
@@ -81,9 +80,6 @@ export default function JournalScreen() {
   
   // State for weekly digest
   const [showDigest, setShowDigest] = useState(false);
-  const [digestData, setDigestData] = useState<WeeklyDigestData | null>(null);
-  const [isDigestLoading, setIsDigestLoading] = useState(true);
-  const [entriesNeeded, setEntriesNeeded] = useState(3);
   
   // State for filtering
   const [filterVisible, setFilterVisible] = useState(false);
@@ -125,33 +121,38 @@ export default function JournalScreen() {
   
   // Effect to filter entries when filters change
   useEffect(() => {
+    if (gamification?.journalEntries) {
     filterEntries();
     findOnThisDayEntry();
-  }, [selectedMoodFilter, selectedTagFilter, dateRange, journalEntries]);
+    }
+  }, [selectedMoodFilter, selectedTagFilter, dateRange, gamification?.journalEntries]);
   
   // Initial loading
   useEffect(() => {
     const init = async () => {
     setIsLoading(false);
-    setFilteredEntries(journalEntries);
+      if (gamification?.journalEntries) {
+        setFilteredEntries(gamification.journalEntries);
       findOnThisDayEntry();
-      
-      const digest = await generateWeeklyDigest(journalEntries);
-      setDigestData(digest);
-      
-      if (!digest) {
-        const needed = 3 - journalEntries.filter(e => new Date(e.timestamp) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length;
-        setEntriesNeeded(needed > 0 ? needed : 0);
       }
-      
-      setIsDigestLoading(false);
     }
     init();
-  }, [journalEntries]);
+  }, [gamification?.journalEntries]);
+  
+  // Ensure gamification context is available
+  if (!gamification) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+  
+  const { addJournalEntry, journalEntries, deleteJournalEntry, streak, lastCheckIn, dailyCheckedIn } = gamification;
   
   const findOnThisDayEntry = () => {
     const today = new Date();
-    const pastEntries = journalEntries.filter(entry => {
+    const pastEntries = journalEntries.filter((entry: JournalEntryType) => {
       const entryDate = new Date(entry.timestamp);
       // Exclude entries from today
       if (isSameDay(today, entryDate)) {
@@ -162,7 +163,7 @@ export default function JournalScreen() {
 
     if (pastEntries.length > 0) {
       // Find the most recent one from a past year
-      pastEntries.sort((a, b) => b.timestamp - a.timestamp);
+      pastEntries.sort((a: JournalEntryType, b: JournalEntryType) => b.timestamp - a.timestamp);
       setOnThisDayEntry(pastEntries[0]);
     } else {
       setOnThisDayEntry(null);
@@ -175,21 +176,21 @@ export default function JournalScreen() {
     
     // Filter by mood
     if (selectedMoodFilter) {
-      filtered = filtered.filter(entry => 
+      filtered = filtered.filter((entry: JournalEntryType) => 
         entry.mood === selectedMoodFilter
       );
     }
     
     // Filter by tag
     if (selectedTagFilter) {
-      filtered = filtered.filter(entry => 
+      filtered = filtered.filter((entry: JournalEntryType) => 
         entry.tags?.includes(selectedTagFilter)
       );
     }
     
     // Filter by date range
     if (dateRange.start && dateRange.end) {
-      filtered = filtered.filter(entry => 
+      filtered = filtered.filter((entry: JournalEntryType) => 
         entry.timestamp >= dateRange.start! && entry.timestamp <= dateRange.end!
       );
     }
@@ -248,37 +249,18 @@ export default function JournalScreen() {
   
   // Toggle mood selection
   const selectMood = (mood: string) => {
-    setSelectedMood(prev => prev === mood ? '' : mood);
-    
-    // Dismiss keyboard when mood is selected
-    Keyboard.dismiss();
-    
-    // Haptic feedback
+    setSelectedMood(mood);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
   
-  // Reset all filters
   const resetFilters = () => {
     setSelectedMoodFilter(null);
     setSelectedTagFilter(null);
     setDateRange({ start: null, end: null });
-    setFilterVisible(false);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
   
-  // Handle filter selection
   const handleFilterPress = (type: 'mood' | 'tag') => {
-    // If the same filter type is already selected, clear it
-    if ((type === 'mood' && selectedMoodFilter) || (type === 'tag' && selectedTagFilter)) {
-      if (type === 'mood') {
-        setSelectedMoodFilter(null);
-      } else {
-        setSelectedTagFilter(null);
-      }
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      return;
-    }
-    
-    // Otherwise show the filter modal
     setFilterType(type);
     setFilterVisible(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -286,100 +268,24 @@ export default function JournalScreen() {
   
   const handleSelectFilter = (value: string) => {
     if (filterType === 'mood') {
-      // Toggle off if selecting the same mood filter
-      setSelectedMoodFilter(prevMood => prevMood === value ? null : value);
+      setSelectedMoodFilter(value);
     } else if (filterType === 'tag') {
-      // Toggle off if selecting the same tag filter
-      setSelectedTagFilter(prevTag => prevTag === value ? null : value);
+      setSelectedTagFilter(value);
     }
     setFilterVisible(false);
     setFilterType(null);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
   
   // Check if a date is within the current streak
   const isStreakDay = (date: Date | null) => {
-    if (!date) return false;
+    if (!date || !gamification) return false; // Ensure gamification context is available
     
-    // Normalize date for comparison
-    const normalizedDate = new Date(date);
-    normalizedDate.setHours(0, 0, 0, 0);
-    
-    // Get today's date normalized
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    // If we have a persistent streak, calculate the start date
-    if (persistentStreak > 0) {
-      // Get the streak data from context/storage
-      const calculatedStartTime = today.getTime() - ((persistentStreak - 1) * 24 * 60 * 60 * 1000);
-      const calculatedStart = new Date(calculatedStartTime);
-      calculatedStart.setHours(0, 0, 0, 0);
-      
-      // If the date is between the calculated start date and today (inclusive), it's a streak day
-      return normalizedDate >= calculatedStart && normalizedDate <= today;
-    }
-    
-    // If no active streak, check historical streaks
-    for (let i = 0; i < streakStartDates.length; i++) {
-      const startDate = new Date(streakStartDates[i]);
-      startDate.setHours(0, 0, 0, 0);
-      
-      // Find the next relapse or start date after this start date
-      const nextRelapse = relapseDates
-        .find(d => {
-          const rd = new Date(d);
-          rd.setHours(0, 0, 0, 0);
-          return rd > startDate;
-        });
-      
-      const nextStart = streakStartDates
-        .find(d => {
-          const sd = new Date(d);
-          sd.setHours(0, 0, 0, 0);
-          return sd > startDate && !isSameDay(sd, startDate);
-        });
-      
-      // Determine the end date of this streak
-      let streakEnd = today;
-      if (nextRelapse && (!nextStart || nextRelapse < nextStart)) {
-        streakEnd = new Date(nextRelapse);
-      } else if (nextStart && (!nextRelapse || nextStart < nextRelapse)) {
-        streakEnd = new Date(nextStart);
-      }
-      
-      streakEnd.setHours(0, 0, 0, 0);
-      
-      // Check if the date falls within this streak period
-      if (normalizedDate >= startDate && normalizedDate <= streakEnd) {
-        return true;
-      }
-    }
-    
-    return false;
+    // We'll rely on the simple 'streak' value from gamification context for daily check-in visualization.
+    const checkinDate = new Date(lastCheckIn || 0);
+    return isSameDay(date, checkinDate) && dailyCheckedIn;
   };
-  
-  // Render a loading state
-  if (isLoading) {
-  return (
-      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
-  }
 
-  // Animation styles
-  const entryFormStyle = {
-    opacity: entryAnimation,
-    transform: [
-      { translateY: entryAnimation.interpolate({
-        inputRange: [0, 1],
-        outputRange: [50, 0]
-      })}
-    ]
-  };
-  
-  // Render "On This Day" memory
   const renderOnThisDay = () => {
     if (!onThisDayEntry) return null;
     
@@ -423,7 +329,6 @@ export default function JournalScreen() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
     >
       <LinearGradient colors={['#121212', '#000000']} style={StyleSheet.absoluteFillObject} />
-      <SafeAreaView style={{ flex: 1 }}>
         <View style={[styles.formHeader, { borderBottomColor: 'rgba(255, 255, 255, 0.1)' }]}>
           <TouchableOpacity 
             style={styles.headerButton} 
@@ -540,7 +445,6 @@ export default function JournalScreen() {
             </LinearGradient>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
     </KeyboardAvoidingView>
   );
   
@@ -580,124 +484,25 @@ export default function JournalScreen() {
                 <X size={24} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
-            
-            <ScrollView style={styles.filterContent}>
-              {filterType === 'mood' && (
-                <View style={styles.filterOptions}>
-                  <TouchableOpacity
-                    style={[
-                      styles.filterOption,
-                      { 
-                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                        borderColor: 'rgba(255, 255, 255, 0.1)'
-                      }
-                    ]}
-                    onPress={() => {
-                      setSelectedMoodFilter(null);
-                      setFilterVisible(false);
-                      setFilterType(null);
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                      <X size={24} color="#FFFFFF" />
-                      <Text style={[styles.filterOptionText, { color: '#FFFFFF' }]}>
-                        Clear Filter
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                  
-                  {MOOD_OPTIONS.map((mood) => {
-                    const MoodIcon = mood.icon;
-                    const isSelected = selectedMoodFilter === mood.key;
-                    
-                    return (
+            <ScrollView contentContainerStyle={styles.filterOptionsContainer}>
+              {filterType === 'mood' && MOOD_OPTIONS.map(mood => (
                       <TouchableOpacity
                         key={mood.key}
-                        style={[
-                          styles.filterOption,
-                          { 
-                            backgroundColor: isSelected ? `${mood.color}30` : 'rgba(255, 255, 255, 0.05)',
-                            borderColor: isSelected ? mood.color : 'rgba(255, 255, 255, 0.1)'
-                          }
-                        ]}
+                  style={[styles.filterOption, selectedMoodFilter === mood.key && styles.selectedFilterOption]}
                         onPress={() => handleSelectFilter(mood.key)}
-                        activeOpacity={0.7}
-                      >
-                        <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                          <MoodIcon size={24} color={mood.color} />
-                          <Text style={[styles.filterOptionText, { color: isSelected ? mood.color : '#FFFFFF' }]}>
-                            {mood.label}
-                          </Text>
-                        </View>
-                        {isSelected && (
-                          <View style={styles.selectedFilterIndicator}>
-                            <Text style={styles.selectedFilterText}>Selected</Text>
-                          </View>
-                        )}
+                >
+                  <Text style={styles.filterOptionText}>{mood.label}</Text>
                       </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
-              
-              {filterType === 'tag' && (
-                <View style={styles.filterOptions}>
-                  <TouchableOpacity
-                    style={[
-                      styles.filterOption,
-                      { 
-                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                        borderColor: 'rgba(255, 255, 255, 0.1)'
-                      }
-                    ]}
-                    onPress={() => {
-                      setSelectedTagFilter(null);
-                      setFilterVisible(false);
-                      setFilterType(null);
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                      <X size={24} color="#FFFFFF" />
-                      <Text style={[styles.filterOptionText, { color: '#FFFFFF' }]}>
-                        Clear Filter
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                  
-                  {JOURNAL_TAGS.map((tag) => {
-                    const isSelected = selectedTagFilter === tag;
-                    
-                    return (
+              ))}
+              {filterType === 'tag' && JOURNAL_TAGS.map(tag => (
                       <TouchableOpacity
                         key={tag}
-                        style={[
-                          styles.filterOption,
-                          { 
-                            backgroundColor: isSelected ? '#6366F130' : 'rgba(255, 255, 255, 0.05)',
-                            borderColor: isSelected ? '#6366F1' : 'rgba(255, 255, 255, 0.1)'
-                          }
-                        ]}
+                  style={[styles.filterOption, selectedTagFilter === tag && styles.selectedFilterOption]}
                         onPress={() => handleSelectFilter(tag)}
-                        activeOpacity={0.7}
-                      >
-                        <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                          <Tag size={20} color={isSelected ? '#6366F1' : '#FFFFFF'} />
-                          <Text style={[styles.filterOptionText, { color: isSelected ? '#6366F1' : '#FFFFFF' }]}>
-                            {tag}
-                          </Text>
-                        </View>
-                        {isSelected && (
-                          <View style={styles.selectedFilterIndicator}>
-                            <Text style={styles.selectedFilterText}>Selected</Text>
-                          </View>
-                        )}
+                >
+                  <Text style={styles.filterOptionText}>{tag}</Text>
                       </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
+              ))}
             </ScrollView>
           </View>
         </BlurView>
@@ -705,35 +510,9 @@ export default function JournalScreen() {
     </Modal>
   );
   
-  // Main journal screen
   const renderJournalList = () => {
   return (
-      <View style={styles.container}>
-        <StatusBar style="light" />
-        <LinearGradient colors={['#121212', '#000000']} style={StyleSheet.absoluteFillObject} />
-
-        {isWriting ? (
-          renderEntryForm()
-        ) : (
-          <View style={{flex: 1}}>
-            <View style={styles.header}>
-              <Text style={styles.headerTitle}>Journal</Text>
-              {isDigestLoading ? (
-                <ActivityIndicator size="small" color="#6366F1" />
-              ) : digestData ? (
-                <TouchableOpacity onPress={() => setShowDigest(true)} style={styles.digestButton}>
-                  <Text style={styles.digestButtonText}>Weekly Digest</Text>
-                </TouchableOpacity>
-              ) : (
-                <View style={styles.digestButtonDisabled}>
-                  <Text style={styles.digestButtonTextDisabled}>Weekly Digest</Text>
-                  <Text style={styles.digestSubTextDisabled}>
-                    {entriesNeeded > 0 ? `${entriesNeeded} more entries this week` : `Come back next week`}
-                  </Text>
-                </View>
-              )}
-            </View>
-
+      <View style={{ flex: 1 }}>
             {/* Tabs for filtering */}
             <View style={styles.tabContainer}>
               <TouchableOpacity 
@@ -777,25 +556,53 @@ export default function JournalScreen() {
                 </View>
               }
             />
-            <TouchableOpacity style={styles.addEntryButton} onPress={() => setIsWriting(true)}>
-              <LinearGradient colors={['#6366F1', '#4F46E5']} style={styles.gradientButton}>
+        <TouchableOpacity 
+          style={styles.addEntryButton}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            setIsWriting(true);
+          }}
+        >
                 <PlusCircle size={24} color={'white'} />
-              </LinearGradient>
             </TouchableOpacity>
-          </View>
-        )}
         </View>
     );
   };
 
-  if (showDigest && digestData) {
-    return <WeeklyDigest onBack={() => setShowDigest(false)} digestData={digestData} />;
-  }
+  return (
+    <View style={styles.container}>
+      <StatusBar style="light" />
+      <LinearGradient
+        colors={['#0A0A0A', '#1A1A1A', '#0A0A0A']}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <SafeAreaView style={{ flex: 1 }}>
+        {showDigest ? (
+          <WeeklyDigest onBack={() => setShowDigest(false)} />
+        ) : isWriting ? (
+          renderEntryForm()
+        ) : (
+          <View style={{ flex: 1 }}>
+            <View style={styles.header}>
+              <Text style={styles.headerTitle}>Journal</Text>
+              <TouchableOpacity
+                onPress={() => setShowDigest(true)}
+                style={styles.digestButton}
+              >
+                <BookOpen size={24} color={colors.text} />
+                <Text style={styles.digestButtonText}>Weekly Pulse</Text>
+              </TouchableOpacity>
+            </View>
+            {renderJournalList()}
+          </View>
+        )}
 
-  return renderJournalList();
+        {filterVisible && renderFilterModal()}
+      </SafeAreaView>
+    </View>
+  );
 }
 
-// Update styles
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -824,22 +631,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 20,
-  },
-  digestButtonDisabled: {
-    alignItems: 'flex-end',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   digestButtonText: {
     color: 'white',
     fontWeight: '600',
-  },
-  digestButtonTextDisabled: {
-    color: '#A1A1AA',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  digestSubTextDisabled: {
-    color: '#71717A',
-    fontSize: 12,
   },
   tabContainer: {
     flexDirection: 'row',
@@ -867,6 +665,62 @@ const styles = StyleSheet.create({
   activeTabText: {
     color: '#FFFFFF',
   },
+  onThisDayContainer: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    marginBottom: 20,
+    marginHorizontal: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 8,
+  },
+  onThisDayHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  onThisDayTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#EC4899',
+    marginLeft: 10,
+  },
+  onThisDayContent: {
+    fontSize: 16,
+    color: '#E5E7EB',
+    marginBottom: 10,
+    lineHeight: 22,
+  },
+  onThisDayLink: {
+    fontSize: 14,
+    color: '#6366F1',
+    fontWeight: '600',
+  },
+  emptyJournalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    minHeight: 200,
+  },
+  emptyBlurContainer: {
+    borderRadius: 20,
+    padding: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    width: '100%',
+  },
+  emptyJournalText: {
+    marginTop: 15,
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'center',
+    lineHeight: 24,
+  },
   addEntryButton: {
     position: 'absolute',
     bottom: 24,
@@ -876,88 +730,26 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#6366F1',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
     shadowRadius: 5,
-    elevation: 4,
-  },
-  gradientButton: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  onThisDayContainer: {
-    marginHorizontal: 0,
-    marginBottom: 20,
-    borderRadius: 16,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  onThisDayHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-    padding: 15,
-  },
-  onThisDayTitle: {
-    marginLeft: 8,
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  onThisDayContent: {
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: 10,
-    paddingHorizontal: 15,
-    paddingBottom: 15,
-    color: 'rgba(255, 255, 255, 0.8)',
-  },
-  onThisDayLink: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#6366F1',
-  },
-  emptyJournalContainer: {
-    paddingTop: 60,
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  emptyBlurContainer: {
-    width: '100%',
-    padding: 30,
-    borderRadius: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  emptyJournalText: {
-    fontSize: 16,
-    textAlign: 'center',
-    lineHeight: 24,
-    marginTop: 16,
-    color: 'rgba(255, 255, 255, 0.7)',
+    elevation: 8,
   },
   formContainer: {
     flex: 1,
-    backgroundColor: '#000000',
   },
   formHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 15,
     borderBottomWidth: 1,
-    marginTop: Platform.OS === 'ios' ? 0 : 40,
   },
   headerButton: {
-    padding: 12,
-    borderRadius: 8,
+    padding: 5,
   },
   formTitle: {
     fontSize: 20,
@@ -965,149 +757,136 @@ const styles = StyleSheet.create({
   },
   formScrollView: {
     flex: 1,
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
   },
   inputContainer: {
-    borderRadius: 16,
+    borderRadius: 15,
+    marginBottom: 20,
     borderWidth: 1,
     overflow: 'hidden',
-    marginBottom: 24,
   },
   input: {
-    fontSize: 16,
     minHeight: 120,
+    padding: 15,
+    fontSize: 16,
     textAlignVertical: 'top',
-    padding: 16,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '700',
-    marginBottom: 16,
     color: '#FFFFFF',
+    marginBottom: 15,
   },
   moodSelector: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
-    marginBottom: 24,
-    gap: 8,
+    marginBottom: 20,
   },
   moodButton: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderRadius: 12,
-    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 10,
+    marginBottom: 10,
+    width: '48%',
   },
   moodLabel: {
-    marginTop: 8,
-    fontSize: 12,
+    marginLeft: 10,
+    fontSize: 16,
     fontWeight: '600',
   },
   tagSelector: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   tagHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 15,
   },
   tagTitle: {
-    marginLeft: 8,
     fontSize: 18,
     fontWeight: '700',
+    marginLeft: 10,
   },
   tagContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    gap: 10,
   },
   tag: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 15,
     borderRadius: 20,
-    marginRight: 8,
-    marginBottom: 8,
     borderWidth: 1,
   },
   saveButtonContainer: {
-    paddingHorizontal: 16,
-    paddingBottom: Platform.OS === 'ios' ? 16 : 24,
-    backgroundColor: 'transparent',
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: '#000000',
   },
   saveButton: {
-    borderRadius: 12,
+    borderRadius: 30,
     overflow: 'hidden',
   },
   saveButtonGradient: {
-    paddingVertical: 16,
+    paddingVertical: 15,
     alignItems: 'center',
   },
   saveButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
     color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   filterModalContainer: {
+    borderRadius: 20,
+    overflow: 'hidden',
     width: '90%',
     maxHeight: '80%',
-    borderRadius: 20,
-    overflow: 'hidden',
   },
   filterModal: {
+    backgroundColor: '#111827',
     borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    overflow: 'hidden',
+    padding: 20,
   },
   filterHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    marginBottom: 20,
   },
   filterTitle: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: '700',
     color: '#FFFFFF',
   },
   closeButton: {
-    padding: 8,
+    padding: 5,
   },
-  filterContent: {
-    padding: 20,
-  },
-  filterOptions: {
-    gap: 12,
+  filterOptionsContainer: {
+    paddingBottom: 10,
   },
   filterOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 15,
+    borderRadius: 10,
+    marginBottom: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  selectedFilterOption: {
+    backgroundColor: '#6366F1',
   },
   filterOptionText: {
-    marginLeft: 12,
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
-  },
-  selectedFilterIndicator: {
-    backgroundColor: '#6366F1',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  selectedFilterText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#FFFFFF',
   },
 });

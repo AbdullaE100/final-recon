@@ -1,0 +1,299 @@
+--- a/components/home/RecoveryCalendar.tsx
++++ b/components/home/RecoveryCalendar.tsx
+@@ -1,10 +1,11 @@
+-import React, { useMemo, useState } from 'react';
++import React, { useMemo, useState, useEffect } from 'react';
+ import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+ import { Calendar } from 'react-native-calendars';
+ import { useTheme } from '@/context/ThemeContext';
+ import { useStreak } from '@/context/StreakContext';
+ import { format, startOfDay, eachDayOfInterval, parseISO, isAfter, addDays, subDays, isSameDay } from 'date-fns';
+ import { LinearGradient } from 'expo-linear-gradient';
++import { getData, STORAGE_KEYS } from '@/utils/storage';
+ import { ChevronDown, ChevronUp } from 'lucide-react-native';
+
+ // Define custom colors for the calendar
+@@ -37,7 +38,25 @@ const CalendarLegend = () => {
+ 
+ const RecoveryCalendar = () => {
+   const { colors } = useTheme();
+-  const { streakStartDate, calendarHistory, debugCalendarHistory, resetCalendar } = useStreak();
++  const { streakStartDate, calendarHistory, debugCalendarHistory, resetCalendar, forceRefresh, streak } = useStreak();
+   const [expanded, setExpanded] = useState(false);
++  const [isNewUser, setIsNewUser] = useState(false);
++
++  // Check if user is new when component mounts
++  useEffect(() => {
++    const checkNewUserStatus = async () => {
++      try {
++        const isOnboardingCompleted = await getData(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
++        setIsNewUser(isOnboardingCompleted === false);
++        console.log(`RecoveryCalendar: User is ${isOnboardingCompleted ? 'existing' : 'new'}, streak: ${streak}`);
++      } catch (err) {
++        console.error('RecoveryCalendar: Failed to check onboarding status', err);
++      }
++    };
++    
++    checkNewUserStatus();
++    
++    // Force refresh to ensure we have the latest data
++    forceRefresh();
++  }, [forceRefresh, streak]);
+ 
+   // Re-compute marked dates from scratch each render to ensure no stale/buggy data
+@@ -45,6 +64,20 @@ const RecoveryCalendar = () => {
+     const marked: { [key: string]: any } = {};
+     const today = startOfDay(new Date());
+     const todayStr = format(today, 'yyyy-MM-dd');
++    
++    // If user is new, special handling - only mark today
++    if (isNewUser || streak === 0) {
++      marked[todayStr] = {
++        customStyles: {
++          container: {
++            backgroundColor: customCalendarColors.today,
++            borderRadius: 12,
++          },
++          text: {
++            color: colors.white,
++            fontWeight: 'bold',
++          },
++        },
++      };
++      return marked;
++    }
+     
+     // Mark today specially if not already in calendar history
+     if (!calendarHistory[todayStr]) {
+@@ -68,63 +101,22 @@ const RecoveryCalendar = () => {
+       if (status === 'relapse') {
+         backgroundColor = customCalendarColors.relapse;
+       }
++      
++      // If this is the streak start date, use the special start day color
++      if (streakStartDate && isSameDay(parseISO(dateStr), streakStartDate)) {
++        backgroundColor = customCalendarColors.startDay;
++      }
+       
+       marked[dateStr] = {
+         customStyles: {
+           container: {
+             backgroundColor,
+             borderRadius: 12,
+           },
+           text: {
+             color: colors.white,
+             fontWeight: 'bold',
+           },
+         },
+       };
+     });
+-
+-    // Highlight the streak start date if it exists
+-    if (streakStartDate) {
+-      const startDateStr = format(startOfDay(streakStartDate), 'yyyy-MM-dd');
+-      
+-      // Only mark as start day if it's in the calendar history and not a relapse
+-      if (calendarHistory[startDateStr] && calendarHistory[startDateStr] !== 'relapse') {
+-        marked[startDateStr] = {
+-          ...marked[startDateStr],
+-          customStyles: {
+-            ...marked[startDateStr]?.customStyles,
+-            container: {
+-              backgroundColor: customCalendarColors.startDay,
+-              borderRadius: 12,
+-            },
+-            text: {
+-              color: colors.white,
+-              fontWeight: 'bold',
+-            },
+-          },
+-        };
+-      }
+-    }
+-
+-    return marked;
+-  }, [streakStartDate, calendarHistory, colors]);
+-
+-  // Generate a summary of the calendar history
+-  const historySummary = useMemo(() => {
+-    const cleanDays = Object.values(calendarHistory).filter(status => status === 'clean').length;
+-    const relapseDays = Object.values(calendarHistory).filter(status => status === 'relapse').length;
+-    const totalDays = Object.keys(calendarHistory).length;
+     
+-    return {
+-      cleanDays,
+-      relapseDays,
+-      totalDays,
+-      cleanPercentage: totalDays > 0 ? Math.round((cleanDays / totalDays) * 100) : 0
+-    };
+-  }, [calendarHistory]);
++    return marked;
++  }, [calendarHistory, streakStartDate, colors.white, isNewUser, streak]);
+ 
+   return (
+     <LinearGradient
+-      colors={[colors.card, '#1A1A1A']}
+-      style={styles.card}
++      colors={[colors.card, colors.background]}
++      style={[
++        styles.container,
++        expanded ? styles.expanded : null,
++        { borderColor: colors.border }
++      ]}
+     >
+-      <View style={styles.headerRow}>
+-      <Text style={[styles.title, { color: colors.text }]}>Recovery Calendar</Text>
+-        <TouchableOpacity 
+-          style={styles.expandButton}
+-          onPress={() => setExpanded(!expanded)}
+-        >
+-          {expanded ? (
+-            <ChevronUp size={20} color={colors.text} />
+-          ) : (
+-            <ChevronDown size={20} color={colors.text} />
+-          )}
+-        </TouchableOpacity>
+-      </View>
+-      
+-      {expanded && (
+-        <View style={styles.summaryContainer}>
+-          <Text style={[styles.summaryText, { color: colors.secondaryText }]}>
+-            Total tracked days: {historySummary.totalDays}
+-          </Text>
+-          <Text style={[styles.summaryText, { color: customCalendarColors.clean }]}>
+-            Clean days: {historySummary.cleanDays} ({historySummary.cleanPercentage}%)
+-          </Text>
+-          <Text style={[styles.summaryText, { color: customCalendarColors.relapse }]}>
+-            Relapse days: {historySummary.relapseDays}
+-          </Text>
+-          {streakStartDate && (
+-            <Text style={[styles.summaryText, { color: customCalendarColors.startDay }]}>
+-              Current streak started: {format(streakStartDate, 'MMM d, yyyy')}
+-            </Text>
+-          )}
+-        </View>
+-      )}
++      <TouchableOpacity 
++        style={styles.header}
++        onPress={() => setExpanded(prev => !prev)}
++        activeOpacity={0.8}
++      >
++        <Text style={[styles.title, { color: colors.text }]}>
++          Recovery Calendar
++        </Text>
++        {expanded ? (
++          <ChevronUp size={18} color={colors.text} />
++        ) : (
++          <ChevronDown size={18} color={colors.text} />
++        )}
++      </TouchableOpacity>
+       
+       <Calendar
+         current={format(new Date(), 'yyyy-MM-dd')}
+@@ -154,7 +146,10 @@ const RecoveryCalendar = () => {
+             style={[styles.debugButton, { backgroundColor: colors.primary }]} 
+-            onPress={debugCalendarHistory}
++            onPress={() => {
++              debugCalendarHistory();
++              forceRefresh();
++            }}
+           >
+             <Text style={{ color: colors.white }}>Debug</Text>
+           </TouchableOpacity>
+@@ -169,51 +164,29 @@ const RecoveryCalendar = () => {
+ };
+ 
+ const styles = StyleSheet.create({
+-  card: {
+-    borderRadius: 24,
+-    padding: 20,
+-    marginBottom: 24,
++  container: {
++    borderRadius: 16,
++    padding: 16,
++    marginBottom: 16,
+     borderWidth: 1,
+-    borderColor: 'rgba(255, 255, 255, 0.05)',
++    overflow: 'hidden',
+   },
+-  headerRow: {
++  expanded: {
++    minHeight: 400,
++  },
++  header: {
+     flexDirection: 'row',
+     justifyContent: 'space-between',
+     alignItems: 'center',
+-    marginBottom: 16,
++    marginBottom: 16,
+   },
+   title: {
+-    fontSize: 22,
+-    fontWeight: 'bold',
+-    textAlign: 'center',
+-    flex: 1,
+-  },
+-  expandButton: {
+-    padding: 5,
+-  },
+-  summaryContainer: {
+-    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+-    borderRadius: 12,
+-    padding: 12,
+-    marginBottom: 16,
+-  },
+-  summaryText: {
+-    fontSize: 14,
+-    marginBottom: 4,
++    fontSize: 18,
++    fontWeight: '600',
+   },
+   legendContainer: {
+     flexDirection: 'row',
+     justifyContent: 'space-around',
+-    marginTop: 20,
+-    paddingTop: 10,
+-    borderTopWidth: 1,
+-    borderTopColor: 'rgba(255, 255, 255, 0.05)',
++    paddingTop: 12,
++    paddingBottom: 8,
++    flexWrap: 'wrap',
+   },
+   legendItem: {
+     flexDirection: 'row',
+     alignItems: 'center',
++    marginHorizontal: 8,
++    marginVertical: 4,
+   },
+   legendIndicator: {
+-    width: 12,
+-    height: 12,
+-    borderRadius: 6,
+-    marginRight: 8,
++    width: 16,
++    height: 16,
++    borderRadius: 8,
++    marginRight: 6,
+   },
+   legendText: {
+     fontSize: 12,
+@@ -221,15 +194,14 @@ const styles = StyleSheet.create({
+   debugButtons: {
+     flexDirection: 'row',
+-    justifyContent: 'space-around',
+-    marginTop: 10,
++    justifyContent: 'center',
++    marginTop: 16,
+   },
+   debugButton: {
+-    padding: 8,
++    paddingHorizontal: 16,
++    paddingVertical: 8,
+     borderRadius: 8,
+-    minWidth: 80,
+-    alignItems: 'center',
++    marginHorizontal: 4,
+   },
+ });
+ 

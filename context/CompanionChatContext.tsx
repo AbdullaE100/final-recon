@@ -197,47 +197,43 @@ export const CompanionChatProvider: React.FC<{children: React.ReactNode}> = ({ c
     setLastMessageFailed(false); // Reset error state on new message
     
     try {
-      // Check for crisis keywords to provide immediate safety resources
-      const lowercaseMsg = message.toLowerCase();
-      const isCrisis = 
-        lowercaseMsg.includes('hurt myself') || 
-        lowercaseMsg.includes('kill myself') || 
-        lowercaseMsg.includes('suicide') || 
-        lowercaseMsg.includes('end my life') || 
-        lowercaseMsg.includes('want to die');
-      
-      if (isCrisis) {
-        // Create an immediate crisis response with resources
-        const crisisResponse: ChatMessage = {
-          role: 'model',
-          content: await getCrisisResponse()
-        };
-        
-        const finalMessages = [...updatedMessages, crisisResponse];
-        setMessages(finalMessages);
-        await storeData(CHAT_HISTORY_KEY, finalMessages);
-        setHasUnreadMessage(true);
-        await storeData(UNREAD_MESSAGE_KEY, true);
-        setIsLoading(false);
-        return;
+      if (!gamification) {
+        console.warn("CompanionChatContext: Gamification context is not available. Cannot send message with full context.");
+        // If gamification context is not available, return early or send message without full context
+        // For now, let's return early if it's critical to have this data.
+        return; 
       }
-      
-      // Check for "relapsed" keyword to handle relapse tracking
-      if (
-        lowercaseMsg.includes('relapsed') || 
-        lowercaseMsg.includes('reset') || 
-        lowercaseMsg.includes('messed up') ||
-        lowercaseMsg.includes('i failed') ||
-        lowercaseMsg.includes('gave in') ||
-        lowercaseMsg.includes('i watched porn') ||
-        (lowercaseMsg.includes('back') && (lowercaseMsg.includes('day 1') || lowercaseMsg.includes('day one')))
-      ) {
+
+      const { 
+        streak,
+        lastCheckIn,
+        achievements,
+        activityStats,
+        journalEntries,
+      } = gamification;
+
+      const currentMessages = messages;
+
+      if (message.toLowerCase().includes("relapse")) {
         // Update streak data for relapse
         await handleRelapse();
       }
       
+      // Prepare context data to send to the AI
+      const contextData = {
+        streak: streak,
+        lastCheckIn: lastCheckIn || null,
+        triggers: await getTriggers(), // Get all logged triggers
+        achievements: achievements.filter(a => a.unlocked).map(a => a.name), // Get names of unlocked achievements
+        lastMeditation: activityStats?.lastMeditation || 0,
+        lastWorkout: activityStats?.lastWorkout || 0,
+        lastJournalEntry: journalEntries.length > 0 
+          ? Math.max(...journalEntries.map(entry => entry.timestamp)) 
+          : 0,
+      };
+
       const displayMessages = [...currentMessages];
-      const response = await getGeminiResponse(message, displayMessages);
+      const response = await getGeminiResponse(message, displayMessages, contextData);
       
       const companionMessage: ChatMessage = {
         role: 'model',

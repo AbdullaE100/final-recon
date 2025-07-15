@@ -46,6 +46,7 @@ import { resetAllStreakData } from '@/utils/resetStreakData';
 import { storeData, getData, STORAGE_KEYS } from '@/utils/storage';
 import { useGamification } from '@/context/GamificationContext';
 import { AppState, AppStateStatus } from 'react-native';
+import { isProcessing } from '@/utils/processingLock';
 
 // Define storage keys here to ensure consistency
 const STREAK_STORAGE_KEYS = {
@@ -171,6 +172,10 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // Function to update calendar with new clean days
   const updateCalendarForNewDay = useCallback(async () => {
+    if (isProcessing()) {
+      console.log('[StreakContext] Skipping updateCalendarForNewDay: Processing lock is active.');
+      return;
+    }
     try {
       // Get the current calendar history
       const history = await getData<CalendarHistory>(STREAK_STORAGE_KEYS.CALENDAR_HISTORY, {});
@@ -270,9 +275,8 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
   
   // Force refresh function - defined before the AppState listener to avoid linter errors
   const forceRefresh = useCallback(async () => {
-    // Skip refresh completely if we're already processing something critical
-    if (isProcessingRef.current) {
-      console.log('[StreakContext] Skipping forceRefresh during critical operation');
+    if (isProcessing()) {
+      console.log('[StreakContext] Skipping forceRefresh: Processing lock is active.');
       return true;
     }
     
@@ -519,9 +523,8 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
   // Add AppState listener to check for date changes and update streak
   useEffect(() => {
     const handleAppStateChange = async (nextAppState: AppStateStatus) => {
-      // Skip this completely if we're in a critical operation
-      if (isProcessingRef.current) {
-        console.log('[StreakContext] Skipping app state change handler during critical operation');
+      if (isProcessing()) {
+        console.log('[StreakContext] Skipping AppState change handler: Processing lock is active.');
         return;
       }
       
@@ -539,10 +542,7 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
     
     // Check for date changes less aggressively to avoid performance issues
     const checkDateInterval = setInterval(async () => {
-      // Skip check if we're processing something critical
-      if (isProcessingRef.current) {
-        return;
-      }
+      if (isProcessing()) return;
       
       try {
         // Get a fresh Date object to ensure we're using the current system time
@@ -562,7 +562,7 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
     }, 300000); // Check every 5 minutes instead of every 30 seconds - much less aggressive to save resources
     
     // Run an immediate check when this effect is first setup, but not if we're processing
-    if (!isProcessingRef.current) {
+    if (!isProcessing()) {
       handleAppStateChange('active');
     }
     

@@ -1,0 +1,69 @@
+
+// ===== RECORD RELAPSE FIX =====
+// This specific fix addresses the crash when recording a relapse
+
+// Replace the entire recordRelapse function with this version:
+
+const recordRelapse = useCallback(
+  async (date: Date) => {
+    try {
+      console.log('[StreakContext] RECORDING RELAPSE: Date=' + date.toISOString());
+      const relapseDay = startOfDay(date);
+      const key = format(relapseDay, DATE_FMT);
+      const today = startOfToday();
+
+      // Update the calendar history with the relapse
+      const history = { ...calendarHistory };
+      history[key] = 'relapse';
+      
+      // Save the updated calendar history
+      await storeData(STREAK_STORAGE_KEYS.CALENDAR_HISTORY, history);
+      
+      // Clear the streak start date
+      await storeData(STREAK_STORAGE_KEYS.STREAK_START_DATE, null);
+
+      // Update local state
+      console.log('[StreakContext] Updating local state: streak=0, startDate=null');
+      setCalendarHistory(history);
+      setStreakStartDateState(null);
+      setStreakState(0);
+      
+      // IMPORTANT: Set up the new streak start date for tomorrow after a delay
+      setTimeout(async () => {
+        try {
+          // Set tomorrow as the new streak start date
+          const tomorrow = new Date(today);
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          
+          // Get a fresh copy of history to avoid using stale data
+          const updatedHistory = await getData<CalendarHistory>(STREAK_STORAGE_KEYS.CALENDAR_HISTORY, {});
+          
+          // Ensure today is marked as relapse
+          updatedHistory[key] = 'relapse';
+          
+          // Mark tomorrow as clean to start the new streak
+          const tomorrowKey = format(tomorrow, DATE_FMT);
+          updatedHistory[tomorrowKey] = 'clean';
+          
+          console.log('[StreakContext] Setting up new streak starting tomorrow: ' + tomorrowKey);
+          
+          // Save the updated history and start date
+          await storeData(STREAK_STORAGE_KEYS.CALENDAR_HISTORY, updatedHistory);
+          await storeData(STREAK_STORAGE_KEYS.STREAK_START_DATE, tomorrow.toISOString());
+          
+          // Update local state
+          setCalendarHistory(updatedHistory);
+          setStreakStartDateState(tomorrow);
+        } catch (error) {
+          console.error('[StreakContext] Error setting up new streak:', error);
+        }
+      }, 3000);
+      
+      console.log('[StreakContext] RELAPSE RECORDING COMPLETE');
+    } catch (error) {
+      console.error('[StreakContext] ERROR recording relapse:', error);
+    }
+  },
+  [calendarHistory]
+);
+

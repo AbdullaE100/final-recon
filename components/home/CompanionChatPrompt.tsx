@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,10 @@ import {
   StyleSheet,
   Dimensions,
   Image,
+  Keyboard,
+  Platform,
+  UIManager,
+  ActivityIndicator,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -14,14 +18,26 @@ import { useTheme } from '@/context/ThemeContext';
 import { useCompanionChat } from '@/context/CompanionChatContext';
 import { useGamification } from '@/context/GamificationContext';
 import LottieView from 'lottie-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import Colors from '@/constants/Colors';
+import { ChatMessage } from '@/lib/ai-service';
+import { TriggerLog } from '@/types/gamification';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
+
+// Enable LayoutAnimation for Android
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 const CompanionChatPrompt = () => {
   const { colors } = useTheme();
-  const { hasUnreadMessage } = useCompanionChat();
+  const { hasUnreadMessage, isLoading } = useCompanionChat();
   const { companion, achievements } = useGamification();
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
+  const [message, setMessage] = useState('');
   
   // Get companion stage directly from badge count
   const unlockedBadgesCount = achievements.filter(badge => badge.unlocked).length;

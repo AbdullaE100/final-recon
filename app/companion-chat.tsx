@@ -31,7 +31,7 @@ import { BlurView } from 'expo-blur';
 import { ChatMessage, getAIResponse as getGeminiResponse, initializeCompanionConversation } from '@/lib/ai-service';
 import { getData, storeData, STORAGE_KEYS } from '@/utils/storage';
 
-// Unique ID for input accessory view on iOS
+/** Unique ID for input accessory view on iOS */
 const INPUT_ACCESSORY_VIEW_ID = 'companion-chat-input';
 
 interface UserPreferences {
@@ -63,6 +63,7 @@ interface TherapyOption {
   conditions?: string[];
 }
 
+/** React component for the companion chat screen */
 const CompanionChat = () => {
   const { colors } = useTheme();
   const { 
@@ -99,15 +100,15 @@ const CompanionChat = () => {
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
   
-  // Get companion stage directly from badge count
+  /** Get companion stage directly from badge count */
   const unlockedBadgesCount = achievements.filter(badge => badge.unlocked).length;
   const companionStage = unlockedBadgesCount >= 30 ? 3 : unlockedBadgesCount >= 15 ? 2 : 1;
   const companionType = companion?.type || 'water';
   
-  // Get companion animation source based on stage and type
+  /** Get companion animation source based on stage and type */
   const getCompanionSource = () => {
     if (companionType === 'plant') {
-      // Drowsi (Panda) animations
+      /** Drowsi (Panda) animations */
       switch (companionStage) {
         case 3:
           return require('@/assets/lottie/panda/panda_stage3.json');
@@ -117,7 +118,7 @@ const CompanionChat = () => {
           return require('@/assets/lottie/baby_panda_stage1.json');
       }
     } else if (companionType === 'fire') {
-      // Snuglur animations
+      /** Snuglur animations */
       switch (companionStage) {
         case 3:
           return require('@/assets/lottie/baby_monster_stage3.json');
@@ -127,7 +128,7 @@ const CompanionChat = () => {
           return require('@/assets/lottie/baby_monster_stage1.json');
       }
     } else {
-      // Stripes (Tiger) animations
+      /** Stripes (Tiger) animations */
       switch (companionStage) {
         case 3:
           return require('@/assets/lottie/baby_tiger_stage3.json');
@@ -139,7 +140,7 @@ const CompanionChat = () => {
     }
   };
   
-  // Handle keyboard appearance
+  /** Handle keyboard appearance */
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
       'keyboardDidShow',
@@ -164,26 +165,28 @@ const CompanionChat = () => {
     };
   }, []);
   
-  // Scroll to bottom when new messages appear
+  /** Scroll to bottom when new messages appear */
   useEffect(() => {
     if (messages.length > 0) {
       scrollToBottom();
     }
   }, [messages]);
   
+  /** Scroll to bottom of the chat */
   const scrollToBottom = () => {
     if (flatListRef.current && messages.length > 0) {
       flatListRef.current.scrollToEnd({ animated: true });
     }
   };
   
+  /** Handle sending a new message */
   const handleSendMessage = async () => {
     if (inputMessage.trim() === '') return;
     
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const message = inputMessage;
     setInputMessage('');
-    Keyboard.dismiss(); // Dismiss the keyboard
+    Keyboard.dismiss(); /** Dismiss the keyboard */
     await sendMessage(message);
   };
   
@@ -201,38 +204,38 @@ const CompanionChat = () => {
     await resetConversation();
   };
   
-  // Load common triggers
+  /** Load common triggers */
   useEffect(() => {
     const loadTriggers = async () => {
       const triggers = await getTriggers();
-      setCommonTriggers(triggers.slice(0, 5)); // Get top 5 triggers
+      setCommonTriggers(triggers.slice(0, 5)); /** Get top 5 triggers */
     };
     
     loadTriggers();
   }, [getTriggers]);
   
-  // Handle daily check-in
+  /** Handle daily check-in */
   const handleDailyCheckIn = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setShowQuickActions(false);
     await promptDailyCheckIn();
   };
   
-  // Handle urge management
+  /** Handle urge management */
   const handleUrgeManagement = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setShowQuickActions(false);
     await startUrgeManagement();
   };
   
-  // Show trigger modal
+  /** Show trigger modal */
   const handleOpenTriggerModal = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setShowQuickActions(false);
     setShowTriggerModal(true);
   };
   
-  // Log a trigger
+  /** Log a trigger */
   const handleLogTrigger = async () => {
     if (!triggerInput.trim()) return;
     
@@ -240,22 +243,22 @@ const CompanionChat = () => {
     setShowTriggerModal(false);
     await logTrigger(triggerInput);
     
-    // Reset trigger input
+    /** Reset trigger input */
     setTriggerInput('');
     
-    // Reload common triggers
+    /** Reload common triggers */
     const triggers = await getTriggers();
     setCommonTriggers(triggers.slice(0, 5));
   };
   
-  // Handle selecting a common trigger
+  /** Handle selecting a common trigger */
   const handleSelectTrigger = async (trigger: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setShowTriggerModal(false);
     await logTrigger(trigger);
   };
   
-  // Handle journal summary creation
+  /** Handle journal summary creation */
   const handleCreateJournalSummary = async () => {
     if (!journalSummary.trim()) return;
     
@@ -300,37 +303,37 @@ const CompanionChat = () => {
       // Send a confirmation message to chat
       sendMessage("I've saved a summary of our conversation to your journal for future reference.");
     } catch (error) {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      console.error("Error creating journal summary:", error);
     }
   };
   
-  // Toggle quick actions
+  /** Toggle quick actions menu */
   const handleToggleQuickActions = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setShowQuickActions(!showQuickActions);
   };
   
-  // Toggle therapy options with opt-out check
+  /** Toggle therapy options menu with opt-out check */
   const handleToggleTherapyOptions = async () => {
     try {
-      // Check if user has opted out of therapy options
+      /** Check if user has opted out of therapy options */
       const userPreferences = await getData<UserPreferences>(STORAGE_KEYS.USER_PREFERENCES, {});
       
       if (userPreferences.therapyOptionsOptOut) {
-        // User has opted out, send a supportive message instead
+        /** User has opted out, send a supportive message instead */
         const supportMessage = "I'm here to support you! You can ask me for specific help like:\n\n• 'Help me with urge surfing'\n• 'I need a distraction plan'\n• 'Guide me through breathing exercises'\n• 'Help me reframe my thoughts'\n\nWhat would you like to work on together?";
         await sendMessage(supportMessage);
       } else {
-        // Show therapy options as normal
+        /** Show therapy options as normal */
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         setShowTherapyOptions(!showTherapyOptions);
-        // Close quick actions if therapy options are shown
+        /** Close quick actions if therapy options are shown */
         if (!showTherapyOptions) {
           setShowQuickActions(false);
         }
       }
     } catch (error) {
-      // Fallback to showing therapy options
+      /** Fallback to showing therapy options */
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setShowTherapyOptions(!showTherapyOptions);
       if (!showTherapyOptions) {
@@ -339,42 +342,42 @@ const CompanionChat = () => {
     }
   };
   
-  // Start urge surfing
+  /** Handle starting urge surfing exercise */
   const handleStartUrgeSurfing = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setShowTherapyOptions(false);
     await startUrgeSurfing();
   };
   
-  // Start distraction plan
+  /** Handle starting distraction plan */
   const handleStartDistractionPlan = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setShowTherapyOptions(false);
     await startDistractionPlan();
   };
   
-  // Handle breathing exercise
+  /** Handle starting breathing exercise */
   const handleStartBreathing = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setShowTherapyOptions(false);
-    const breathingMessage = "Let's do a calming breathing exercise together. Find a comfortable position and follow along:\n\n🫁 4-7-8 Breathing Technique\n\n1. Breathe in through your nose for 4 counts\n2. Hold your breath for 7 counts\n3. Exhale through your mouth for 8 counts\n4. Repeat 3-4 times\n\nThis technique activates your parasympathetic nervous system, helping you feel calmer and more in control. Focus on the rhythm and let your body relax with each exhale.";
-    await sendMessage(breathingMessage);
+    router.push('/breathing');
   };
   
-  // Handle grounding exercise
+  /** Handle starting grounding exercise */
   const handleStartGrounding = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setShowTherapyOptions(false);
-    const groundingMessage = "Let's ground yourself in the present moment with the 5-4-3-2-1 technique:\n\n🌱 5-4-3-2-1 Grounding Exercise\n\n• 5 things you can SEE - Look around and name 5 things you can see\n• 4 things you can TOUCH - Feel 4 different textures around you\n• 3 things you can HEAR - Listen for 3 different sounds\n• 2 things you can SMELL - Notice 2 scents in your environment\n• 1 thing you can TASTE - Focus on 1 taste in your mouth\n\nThis technique helps anchor you to the present moment and reduces the intensity of urges by engaging your senses.";
-    await sendMessage(groundingMessage);
+    router.push('/grounding');
   };
   
-  // Handle progressive muscle relaxation
+  /** Handle starting progressive muscle relaxation */
   const handleStartProgressiveMuscle = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setShowTherapyOptions(false);
-    const muscleMessage = "Let's release physical tension with progressive muscle relaxation:\n\n💪 Progressive Muscle Relaxation\n\n1. Feet & Legs: Tense for 5 seconds, then relax\n2. Abdomen: Tighten your core, then release\n3. Hands & Arms: Make fists, tense arms, then let go\n4. Shoulders: Raise to ears, hold, then drop\n5. Face: Scrunch all facial muscles, then relax\n\nAs you release each muscle group, notice the contrast between tension and relaxation. This helps your body and mind return to a calmer state, making it easier to manage urges.";
-    await sendMessage(muscleMessage);
+    router.push('/progressive-muscle-relaxation');
   };
   
-  // Start cognitive reframing
+  /** Handle starting cognitive reframing */
   const handleStartReframing = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setShowTherapyOptions(false);

@@ -47,6 +47,7 @@ import CompanionChatPrompt from '@/components/home/CompanionChatPrompt';
 import { CompanionChatProvider } from '@/context/CompanionChatContext';
 import { useAuth } from '@/context/AuthContext';
 import { format, addDays, differenceInDays, startOfToday, isBefore, parseISO } from 'date-fns';
+import { acquireLock, releaseLock } from '@/utils/processingLock';
 
 const { width, height } = Dimensions.get('window');
 
@@ -494,81 +495,65 @@ const StreakCard = () => {
   
   // Handle relapse confirmation
   const handleRelapseConfirm = async () => {
-    console.log('handleRelapseConfirm: Starting with simplified implementation...');
+    if (!acquireLock()) {
+      console.log('handleRelapseConfirm: Could not acquire lock, aborting.');
+      Alert.alert(
+        'Processing',
+        'Another operation is already in progress. Please wait a moment and try again.'
+      );
+      return;
+    }
+
+    console.log('handleRelapseConfirm: Lock acquired. Starting relapse process...');
     setRelapseModalVisible(false);
-    
+
     try {
-      // Set the UI state immediately for better feedback
       setLocalStreak(0);
       streakValueRef.current = 0;
-      
-      // Simple animation
-      animation.value = withTiming(0.9, {
-        duration: 300,
-        easing: Easing.inOut(Easing.ease)
-      });
-      
-      // Record the relapse directly
-      const relapseDate = new Date();
-      console.log('handleRelapseConfirm: Recording relapse for date', relapseDate);
-      
-      // Directly use resetStreakData instead of recordRelapse to avoid context callbacks
+      animation.value = withTiming(0.9, { duration: 300 });
+
       const { resetAllStreakData } = require('@/utils/resetStreakData');
       await resetAllStreakData();
-      console.log('handleRelapseConfirm: Reset all streak data successfully');
-      
-      // Show notification
+
       showAchievement({
-        title: "Streak Reset",
-        description: "Your streak has been reset. Today is a new beginning.",
-        buttonText: "Continue"
+        title: 'Streak Reset',
+        description: 'Your streak has been reset. Today is a new beginning.',
+        buttonText: 'Continue',
       });
-      
-      // Set up new streak starting tomorrow
+
       setTimeout(async () => {
         try {
-          // Use storage directly instead of going through contexts
           const { storeData, STORAGE_KEYS } = require('@/utils/storage');
           const { format, startOfToday, addDays } = require('date-fns');
           
-          // Set up tomorrow as a clean day
           const today = startOfToday();
           const tomorrow = addDays(today, 1);
-          const tomorrowKey = format(tomorrow, 'yyyy-MM-dd');
           
-          // Create minimal calendar history
           const history = {
             [format(today, 'yyyy-MM-dd')]: 'relapse',
-            [tomorrowKey]: 'clean'
+            [format(tomorrow, 'yyyy-MM-dd')]: 'clean',
           };
-          
-          // Store directly to avoid context loops
+
           await storeData(STORAGE_KEYS.CALENDAR_HISTORY, history);
           await storeData(STORAGE_KEYS.STREAK_START_DATE, tomorrow.toISOString());
           
-          // Update local UI after a delay
-          setTimeout(() => {
-            setLocalStreak(1);
-            streakValueRef.current = 1;
-            
-            // Trigger animation to show 1
-            animation.value = withSequence(
-              withTiming(1.15, { duration: 400, easing: Easing.out(Easing.cubic) }),
-              withTiming(1, { duration: 300, easing: Easing.inOut(Easing.cubic) })
-            );
-            
-            // Force a re-render
-            setForceRender(prev => prev + 1);
-          }, 2000);
-          
+          setLocalStreak(1);
+          streakValueRef.current = 1;
+          animation.value = withTiming(1, { duration: 400 });
+          setForceRender((p) => p + 1);
+
         } catch (error) {
-          console.error('handleRelapseConfirm: Error setting up new streak:', error);
+          console.error('handleRelapseConfirm: Error in inner timeout:', error);
+        } finally {
+          console.log('handleRelapseConfirm: Releasing lock after operation.');
+          releaseLock();
         }
-      }, 3000);
+      }, 1500);
 
     } catch (error) {
       console.error('handleRelapseConfirm: Error recording relapse:', error);
-      Alert.alert('Error', 'There was a problem recording your relapse. Please try again.');
+      Alert.alert('Error', 'There was a problem recording your relapse.');
+      releaseLock();
     }
   };
   

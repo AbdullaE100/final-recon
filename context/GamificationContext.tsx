@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { storeData, getData, STORAGE_KEYS, clearAllData } from '@/utils/storage';
 import {
   UserProgress,
@@ -12,14 +12,16 @@ import {
   ActivityType,
   ChallengeRewards
 } from '@/types/gamification';
-import { getStartOfDay, isToday } from '@/utils/dateUtils';
-import { Alert, Platform, NativeModules } from 'react-native';
-import { loadStreakData, updateStreak, performCheckIn as serviceCheckIn, DEFAULT_USER_ID, checkAndAdjustStreak } from '@/utils/streakService';
+import { isToday } from '@/utils/dateUtils';
+import { Alert, Platform, NativeModules, AppState, AppStateStatus } from 'react-native';
 import { Companion, CompanionType, UserCompanion, EVOLUTION_THRESHOLDS, BOND_THRESHOLDS, XpActionType, FeedingAction } from '@/types/companion';
 import useAchievementNotification, { AchievementProps } from '@/hooks/useAchievementNotification';
-
-// Import the updateWidgetStreakData function from streakService
-import { updateWidgetStreakData } from '@/utils/streakService';
+import { format, startOfDay, differenceInDays, isSameDay, addDays } from 'date-fns';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '@/lib/supabase';
+import { resetStreakToOne } from '@/utils/resetStreakData';
+import { useCurrentUserId } from '@/hooks/useCurrentUserId';
+import { isProcessing } from '@/utils/processingLock';
 
 // Initial challenges
 const initialChallenges: Challenge[] = [
@@ -30,7 +32,11 @@ const initialChallenges: Challenge[] = [
     isDaily: true,
     points: 50,
     progress: 0,
-    type: 'habit'
+    type: 'habit',
+    rewards: {
+      badgeId: 'badge-challenge-first',
+      badgeName: 'Challenger'
+    }
   },
   {
     id: 'challenge-2',
@@ -958,20 +964,25 @@ const defaultUserProgress: UserProgress = {
   activeChallenges: [],
   availableChallenges: initialChallenges,
   completedChallenges: [],
+  badgesEarned: [],
+  challengesCompleted: [],
+  challengesActive: [],
   achievements: initialAchievements,
   lastCheckIn: null,
   dailyCheckedIn: false,
   companion: null,
   activityStats: {
-  totalMeditationMinutes: 0,
+    totalMeditationMinutes: 0,
     totalWorkoutMinutes: 0,
     totalReadingMinutes: 0,
     meditationStreak: 0,
-    lastMeditationDate: null,
+    lastMeditation: 0,
     workoutStreak: 0,
-    lastWorkoutDate: null,
+    lastWorkout: 0,
     readingStreak: 0,
-    lastReadingDate: null,
+    lastReading: 0,
+    totalHabitReplacements: 0,
+    activityLogs: [],
   }
 };
 
@@ -982,10 +993,29 @@ const defaultActivityStats: ActivityStats = {
   totalHabitReplacements: 0,
   meditationStreak: 0,
   workoutStreak: 0,
+  lastMeditation: 0,
+  lastWorkout: 0,
   activityLogs: [],
   totalReadingMinutes: 0,
   readingStreak: 0,
   lastReading: 0,
+};
+
+/**
+ * Helper function to detect the infamous 730-day bug
+ */
+const isKnown730Bug = (streakValue: number): boolean => {
+  return streakValue >= 730; // The bug typically manifests as exactly 730 days
+};
+
+/**
+ * Helper function to detect the 30-day bug with future start date
+ */
+const isFutureStartDateBug = (streakValue: number, startDateValue?: number): boolean => {
+  if (startDateValue && streakValue === 30) {
+    return startDateValue > Date.now(); // The bug has a future start date
+  }
+  return false;
 };
 
 interface GamificationContextType {
@@ -996,6 +1026,7 @@ interface GamificationContextType {
   totalPoints: number;
   dailyCheckedIn: boolean;
   startDate?: number;
+  lastCheckIn: number | null;
   
   // Journal
   journalEntries: JournalEntry[];
@@ -1056,8 +1087,69 @@ export const GamificationContext = createContext<GamificationContextType | undef
 export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ children }) => {
   const [userProgress, setUserProgress] = useState<UserProgress>(defaultUserProgress);
   const [dataLoaded, setDataLoaded] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [manualStreakSet, setManualStreakSet] = useState(false);
   const { showAchievement } = useAchievementNotification();
+  const userId = useCurrentUserId();
+  // Track app state for background/foreground transitions
+  const appState = useRef(AppState.currentState);
+
+  // Force refresh all data from storage
+  const forceRefresh = async () => {
+    try {
+      console.log('GamificationContext: Force refreshing data...');
+      setIsLoading(true);
+      
+      // Load user data from storage
+      const savedData = await getData(STORAGE_KEYS.USER_DATA, defaultUserProgress);
+      
+      // Load journal entries
+      const savedJournalEntries = await getData(STORAGE_KEYS.JOURNAL_ENTRIES, []);
+      
+      // Load challenges
+      const savedActiveChallenges = await getData(STORAGE_KEYS.ACTIVE_CHALLENGES, []);
+      const savedCompletedChallenges = await getData(STORAGE_KEYS.CHALLENGES, []);
+      
+      // Load achievements
+      const savedAchievements = await getData(STORAGE_KEYS.ACHIEVEMENTS, []);
+      
+      // Load companion data
+      const savedCompanion = await getData(STORAGE_KEYS.COMPANION_DATA, null);
+      
+      // Load activity stats
+      const savedActivityStats = await getData(STORAGE_KEYS.ACTIVITY_STATS, defaultActivityStats);
+      
+      // Update all data in one go
+      updateProgress({
+        ...savedData,
+        journalEntries: savedJournalEntries,
+        activeChallenges: savedActiveChallenges,
+        completedChallenges: savedCompletedChallenges,
+        achievements: savedAchievements,
+        companion: savedCompanion,
+        activityStats: savedActivityStats
+      });
+      
+      // Make sure window instance is available for future use
+      if (typeof window !== 'undefined') {
+        // Use a type-safe approach to add the property to window
+        (window as any).gamificationContextInstance = {
+          setStreak: setStreak,
+          forceRefresh: forceRefresh
+        };
+      }
+      
+      setDataLoaded(true);
+      setIsLoading(false);
+      console.log('GamificationContext: Force refresh complete');
+      
+      return true;
+    } catch (error) {
+      console.error('GamificationContext: Error during force refresh:', error);
+      setIsLoading(false);
+      return false;
+    }
+  };
 
   const { 
     streak,
@@ -1075,10 +1167,12 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     activityStats,
   } = userProgress;
   
-  const updateProgress = (updates: Partial<UserProgress>) => {
+  const updateProgress = (updates: Partial<UserProgress>, options?: { skipSave?: boolean }) => {
     setUserProgress(prev => {
       const newState = { ...prev, ...updates };
-      storeData(STORAGE_KEYS.USER_DATA, newState);
+      if (!options?.skipSave) {
+        storeData(STORAGE_KEYS.USER_DATA, newState);
+      }
       return newState;
     });
   };
@@ -1098,54 +1192,123 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
 
   useEffect(() => {
     const loadData = async () => {
+      if (isProcessing()) {
+        console.log('[GamificationContext] Skipping loadData: Processing lock is active.');
+        return;
+      }
+      console.log('[GamificationContext] Starting to load data...');
       try {
-        const storedData = await getData<UserProgress>(STORAGE_KEYS.USER_DATA, defaultUserProgress);
-        if (storedData) {
-          const mergedAchievements = [...initialAchievements];
-          if (storedData.achievements) {
-            storedData.achievements.forEach(storedAch => {
-              const index = mergedAchievements.findIndex(initAch => initAch.id === storedAch.id);
-              if (index !== -1) {
-                mergedAchievements[index] = { ...mergedAchievements[index], ...storedAch };
-              } else {
-                mergedAchievements.push(storedAch);
-              }
-            });
-          }
-          
-          const mergedChallenges = [...initialChallenges];
-          if(storedData.availableChallenges){
-             storedData.availableChallenges.forEach(storedCh => {
-              const index = mergedChallenges.findIndex(initCh => initCh.id === storedCh.id);
-              if (index !== -1) {
-                mergedChallenges[index] = { ...mergedChallenges[index], ...storedCh };
-              } else {
-                mergedChallenges.push(storedCh);
-              }
-            });
-          }
-
-          setUserProgress({ 
-            ...defaultUserProgress, 
-            ...storedData, 
-            achievements: mergedAchievements,
-            availableChallenges: storedData.availableChallenges || mergedChallenges,
-            completedChallenges: storedData.completedChallenges || [],
-          });
-        } else {
-          // No stored data, use defaults
-          setUserProgress(defaultUserProgress);
+        console.log('GamificationContext: Loading data...');
+        setIsLoading(true);
+        
+        // Load user data from storage
+        const savedData = await getData(STORAGE_KEYS.USER_DATA, defaultUserProgress);
+        
+        // Apply any data migrations or fixes here
+        const migratedData = { ...savedData };
+        
+        // Set the user progress state
+        setUserProgress(migratedData);
+        
+        // Load journal entries
+        const savedJournalEntries = await getData(STORAGE_KEYS.JOURNAL_ENTRIES, []);
+        
+        // Load challenges
+        const savedActiveChallenges = await getData(STORAGE_KEYS.ACTIVE_CHALLENGES, []);
+        const savedCompletedChallenges = await getData(STORAGE_KEYS.CHALLENGES, []);
+        
+        // Load achievements
+        const savedAchievements = await getData(STORAGE_KEYS.ACHIEVEMENTS, []);
+        
+        // Load companion data
+        const savedCompanion = await getData(STORAGE_KEYS.COMPANION_DATA, null);
+        
+        // Load activity stats
+        const savedActivityStats = await getData(STORAGE_KEYS.ACTIVITY_STATS, defaultActivityStats);
+        
+        // Update all data in one go
+        updateProgress({
+          ...migratedData,
+          journalEntries: savedJournalEntries,
+          activeChallenges: savedActiveChallenges,
+          completedChallenges: savedCompletedChallenges,
+          achievements: savedAchievements,
+          companion: savedCompanion,
+          activityStats: savedActivityStats
+        });
+        
+        // Check for new user
+        const isOnboardingCompleted = await getData(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
+        const isNewUser = isOnboardingCompleted === false;
+        
+        // For new users, ensure streak is set to 0
+        if (isNewUser) {
+          console.log('GamificationContext: New user detected - setting streak to 0');
+          setStreak(0);
         }
-        } catch (error) {
-        console.error("Failed to load user progress", error);
-        setUserProgress(defaultUserProgress);
-      } finally {
+        
         setDataLoaded(true);
+        setIsLoading(false);
+        console.log('GamificationContext: Data loaded successfully');
+      } catch (error) {
+        console.error('GamificationContext: Error loading data:', error);
+        setIsLoading(false);
       }
     };
 
     loadData();
   }, []);
+
+  // Add AppState listener to check for date changes when app resumes
+  useEffect(() => {
+    const handleAppStateChange = async (nextAppState: AppStateStatus) => {
+      if (isProcessing()) {
+        console.log('[GamificationContext] Skipping AppState change handler: Processing lock is active.');
+        return;
+      }
+      // Only run this when the app comes to the foreground
+      if (
+        appState.current.match(/inactive|background/) &&
+        nextAppState === 'active'
+      ) {
+        console.log('App has come to the foreground!');
+        
+        // Check if we need to update the streak
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const lastCheck = userProgress.lastCheckIn ? new Date(userProgress.lastCheckIn) : null;
+        
+        if (!lastCheck || !isSameDay(lastCheck, today)) {
+          console.log('GamificationContext: Day changed since last check, updating data...');
+          
+          // Load data again
+          try {
+            setIsLoading(true);
+            const savedData = await getData(STORAGE_KEYS.USER_DATA, defaultUserProgress);
+            setUserProgress(savedData);
+            setIsLoading(false);
+          } catch (error) {
+            console.error('GamificationContext: Error refreshing data:', error);
+            setIsLoading(false);
+          }
+        }
+      }
+      
+      appState.current = nextAppState;
+    };
+
+    // Subscribe to app state changes
+    const appStateSubscription = AppState.addEventListener('change', handleAppStateChange);
+
+    // Run an immediate check when this effect is first setup
+    handleAppStateChange('active');
+
+    // Cleanup subscription
+    return () => {
+      appStateSubscription.remove();
+    };
+  }, [userProgress.streak]); // Include streak in dependencies to avoid checking too frequently with same value
   
   const addJournalEntry = (
     content: string, 
@@ -1164,7 +1327,7 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     updateProgress({ journalEntries: [...userProgress.journalEntries, newEntry] });
     
     checkJournalAchievements([...userProgress.journalEntries, newEntry]);
-    updateCompanionExperience(10, 'journal');
+    updateCompanionExperience(10, XpActionType.JOURNAL_ENTRY);
   };
 
   const deleteJournalEntry = (id: string) => {
@@ -1173,7 +1336,7 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   };
   
   const startChallenge = async (id: string) => {
-      const challengeToStart = availableChallenges.find(c => c.id === id);
+    const challengeToStart = availableChallenges.find(c => c.id === id);
     if (!challengeToStart) return;
 
     const newAvailable = availableChallenges.filter(c => c.id !== id);
@@ -1185,14 +1348,29 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     });
     
     checkChallengeAchievements();
+
+    // Unlock 'Challenger' badge for starting first challenge
+    const currentAchievements = [...userProgress.achievements];
+    const challengerBadge = currentAchievements.find(a => a.id === 'badge-challenge-first');
+    if (challengerBadge && !challengerBadge.unlocked) {
+      challengerBadge.unlocked = true;
+      updateProgress({ achievements: currentAchievements });
+      showAchievement?.({
+        title: challengerBadge.name || 'Challenger',
+        description: challengerBadge.description || 'Started your first challenge',
+        buttonText: 'Awesome!'
+      });
+    }
   };
 
   const completeChallenge = async (id: string) => {
-    const challenge = activeChallenges.find(c => c.id === id);
-    if (!challenge) {
-        return;
-      }
+    // Find the challenge
+    const challenge = userProgress.activeChallenges.find(c => c.id === id) ||
+      userProgress.availableChallenges.find(c => c.id === id) ||
+      userProgress.completedChallenges.find(c => c.id === id);
+    if (!challenge) return;
 
+    // Mark challenge as completed (existing logic)
     const newPoints = points + challenge.points;
     const newTotalPoints = totalPoints + challenge.points;
 
@@ -1208,6 +1386,22 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     
     await checkChallengeAchievements(newCompletedChallenges);
     await checkAndEvolveCompanion();
+
+    // Unlock badge if this challenge has a badge reward
+    if (challenge.rewards && challenge.rewards.badgeId) {
+      const badgeId = challenge.rewards.badgeId;
+      const currentAchievements = [...userProgress.achievements];
+      const badge = currentAchievements.find(a => a.id === badgeId);
+      if (badge && !badge.unlocked) {
+        badge.unlocked = true;
+        updateProgress({ achievements: currentAchievements });
+        showAchievement?.({
+          title: badge.name || 'Challenge Badge Unlocked',
+          description: badge.description || 'Unlocked a badge by completing a challenge!',
+          buttonText: 'Awesome!'
+        });
+      }
+    }
   };
 
   const logChallengeProgress = async (challengeId: string, note: string): Promise<boolean> => {
@@ -1217,12 +1411,13 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     const newActivity: ActivityLog = {
       id: `activity-${Date.now()}`,
       type: 'challenge_progress',
-      timestamp: new Date().toISOString(),
+      timestamp: Date.now(), // Use number for timestamp
       note: note,
       challengeId: challengeId,
     };
     
-    const updatedChallenge = {
+    // Create a deep copy of the challenge and its activities array
+    const updatedChallenge: Challenge = {
       ...challenge,
       activities: [...(challenge.activities || []), newActivity],
       progress: Math.min(100, (challenge.progress || 0) + 25), // Example progress increment
@@ -1235,11 +1430,76 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   };
 
   const checkIn = async () => {
-    // ... (checkIn implementation)
+    try {
+      const now = Date.now();
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const lastCheckIn = userProgress.lastCheckIn ? new Date(userProgress.lastCheckIn) : null;
+      const isFirstCheckIn = !lastCheckIn;
+      const isSameDayCheckIn = lastCheckIn && isSameDay(lastCheckIn, today);
+      
+      if (isFirstCheckIn || !isSameDayCheckIn) {
+        // Calculate new streak
+        let newStreak = userProgress.streak;
+        
+        if (isFirstCheckIn) {
+          // First check-in ever
+          newStreak = 1;
+        } else {
+          // Check if this is the next day (streak continues)
+          const lastCheckDate = new Date(lastCheckIn!);
+          const dayDifference = differenceInDays(today, lastCheckDate);
+          
+          if (dayDifference === 1) {
+            // Next day, increment streak
+            newStreak += 1;
+          } else if (dayDifference > 1) {
+            // More than one day passed, reset streak
+            newStreak = 1;
+          }
+          // If same day, keep streak the same
+        }
+        
+        // Update user progress
+        const updatedProgress = {
+          ...userProgress,
+          streak: newStreak,
+          lastCheckIn: now,
+          dailyCheckedIn: true
+        };
+        
+        setUserProgress(updatedProgress);
+        await storeData(STORAGE_KEYS.USER_DATA, updatedProgress);
+        
+        // Update widget if available
+        try {
+          if (Platform.OS === 'ios' && NativeModules.WidgetUpdaterModule) {
+            NativeModules.WidgetUpdaterModule.updateWidget(
+              newStreak,
+              updatedProgress.startDate || now,
+              now
+            );
+          }
+        } catch (widgetError) {
+          console.log('Widget update failed:', widgetError);
+        }
+        
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('Error in checkIn:', error);
+      return false;
+    }
   };
   
   const resetData = async () => {
-    // ... (resetData implementation)
+    console.log('GamificationContext: resetData called. Clearing all data.');
+    await clearAllData();
+    setUserProgress(defaultUserProgress);
+    console.log('GamificationContext: Data reset to default.');
   };
   
   const exportData = () => {
@@ -1254,28 +1514,384 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     return false;
   };
   const logWorkout = async (durationMinutes: number, type: string): Promise<boolean> => {
-        return false;
+    // 1. Update activity stats
+    const currentStats = { ...userProgress.activityStats };
+    // Use workoutStreak or add a workoutCount property if available
+    // If not, use workoutStreak for session-based badges and totalWorkoutMinutes for duration-based badges
+    const workoutSessions = (currentStats.workoutStreak || 0) + 1;
+    const workoutMinutes = (currentStats.totalWorkoutMinutes || 0) + durationMinutes;
+    currentStats.totalWorkoutMinutes = workoutMinutes;
+
+    // 2. Unlock workout badges
+    const currentAchievements = [...userProgress.achievements];
+    let updated = false;
+
+    // First workout session
+    const firstBadge = currentAchievements.find(b => b.id === 'badge-workout-first');
+    if (firstBadge && !firstBadge.unlocked) {
+      firstBadge.unlocked = true;
+      updated = true;
+      showAchievement?.({
+        title: firstBadge.name,
+        description: firstBadge.description,
+        buttonText: 'Great start!'
+      });
+    }
+
+    // 3 sessions
+    const threeBadge = currentAchievements.find(b => b.id === 'badge-workout-3');
+    if (threeBadge && !threeBadge.unlocked && workoutSessions >= 3) {
+      threeBadge.unlocked = true;
+      updated = true;
+      showAchievement?.({
+        title: threeBadge.name,
+        description: threeBadge.description,
+        buttonText: 'Keep going!'
+      });
+    }
+
+    // 10 sessions
+    const masterBadge = currentAchievements.find(b => b.id === 'badge-workout-master');
+    if (masterBadge && !masterBadge.unlocked && workoutSessions >= 10) {
+      masterBadge.unlocked = true;
+      updated = true;
+      showAchievement?.({
+        title: masterBadge.name,
+        description: masterBadge.description,
+        buttonText: 'Amazing!'
+      });
+    }
+
+    // 60+ minute session
+    const durationBadge = currentAchievements.find(b => b.id === 'badge-workout-long');
+    if (durationBadge && !durationBadge.unlocked && durationMinutes >= 60) {
+      durationBadge.unlocked = true;
+      updated = true;
+      showAchievement?.({
+        title: durationBadge.name,
+        description: durationBadge.description,
+        buttonText: 'Endurance!'
+      });
+    }
+
+    // 3. Update state if needed
+    if (updated) {
+      updateProgress({ achievements: currentAchievements, activityStats: currentStats });
+    } else {
+      updateProgress({ activityStats: currentStats });
+    }
+    return true;
   };
+
   const logMeditation = async (durationMinutes: number, type: string): Promise<boolean> => {
-      return false;
+    return false;
   };
   const logReading = async (durationMinutes: number, book: string): Promise<boolean> => {
-        return false;
+    return false;
   };
   const reloadChallenges = () => {};
   const fixStayCleanChallenge = async (): Promise<boolean> => {
-      return false;
+    return false;
   };
   const forceResetAllChallenges = async (): Promise<boolean> => {
-      return false;
-    };
+    return false;
+  };
   const forceCheckStreakAchievements = async (): Promise<boolean> => {
+    console.log('GamificationContext: forceCheckStreakAchievements called');
+    try {
+      // Get current achievements
+      const currentAchievements = [...userProgress.achievements];
+      let updated = false;
+
+      // Check for streak badges - new improved approach
+      console.log(`Current streak: ${streak} days`);
+      
+      // Unlock all streak badges based on streak value
+      currentAchievements
+        .filter(badge => badge.category === 'streak')
+        .forEach(badge => {
+          // Try to extract the required days from the badge name or unlockCriteria
+          let requiredDays = 0;
+          
+          // Try to parse from unlockCriteria first
+          const criteriaMatch = badge.unlockCriteria?.match(/(\d+)/);
+          if (criteriaMatch) {
+            requiredDays = parseInt(criteriaMatch[1], 10);
+          } 
+          
+          // If not found, try to parse from name
+          if (!requiredDays) {
+            const nameMatch = badge.name?.match(/(\d+)/);
+            if (nameMatch) {
+              requiredDays = parseInt(nameMatch[1], 10);
+            }
+          }
+          
+          // Some badges may have specific IDs we can check as a fallback
+          if (!requiredDays) {
+            if (badge.id === 'badge-streak-1' || badge.id === 'badge-streak-7days') {
+              requiredDays = 7;
+            } else if (badge.id === 'badge-streak-2' || badge.id === 'badge-streak-30days') {
+              requiredDays = 30;
+            } else if (badge.id === 'badge-streak-3' || badge.id === 'badge-streak-90days') {
+              requiredDays = 90;
+            } else if (badge.id === 'badge-streak-4' || badge.id === 'badge-streak-365days') {
+              requiredDays = 365;
+            }
+          }
+          
+          // If we found a required days value and the streak meets or exceeds it
+          if (requiredDays > 0 && streak >= requiredDays && !badge.unlocked) {
+            console.log(`Unlocking badge: ${badge.name} (${badge.id}) - Required: ${requiredDays} days, Current streak: ${streak} days`);
+            badge.unlocked = true;
+            updated = true;
+            
+            // Show achievement notification
+            showAchievement?.({
+              title: badge.name || `${requiredDays}-Day Streak`,
+              description: badge.description || `Maintained a ${requiredDays}-day streak`,
+              buttonText: 'Awesome!'
+            });
+          }
+        });
+
+      // Check for journal badges - keep the existing code
+      const journalCount = journalEntries.length;
+      
+      if (journalCount >= 1) {
+        const firstJournalBadge = currentAchievements.find(badge => 
+          badge.id === 'badge-journal-first' || 
+          badge.id === 'badge-journal-1'
+        );
+        if (firstJournalBadge && !firstJournalBadge.unlocked) {
+          firstJournalBadge.unlocked = true;
+          updated = true;
+          console.log('GamificationContext: Unlocked first journal badge');
+          showAchievement?.({
+            title: firstJournalBadge.name || 'First Journal Entry',
+            description: firstJournalBadge.description || 'Created your first journal entry',
+            buttonText: 'Keep it up!'
+          });
+        }
+      }
+      
+      if (journalCount >= 3) {
+        const threeJournalBadge = currentAchievements.find(badge => 
+          badge.id === 'badge-journal-3'
+        );
+        if (threeJournalBadge && !threeJournalBadge.unlocked) {
+          threeJournalBadge.unlocked = true;
+          updated = true;
+          console.log('GamificationContext: Unlocked 3 journal entries badge');
+          showAchievement?.({
+            title: threeJournalBadge.name || '3 Journal Entries',
+            description: threeJournalBadge.description || 'Created 3 journal entries',
+            buttonText: 'Well done!'
+          });
+        }
+      }
+      
+      if (journalCount >= 10) {
+        const tenJournalBadge = currentAchievements.find(badge => 
+          badge.id === 'badge-journal-2' ||
+          badge.id === 'badge-journal-10'
+        );
+        if (tenJournalBadge && !tenJournalBadge.unlocked) {
+          tenJournalBadge.unlocked = true;
+          updated = true;
+          console.log('GamificationContext: Unlocked 10 journal entries badge');
+          showAchievement?.({
+            title: tenJournalBadge.name || '10 Journal Entries',
+            description: tenJournalBadge.description || 'Created 10 journal entries',
+            buttonText: 'Keep journaling!'
+          });
+        }
+      }
+      
+      if (journalCount >= 20) {
+        const twentyJournalBadge = currentAchievements.find(badge => 
+          badge.id === 'badge-journal-master' ||
+          badge.id === 'badge-journal-20'
+        );
+        if (twentyJournalBadge && !twentyJournalBadge.unlocked) {
+          twentyJournalBadge.unlocked = true;
+          updated = true;
+          console.log('GamificationContext: Unlocked 20 journal entries badge');
+          showAchievement?.({
+            title: twentyJournalBadge.name || '20 Journal Entries',
+            description: twentyJournalBadge.description || 'Created 20 journal entries',
+            buttonText: 'Keep writing!'
+          });
+        }
+      }
+
+      // If any badges were updated, update the state
+      if (updated) {
+        updateProgress({ achievements: currentAchievements });
+      }
+
+      return updated;
+    } catch (error) {
+      console.error('GamificationContext: Error in forceCheckStreakAchievements:', error);
       return false;
+    }
   };
+
   const fix30DayBadge = async (): Promise<boolean> => {
+    console.log('GamificationContext: fix30DayBadge called');
+    try {
+      // Get current achievements
+      const currentAchievements = [...userProgress.achievements];
+      
+      // Find the 30-day badge with any possible ID
+      const thirtyDayBadge = currentAchievements.find(badge => 
+        badge.id === 'badge-streak-2' || 
+        badge.id === 'badge-streak-30' || 
+        badge.id === 'badge-streak-30days'
+      );
+      
+      // If the badge exists and the streak is at least 30 days, unlock it
+      if (thirtyDayBadge && streak >= 30) {
+        thirtyDayBadge.unlocked = true;
+        updateProgress({ achievements: currentAchievements });
+        console.log('GamificationContext: Successfully fixed 30-day badge');
+        showAchievement?.({
+          title: thirtyDayBadge.name || '30-Day Streak',
+          description: thirtyDayBadge.description || 'Maintained a 30-day streak',
+          buttonText: 'Keep it up!'
+        });
+        return true;
+      }
+      
       return false;
+    } catch (error) {
+      console.error('GamificationContext: Error fixing 30-day badge:', error);
+      return false;
+    }
   };
-  const setStreak = (days: number, startDate?: number) => {};
+
+  // EMERGENCY FIX: Add a function to set streak for new users
+  const setStreak = async (days: number, startDate?: number, options?: { skipPersistence?: boolean }) => {
+    if (isProcessing()) {
+      console.log('[GamificationContext] Skipping setStreak: Processing lock is active.');
+      return;
+    }
+    try {
+      console.log(`[GamificationContext] setStreak called with: days=${days}, startDate=${startDate || 'not provided'}`);
+      
+      // Validate input
+      if (isNaN(days)) {
+        console.error('[GamificationContext] Invalid streak value (NaN)');
+        days = 0; // Default to 0 instead of returning
+      }
+      
+      // Enforce that days cannot be negative
+      const safeDays = Math.max(0, days);
+      if (safeDays !== days) {
+        console.log(`[GamificationContext] Corrected negative streak value to 0: ${days} -> ${safeDays}`);
+        days = safeDays;
+      }
+
+      // EMERGENCY FIX: Check if this is a new user
+      let isNewUser = false;
+      try {
+        const isOnboardingCompleted = await getData(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
+        isNewUser = isOnboardingCompleted === false;
+      } catch (error) {
+        console.error('[GamificationContext] Error checking onboarding status:', error);
+        // Continue with default isNewUser = false
+      }
+      
+      // For new users, always force streak to 0
+      if (isNewUser && days !== 0) {
+        console.log('[GamificationContext] New user detected - forcing streak to 0 day');
+        days = 0;
+      }
+
+      // Calculate start date if not provided
+      const effectiveStartDate = startDate || (days > 0 ? Date.now() - ((days - 1) * 86400000) : Date.now());
+      
+      // Update local state
+      console.log(`[GamificationContext] Updating userProgress with streak=${days}`);
+      try {
+        setUserProgress(prev => ({
+          ...prev,
+          streak: days,
+          startDate: effectiveStartDate,
+          lastCheckIn: days > 0 ? Date.now() : prev.lastCheckIn
+        }));
+      } catch (stateError) {
+        console.error('[GamificationContext] Error updating local state:', stateError);
+        // Continue even if state update fails
+      }
+
+      // Persist to storage if not skipped
+      if (!options?.skipPersistence) {
+        try {
+          console.log(`[GamificationContext] Persisting streak=${days} to storage`);
+          // Get fresh user progress to avoid stale state issues
+          const currentProgress = await getData(STORAGE_KEYS.USER_DATA, userProgress);
+          const updatedProgress = {
+            ...currentProgress,
+            streak: days,
+            startDate: effectiveStartDate,
+            lastCheckIn: days > 0 ? Date.now() : currentProgress.lastCheckIn
+          };
+          await storeData(STORAGE_KEYS.USER_DATA, updatedProgress);
+          console.log('[GamificationContext] Successfully persisted streak to storage');
+        } catch (storageError) {
+          console.error('[GamificationContext] Error persisting streak to storage:', storageError);
+          // Continue even if storage fails
+          
+          // Try a simplified approach as fallback
+          try {
+            await storeData('clearmind:manual-streak-value', days.toString());
+            console.log('[GamificationContext] Saved streak to manual-streak-value as fallback');
+          } catch (fallbackError) {
+            console.error('[GamificationContext] Even fallback storage failed:', fallbackError);
+          }
+        }
+      }
+
+      // Update widget if available
+      try {
+        if (Platform.OS === 'ios' && NativeModules.WidgetUpdaterModule) {
+          console.log(`[GamificationContext] Updating widget with streak=${days}`);
+          NativeModules.WidgetUpdaterModule.updateWidget(
+            days,
+            effectiveStartDate,
+            Date.now()
+          );
+          console.log('[GamificationContext] Widget updated successfully');
+        }
+      } catch (widgetError) {
+        console.error('[GamificationContext] Widget update failed:', widgetError);
+        // Continue even if widget update fails
+      }
+      
+      // Check streak achievements
+      try {
+        await forceCheckStreakAchievements();
+      } catch (achievementError) {
+        console.error('[GamificationContext] Error checking streak achievements:', achievementError);
+      }
+      
+      console.log(`[GamificationContext] setStreak completed successfully with value ${days}`);
+    } catch (error) {
+      console.error('[GamificationContext] Error setting streak:', error);
+      // No need to re-throw, just log the error
+      
+      // Try a last-ditch effort to at least update the local state
+      try {
+        setUserProgress(prev => ({
+          ...prev,
+          streak: days || 0
+        }));
+      } catch (finalError) {
+        console.error('[GamificationContext] Final attempt to update state failed:', finalError);
+      }
+    }
+  };
   const getLevelProgress = (): number => {
     return 0;
   };
@@ -1303,36 +1919,162 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       return false;
   };
   const testUnlock15Badges = async (): Promise<boolean> => {
-    return false;
+    try {
+      console.log('GamificationContext: testUnlock15Badges called - unlocking first 15 badges');
+      // Get current achievements
+      const currentAchievements = [...userProgress.achievements];
+      let updated = false;
+      
+      // Unlock the first 15 badges
+      const badgesToUnlock = currentAchievements.slice(0, 15);
+      
+      badgesToUnlock.forEach(badge => {
+        if (!badge.unlocked) {
+          badge.unlocked = true;
+          updated = true;
+          console.log(`GamificationContext: Unlocked badge: ${badge.name} (${badge.id})`);
+        }
+      });
+
+      // If any badges were updated, update the state
+      if (updated) {
+        updateProgress({ achievements: currentAchievements });
+        console.log('GamificationContext: Successfully unlocked 15 badges');
+      }
+
+      return updated;
+    } catch (error) {
+      console.error('GamificationContext: Error unlocking test badges:', error);
+      return false;
+    }
   };
-  const checkChallengeAchievements = async (completed?: Challenge[]) => {};
+  const checkChallengeAchievements = async (completed?: Challenge[]) => {
+    // Unlock badges for all completed challenges with badge rewards
+    const completedChallenges = completed || userProgress.completedChallenges;
+    const currentAchievements = [...userProgress.achievements];
+    let updated = false;
+    completedChallenges.forEach(challenge => {
+      if (challenge && challenge.rewards && challenge.rewards.badgeId) {
+        const badge = currentAchievements.find(a => a.id === challenge.rewards!.badgeId);
+        if (badge && !badge.unlocked) {
+          badge.unlocked = true;
+          updated = true;
+          showAchievement?.({
+            title: badge.name || 'Challenge Badge Unlocked',
+            description: badge.description || 'Unlocked a badge by completing a challenge!',
+            buttonText: 'Awesome!'
+          });
+        }
+      }
+    });
+    if (updated) {
+      updateProgress({ achievements: currentAchievements });
+    }
+    return updated;
+  };
   const checkJournalAchievements = async (entries?: JournalEntry[]) => {};
   const checkAndEvolveCompanion = async () => {};
+
+  // Helper to unlock a badge by ID
+  const unlockBadgeById = (badgeId: string, customButtonText?: string) => {
+    const currentAchievements = [...userProgress.achievements];
+    const badge = currentAchievements.find(b => b.id === badgeId);
+    if (badge && !badge.unlocked) {
+      badge.unlocked = true;
+      updateProgress({ achievements: currentAchievements });
+      showAchievement?.({
+        title: badge.name,
+        description: badge.description,
+        buttonText: customButtonText || 'Awesome!'
+      });
+      return true;
+    }
+    return false;
+  };
+
+  // Example: Unlock app badge after onboarding
+  const unlockAppBadge = () => unlockBadgeById('badge-app-onboarding', 'Welcome!');
+
+  // Example: Unlock recovery badge after logging a recovery event
+  const unlockRecoveryBadge = () => unlockBadgeById('badge-recovery-1', 'Stay strong!');
+
+  // Example: Unlock companion badge after evolution
+  const unlockCompanionBadge = () => unlockBadgeById('badge-companion-evolve', 'Your companion evolved!');
+
+  // Example: Unlock milestone badge after 100 days streak
+  const unlockMilestoneBadge = () => unlockBadgeById('badge-milestone-100', '100 Days!');
+  
+  // Update the useEffect that checks for streak bugs
+  useEffect(() => {
+    // This effect runs when streak changes or startDate changes
+    if (isKnown730Bug(streak)) {
+      console.error(`[GamificationContext] CRITICAL: Detected 730-day bug (current streak: ${streak}). Applying emergency fix...`);
+      
+      // Show alert to user
+      Alert.alert(
+        '⚠️ Data Issue Detected',
+        'We found an issue with your streak counter showing an incorrect value. The app will fix this automatically.',
+        [
+          {
+            text: 'Reset Now',
+            onPress: async () => {
+              try {
+                await resetStreakToOne();
+                forceRefresh();
+                setStreak(1, Date.now());
+              } catch (e) {
+                console.error('[GamificationContext] Error fixing 730-day bug:', e);
+              }
+            }
+          }
+        ]
+      );
+    } else if (isFutureStartDateBug(streak, userProgress.startDate)) {
+      console.error(`[GamificationContext] CRITICAL: Detected 30-day bug with future start date (${new Date(userProgress.startDate || 0).toISOString()}). Applying emergency fix...`);
+      
+      // Fix immediately without alert since this is a critical issue
+      (async () => {
+        try {
+          await resetStreakToOne();
+          forceRefresh();
+          setStreak(1, Date.now());
+          console.log('[GamificationContext] 30-day bug with future date fixed. Streak reset to 1.');
+        } catch (e) {
+          console.error('[GamificationContext] Error fixing 30-day bug:', e);
+        }
+      })();
+    }
+  }, [streak, userProgress.startDate]);
 
   return (
     <GamificationContext.Provider
       value={{
-        ...userProgress,
+        streak,
+        level,
+        points,
+        totalPoints,
+        journalEntries,
+        activeChallenges,
+        availableChallenges,
+        completedChallenges,
+        achievements,
+        lastCheckIn,
+        dailyCheckedIn,
+        startDate: userProgress.startDate, // Make start date available in the context
+        
+        // Functions
         addJournalEntry,
         deleteJournalEntry,
+        startChallenge,
+        completeChallenge,
         checkIn,
         resetData,
         exportData,
         importData,
-        startChallenge,
-        completeChallenge,
-        logHabitReplacement,
-        logWorkout,
-        logMeditation,
-        logReading,
-        reloadChallenges,
-        fixStayCleanChallenge,
-        forceResetAllChallenges,
-        forceCheckStreakAchievements,
-        fix30DayBadge,
         setStreak,
         getLevelProgress,
         getPointsToNextLevel,
+        getPersonalizedGreeting,
         setCompanion,
         updateCompanionExperience,
         evolveCompanion,
@@ -1342,8 +2084,18 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
         resetCompanion,
         checkAllAchievementTypes,
         testUnlock15Badges,
+        logHabitReplacement,
+        logWorkout,
+        logMeditation,
+        logReading,
+        reloadChallenges,
+        fixStayCleanChallenge,
+        forceResetAllChallenges,
+        forceCheckStreakAchievements,
+        fix30DayBadge,
         logChallengeProgress,
-        getPersonalizedGreeting,
+        companion: userProgress.companion || null,
+        activityStats: userProgress.activityStats || defaultActivityStats,
       }}
     >
       {children}

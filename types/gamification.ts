@@ -19,11 +19,10 @@ export interface UserProgress {
   dailyCheckedIn: boolean;
   meditationSessions?: number; // Total number of meditation sessions completed
   meditationStreak?: number; // Current consecutive days of meditation
-  lastMeditationDate?: number; // Timestamp of last meditation session
   totalMeditationMinutes?: number; // Total minutes of meditation
   startDate?: number;
-  companion?: UserCompanion | null;
-  activityStats?: ActivityStats;
+  companion: UserCompanion | null;
+  activityStats: ActivityStats;
 }
 
 // Journal entry
@@ -65,7 +64,7 @@ export interface Challenge {
   completed?: boolean;
   lastContributionDate?: number;
   lastUpdated?: string;
-  activities?: { timestamp: string; note: string }[];
+  activities?: ActivityLog[];
 }
 
 // Achievement/Badge
@@ -94,7 +93,7 @@ export interface LevelRequirement {
   pointsRequired: number;
 }
 
-export type ActivityType = 'meditation' | 'workout' | 'habit_replacement' | 'reading' | 'challenge';
+export type ActivityType = 'meditation' | 'workout' | 'habit_replacement' | 'reading' | 'challenge' | 'challenge_progress';
 
 export interface ActivityLog {
   id: string;
@@ -102,6 +101,8 @@ export interface ActivityLog {
   timestamp: number;
   duration?: number; // for meditation and workout
   description?: string; // for habit replacement
+  note?: string;
+  challengeId?: string;
 }
 
 export interface ActivityStats {

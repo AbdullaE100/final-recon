@@ -1,0 +1,27 @@
+--- a/app/onboarding.tsx
++++ b/app/onboarding.tsx
+@@ -132,7 +132,7 @@ export default function OnboardingScreen() {
+       const today = new Date();
+       today.setHours(0, 0, 0, 0);
+       
+       const newStreakData = {
+-        streak: 1,
++        streak: 0, // Set initial streak to 0 for new users
+         lastCheckIn: Date.now(),
+         startDate: today.getTime(),
+         hourCount: 0
+@@ -150,9 +150,9 @@ export default function OnboardingScreen() {
+       await storeData(STORAGE_KEYS.CALENDAR_HISTORY, calendarHistory);
+       await storeData(STORAGE_KEYS.STREAK_START_DATE, today.toISOString());
+       
+-      // Set all failsafe values
+-      await storeData('clearmind:manual-streak-value', '1');
+-      await storeData('clearmind:backup-streak-value', '1');
+-      await storeData('clearmind:failsafe-streak-value', '1');
++      // Set all failsafe values to 0 for new users
++      await storeData('clearmind:manual-streak-value', '0');
++      await storeData('clearmind:backup-streak-value', '0');
++      await storeData('clearmind:failsafe-streak-value', '0');
+       
+-      console.log('EMERGENCY FIX: Successfully reset all streak data to 1 day');
++      console.log('EMERGENCY FIX: Successfully reset all streak data to 0 days for new user');

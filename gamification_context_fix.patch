@@ -1,0 +1,36 @@
+--- a/context/GamificationContext.tsx
++++ b/context/GamificationContext.tsx
+@@ -1231,9 +1231,9 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ chi
+         const isOnboardingCompleted = await getData(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
+         const isNewUser = isOnboardingCompleted === false;
+         
+-        // For new users, ensure streak is set to 1
+-        if (isNewUser && migratedData.streak !== 1) {
+-          console.log('GamificationContext: New user detected - setting streak to 1');
+-          setStreak(1);
++        // For new users, ensure streak is set to 0
++        if (isNewUser) {
++          console.log('GamificationContext: New user detected - setting streak to 0');
++          setStreak(0);
+         }
+         
+         setDataLoaded(true);
+@@ -1778,10 +1778,16 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ chi
+       // Prevent negative streaks (should never happen but just in case)
+       const safeDays = Math.max(0, days);
+       
++      // Check if this is a new user
++      const isOnboardingCompleted = await getData(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
++      const isNewUser = isOnboardingCompleted === false;
++      
++      // New users should always have streak 0
++      const actualStreak = isNewUser ? 0 : safeDays;
++      
+       // Update the user data
+       await storeData(STORAGE_KEYS.USER_DATA, {
+         ...userData,
+-        streak: safeDays,
++        streak: actualStreak,
+         startDate: startDate ? startDate.getTime() : Date.now(),
+         lastCheckIn: Date.now(),
+       });

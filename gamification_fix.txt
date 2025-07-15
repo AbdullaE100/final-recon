@@ -1,0 +1,41 @@
+
+// ===== GAMIFICATION CONTEXT FIX =====
+// Fix the GamificationContext to properly handle new users with streak 0
+
+// Find the block around line 1235-1240 in GamificationContext.tsx:
+// For new users, ensure streak is set to 1
+if (isNewUser && migratedData.streak !== 1) {
+  console.log('GamificationContext: New user detected - setting streak to 1');
+  setStreak(1);
+}
+
+// Replace it with:
+// For new users, ensure streak is set to 0
+if (isNewUser) {
+  console.log('GamificationContext: New user detected - setting streak to 0');
+  setStreak(0);
+}
+
+// Also find the setStreak function (around line 1763) and modify the part where it updates userData:
+// Current code might have:
+await storeData(STORAGE_KEYS.USER_DATA, {
+  ...userData,
+  streak: days,
+  startDate: startDate ? startDate.getTime() : Date.now(),
+  lastCheckIn: Date.now(),
+});
+
+// Make sure the streak is set to 0 for new users by modifying the isNewUser check:
+const isOnboardingCompleted = await getData(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
+const isNewUser = isOnboardingCompleted === false;
+
+// If this is a new user, always set streak to 0 regardless of 'days' parameter
+const actualStreak = isNewUser ? 0 : days;
+
+await storeData(STORAGE_KEYS.USER_DATA, {
+  ...userData,
+  streak: actualStreak,
+  startDate: startDate ? startDate.getTime() : Date.now(),
+  lastCheckIn: Date.now(),
+});
+

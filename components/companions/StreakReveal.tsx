@@ -17,6 +17,7 @@ import { BlurView } from 'expo-blur';
 import LottieView from 'lottie-react-native';
 import { CompanionChoice } from '@/components/onboarding/CompanionSelectionScreen';
 import { useGamification } from '@/context/GamificationContext';
+import { ActivityIndicator } from 'react-native';
 
 const { width, height } = Dimensions.get('window');
 
@@ -27,13 +28,18 @@ interface StreakRevealProps {
 
 export default function StreakReveal({ companionChoice, onContinue }: StreakRevealProps) {
   const { colors } = useTheme();
-  const { streak, companion } = useGamification();
+  const gamification = useGamification() || { streak: 0, companion: null };
+  const { streak = 0, companion = null } = gamification;
   const lottieRef = useRef<LottieView>(null);
+  
+  // Add loading state
+  const [isLoading, setIsLoading] = React.useState(true);
   
   // Animation values
   const cardOpacity = useSharedValue(0);
   const cardScale = useSharedValue(0.9);
-  const streakCounterValue = useSharedValue(0);
+  const streakCounterValue = useSharedValue(0); // Always start at 0
+  const streakCounterOpacity = useSharedValue(0);
   const companionOpacity = useSharedValue(0);
   const companionY = useSharedValue(20);
   
@@ -61,8 +67,11 @@ export default function StreakReveal({ companionChoice, onContinue }: StreakReve
   const accentColor = getCompanionColor(companionChoice);
 
   useEffect(() => {
-    // Sequence the animations
+    // First, ensure we have a longer delay before showing anything
+    const initialDelay = 1200; // longer delay to ensure all data is loaded properly
+    
     setTimeout(() => {
+      // Begin revealing card
       cardOpacity.value = withTiming(1, { duration: 600 });
       cardScale.value = withDelay(200, withSpring(1, { damping: 12 }));
       
@@ -70,10 +79,22 @@ export default function StreakReveal({ companionChoice, onContinue }: StreakReve
       companionOpacity.value = withDelay(300, withTiming(1, { duration: 800 }));
       companionY.value = withDelay(300, withSpring(0, { damping: 8 }));
       
-      // Animate streak counter from 0 to current value
-      if (streak > 0) {
-        streakCounterValue.value = withDelay(800, withTiming(streak, { duration: 1200, easing: Easing.out(Easing.cubic) }));
-      }
+      // Wait until the card and companion are visible before showing the streak
+      setTimeout(() => {
+        // Now that we've delayed long enough, first fade in the counter container
+        streakCounterOpacity.value = withTiming(1, { duration: 400 });
+        
+        // Then after the container is visible, start counting up (but only if streak > 0)
+        setTimeout(() => {
+          setIsLoading(false);
+          // For new users with streak = 0, we don't need any counting animation
+          // Just immediately show 0
+          streakCounterValue.value = withTiming(streak, { 
+            duration: streak > 0 ? 1500 : 300, 
+            easing: Easing.out(Easing.cubic) 
+          });
+        }, 400);
+      }, 800);
 
       // Play Lottie animation
       if (lottieRef.current) {
@@ -81,7 +102,7 @@ export default function StreakReveal({ companionChoice, onContinue }: StreakReve
           lottieRef.current?.play();
         }, 500);
       }
-    }, 400);
+    }, initialDelay);
   }, []);
   
   // Animated styles
@@ -102,6 +123,7 @@ export default function StreakReveal({ companionChoice, onContinue }: StreakReve
   const animatedCounterStyle = useAnimatedStyle(() => {
     return {
       fontSize: interpolate(cardScale.value, [0.9, 1], [60, 90]),
+      opacity: streakCounterOpacity.value,
     };
   });
   
@@ -188,19 +210,23 @@ export default function StreakReveal({ companionChoice, onContinue }: StreakReve
             </View>
             
             <View style={styles.streakContent}>
-              {streak === 0 ? (
-                <Animated.Text 
-                  style={[styles.streakCounter, animatedCounterStyle, { color: accentColor }]}
-                >
-                  {streak}
-                </Animated.Text>
-              ) : (
-                <Animated.Text 
-                  style={[styles.streakCounter, animatedCounterStyle, { color: accentColor }]}
-                >
-                  {Math.round(streakCounterValue.value)}
-                </Animated.Text>
-              )}
+              <Animated.View style={[styles.counterContainer, { opacity: streakCounterOpacity.value }]}>
+                {isLoading ? (
+                  <ActivityIndicator size="large" color={accentColor} style={styles.loadingIndicator} />
+                ) : streak === 0 ? (
+                  <Animated.Text 
+                    style={[styles.streakCounter, { color: accentColor }]}
+                  >
+                    {streak}
+                  </Animated.Text>
+                ) : (
+                  <Animated.Text 
+                    style={[styles.streakCounter, animatedCounterStyle, { color: accentColor }]}
+                  >
+                    {Math.round(streakCounterValue.value)}
+                  </Animated.Text>
+                )}
+              </Animated.View>
               <Text style={styles.streakUnit}>
                 {streak === 1 ? 'DAY' : 'DAYS'}
               </Text>
@@ -383,5 +409,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     marginRight: 10,
-  }
+  },
+  counterContainer: {
+    minHeight: 90, // Maintain consistent height during loading
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingIndicator: {
+    marginBottom: 8,
+  },
 });

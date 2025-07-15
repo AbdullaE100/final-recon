@@ -369,6 +369,39 @@ export const clearAllData = async (): Promise<void> => {
 };
 
 /**
+ * Specifically clears user-sensitive data when starting a new onboarding session.
+ * This is to prevent data from a previous user/session from leaking.
+ */
+export const clearSensitiveDataForNewUser = async (): Promise<void> => {
+  try {
+    const keysToRemove = [
+      STORAGE_KEYS.DEVICE_ID,
+      STORAGE_KEYS.STREAK_DATA, // This is the generic key, which we also want to clear
+      STORAGE_KEYS.CALENDAR_HISTORY,
+      STORAGE_KEYS.STREAK_START_DATE,
+      STORAGE_KEYS.USER_PREFERENCES,
+      STORAGE_KEYS.COMPANION_DATA,
+      'clearmind:manual-streak-value',
+      'clearmind:backup-streak-value',
+      'clearmind:failsafe-streak-value',
+      'clearmind:last-streak-update-time',
+      'clearmind:previous-streak-value',
+      'clearmind:last-streak-reset-time',
+    ];
+
+    if (Platform.OS === 'web') {
+      keysToRemove.forEach(key => webStorage.removeItem(key));
+      if (window._lastStreakUpdate) delete window._lastStreakUpdate;
+    } else {
+      await AsyncStorage.multiRemove(keysToRemove);
+    }
+    console.log('clearSensitiveDataForNewUser: Successfully cleared sensitive data.');
+  } catch (error) {
+    console.error('clearSensitiveDataForNewUser Error:', error);
+  }
+}
+
+/**
  * Storage keys used throughout the app
  */
 export const STORAGE_KEYS = {
@@ -394,5 +427,5 @@ export const STORAGE_KEYS = {
   BACKUP_DATA: 'clearmind:backup-data',
   RELAPSE_HISTORY: 'clearmind:relapse-history',
   INTENTIONAL_RELAPSE: 'clearmind:intentional-relapse',
-  DEVICE_ID: 'clearmind:device-id'
+  DEVICE_ID: 'clearmind:device-id',
 };

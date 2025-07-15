@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Pressable, Platform, ColorValue , StatusBar } from 'react-native';
+import React, { useState, useEffect, useMemo } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Pressable, Platform, ColorValue , StatusBar, Alert, Modal } from 'react-native';
 import { useGamification } from '@/context/GamificationContext';
 import { SafeAreaView , useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -16,6 +16,8 @@ import { BlurView } from 'expo-blur';
 import LottieView from 'lottie-react-native';
 import { Achievement } from '@/types/gamification';
 import { storeData, getData, STORAGE_KEYS } from '@/utils/storage';
+import { useStreak } from '@/context/StreakContext';
+import { resetAllStreakData } from '@/utils/resetStreakData';
 
 // Define types
 interface BadgeItemProps {
@@ -93,22 +95,31 @@ const BadgeItem: React.FC<BadgeItemProps> = ({
 };
 
 export default function AchievementsScreen() {
+  const gamification = useGamification();
   const { 
-    streak, 
-    level, 
-    points, 
-    totalPoints, 
-    achievements, 
+    streak = 0, 
+    level = 1, 
+    points = 0, 
+    totalPoints = 0, 
+    achievements = [], 
     companion, 
     getCompanionStage,
     forceCheckStreakAchievements,
-    journalEntries,
+    journalEntries = [],
     fix30DayBadge: contextFix30DayBadge
-  } = useGamification();
+  } = gamification || {};
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<'badges' | 'companion'>('badges');
   const [isCheckingAchievements, setIsCheckingAchievements] = useState(false);
+  const [selectedBadge, setSelectedBadge] = useState<Achievement | null>(null);
+  const [badgeModalVisible, setBadgeModalVisible] = useState(false);
 
+  // Automatically check and update badges when component mounts
+  useEffect(() => {
+    console.log('Achievements screen mounted, verifying badges automatically...');
+    if (forceCheckStreakAchievements) forceCheckStreakAchievements();
+    // Optionally, check other badge types here too
+  }, []); // Only run on mount
   
   // Calculate progress percentage
   const progressPercentage = (points / totalPoints) * 100;
@@ -130,17 +141,170 @@ export default function AchievementsScreen() {
   
   console.log("ACHIEVEMENTS: Badge count =", unlockedBadgesCount, "Companion stage =", companionStage);
   
-  // Function to force-check achievements
-  const handleForceCheckAchievements = async () => {
-    setIsCheckingAchievements(true);
+  // Debug function to unlock badges if none are shown
+  const handleDebugBadges = async () => {
+    if (unlockedBadgesCount === 0 && typeof gamification?.testUnlock15Badges === 'function') {
+      console.log("Attempting to unlock 15 badges for debugging...");
+      setIsCheckingAchievements(true);
+      try {
+        const result = await gamification.testUnlock15Badges();
+        console.log("Debug badge unlock result:", result);
+      } catch (error) {
+        console.error("Error unlocking debug badges:", error);
+      } finally {
+        setIsCheckingAchievements(false);
+      }
+    }
+  };
+
+  // Function to reset all app data
+  const handleResetAllData = () => {
+    Alert.alert(
+      "Reset All Data",
+      "This will reset all your streak data and calendar history. This action cannot be undone.",
+      [
+        {
+          text: "Cancel",
+          style: "cancel"
+        },
+        {
+          text: "Reset",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setIsCheckingAchievements(true);
+              await resetAllStreakData();
+              
+              // Force reload the page
+              setTimeout(() => {
+                window.location.reload();
+              }, 500);
+            } catch (error) {
+              console.error("Error resetting data:", error);
+            } finally {
+              setIsCheckingAchievements(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // Create simple fixed streak badges array
+  const streakBadges = [
+    {
+      id: 'badge-streak-7',
+      name: '7 Days',
+      description: 'Maintain a 7-day clean streak',
+      category: 'streak',
+      unlocked: achievements?.some(badge => 
+        (badge.id === 'badge-streak-1' || 
+         badge.id === 'badge-streak-7days' || 
+         badge.id.includes('7')) && 
+        badge.unlocked
+      ) || false,
+      icon: 'medal',
+      unlockCriteria: 'Complete 7 days of streak'
+    },
+    {
+      id: 'badge-streak-30days',
+      name: '30 Days',
+      description: 'Maintain a 30-day clean streak',
+      category: 'streak',
+      unlocked: achievements?.some(badge => 
+        (badge.id === 'badge-streak-2' || 
+         badge.id === 'badge-streak-30days' || 
+         badge.id.includes('30')) && 
+        badge.unlocked
+      ) || false,
+      icon: 'medal',
+      unlockCriteria: 'Complete 30 days of streak'
+    },
+    {
+      id: 'badge-streak-90days',
+      name: '90 Days',
+      description: 'Maintain a 90-day clean streak',
+      category: 'streak',
+      unlocked: achievements?.some(badge => 
+        (badge.id === 'badge-streak-3' || 
+         badge.id === 'badge-streak-90days' || 
+         badge.id.includes('90')) && 
+        badge.unlocked
+      ) || false,
+      icon: 'medal',
+      unlockCriteria: 'Complete 90 days of streak'
+    },
+    {
+      id: 'badge-streak-365days',
+      name: '365 Days',
+      description: 'Maintain a 365-day clean streak',
+      category: 'streak',
+      unlocked: achievements?.some(badge => 
+        (badge.id === 'badge-streak-4' || 
+         badge.id === 'badge-streak-365days' || 
+         badge.id === 'badge-streak-1year' || 
+         badge.id.includes('365')) && 
+        badge.unlocked
+      ) || false,
+      icon: 'medal',
+      unlockCriteria: 'Complete 365 days of streak'
+    }
+  ];
+  
+  // Add a function to specifically fix the 30-day badge
+  const fix30DayBadge = async () => {
     try {
-      const updated = await forceCheckStreakAchievements();
-      console.log('Force checked achievements, updated:', updated);
+    setIsCheckingAchievements(true);
+      
+      // Use the direct fix function from the context
+      if (typeof contextFix30DayBadge === 'function') {
+        const result = await contextFix30DayBadge();
+        
+        console.log(`Result of fixing 30-day badge:`, result);
+        
+        if (result) {
+          console.log('Successfully fixed 30-day badge');
+        } else {
+          console.log('Could not fix 30-day badge. Check console for details.');
+        }
+      } else {
+        console.log('Fix30DayBadge function not available in context');
+      }
     } catch (error) {
-      console.error('Error force-checking achievements:', error);
+      console.error('Error fixing 30-day badge:', error);
     } finally {
       setIsCheckingAchievements(false);
     }
+  };
+
+  // Refactored: Only use forceCheckStreakAchievements from context
+  const verifyAndUnlockAchievements = async () => {
+    try {
+      setIsCheckingAchievements(true);
+      if (typeof forceCheckStreakAchievements === 'function') {
+        console.log('Calling forceCheckStreakAchievements from context...');
+        await forceCheckStreakAchievements();
+      }
+      if (typeof contextFix30DayBadge === 'function' && streak >= 30) {
+        await contextFix30DayBadge();
+      }
+      console.log('Badge verification via context complete');
+    } catch (error) {
+      console.error('Error verifying achievements:', error);
+    } finally {
+      setIsCheckingAchievements(false);
+    }
+  };
+
+  // Always check for badge unlocks on mount and when streak/journal changes
+  useEffect(() => {
+    verifyAndUnlockAchievements();
+  }, [streak, journalEntries.length]);
+
+  // Replace the hasJournalBadgeDiscrepancy with a more general function
+  const hasUnlockedBadgeDiscrepancy = () => {
+    // Always return true to make the button always available
+    return true;
   };
   
   // Check if any streak badges should be unlocked but aren't
@@ -150,19 +314,9 @@ export default function AchievementsScreen() {
     (streak >= 90 && ninetyDayBadge && !ninetyDayBadge.unlocked);
   
   // Add a flag to detect missing journal badges
-  const hasJournalBadgeDiscrepancy = () => {
-    const firstJournalBadge = achievements.find(a => a.id === 'badge-journal-first');
-    const threeJournalBadge = achievements.find(a => a.id === 'badge-journal-3');
-    const tenJournalBadge = achievements.find(a => a.id === 'badge-journal-2');
-    const twentyJournalBadge = achievements.find(a => a.id === 'badge-journal-master');
-    
-    // Check if any journal badges are missing based on journal entry count
-    return (
-      journalEntries.length >= 1 && firstJournalBadge && !firstJournalBadge.unlocked ||
-      journalEntries.length >= 3 && threeJournalBadge && !threeJournalBadge.unlocked ||
-      journalEntries.length >= 10 && tenJournalBadge && !tenJournalBadge.unlocked ||
-      journalEntries.length >= 20 && twentyJournalBadge && !twentyJournalBadge.unlocked
-    );
+  const has30DayBadgeIssue = () => {
+    const thirtyDayBadge = achievements.find(a => a.id === 'badge-streak-2' || a.id === 'badge-streak-30days');
+    return streak >= 30 && thirtyDayBadge && !thirtyDayBadge.unlocked;
   };
   
   // Get companion animation source based on stage and type
@@ -239,72 +393,6 @@ export default function AchievementsScreen() {
   
   const companionInfo = getCompanionInfo();
   
-
-  
-  // Fix streak badges in UI
-  const streakBadges = [
-    {
-      id: 'badge-streak-7',
-      name: '7 Days',
-      description: 'Maintain a 7-day clean streak',
-      category: 'streak',
-      unlockCriteria: 'Maintain a 7-day streak',
-      unlocked: streak >= 7
-    },
-    {
-      id: 'badge-streak-14',
-      name: '14 Days',
-      description: 'Maintain a 14-day clean streak',
-      category: 'streak',
-      unlockCriteria: 'Maintain a 14-day streak',
-      unlocked: streak >= 14
-    },
-    {
-      id: 'badge-streak-30',
-      name: '30 Days',
-      description: 'Maintain a 30-day clean streak',
-      category: 'streak',
-      unlockCriteria: 'Maintain a 30-day streak',
-      unlocked: streak >= 30
-    },
-    {
-      id: 'badge-streak-90',
-      name: '90 Days',
-      description: 'Maintain a 90-day clean streak',
-      category: 'streak',
-      unlockCriteria: 'Maintain a 90-day streak',
-      unlocked: streak >= 90
-    }
-  ];
-  
-  // Add a function to specifically fix the 30-day badge
-  const fix30DayBadge = async () => {
-    try {
-      setIsCheckingAchievements(true);
-      
-      // Use the direct fix function from the context
-      const result = await contextFix30DayBadge();
-      
-      console.log(`Result of fixing 30-day badge:`, result);
-      
-      if (result) {
-        console.log('Successfully fixed 30-day badge');
-      } else {
-        console.log('Could not fix 30-day badge. Check console for details.');
-      }
-    } catch (error) {
-      console.error('Error fixing 30-day badge:', error);
-    } finally {
-      setIsCheckingAchievements(false);
-    }
-  };
-
-  // Add a check for missing 30-day badge
-  const has30DayBadgeIssue = () => {
-    const thirtyDayBadge = achievements.find(a => a.id === 'badge-streak-2' || a.id === 'badge-streak-30days');
-    return streak >= 30 && thirtyDayBadge && !thirtyDayBadge.unlocked;
-  };
-  
   const renderBadgesTab = () => {
     // Group badges by category
     const badgesByCategory = achievements ? achievements.reduce((acc: any, badge) => {
@@ -374,9 +462,12 @@ export default function AchievementsScreen() {
             </LinearGradient>
           </View>
           
-          <View style={styles.pointsContainer}>
-            <Text style={styles.pointsText}>{points} / {totalPoints} points</Text>
-          </View>
+          {/* Only show points container if points exist */}
+          {(points > 0 || totalPoints > 0) && (
+            <View style={styles.pointsContainer}>
+              <Text style={styles.pointsText}>{points} / {totalPoints} points</Text>
+            </View>
+          )}
           
           {/* Progress Bar */}
           <View style={styles.progressBarContainer}>
@@ -390,45 +481,33 @@ export default function AchievementsScreen() {
             </View>
           </View>
           
-          <Text style={styles.nextLevelText}>
-            {pointsToNextLevel} points to Level {level + 1}
-          </Text>
+          {/* Badge counts */}
+          <View style={styles.badgeStatsContainer}>
+            <Text style={styles.badgeStatsText}>
+              {unlockedBadgesCount} / {achievements?.length || 0} badges unlocked
+            </Text>
+            
+            {/* Debug button when no badges are unlocked */}
+            {unlockedBadgesCount === 0 && (
+              <TouchableOpacity 
+                style={styles.debugButton}
+                onPress={handleDebugBadges}
+                disabled={isCheckingAchievements}
+              >
+                {isCheckingAchievements ? (
+                  <Text style={styles.debugButtonText}>Unlocking...</Text>
+                ) : (
+                  <Text style={styles.debugButtonText}>Debug Badges</Text>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
           
-          {/* Manual Achievement Check Buttons */}
-          {hasStreakBadgeDiscrepancy && (
-            <TouchableOpacity 
-              style={styles.checkAchievementsButton}
-              onPress={handleForceCheckAchievements}
-              disabled={isCheckingAchievements}
-            >
-              <Text style={styles.checkAchievementsButtonText}>
-                {isCheckingAchievements ? 'Checking...' : 'Verify Streak Badges'}
-              </Text>
-            </TouchableOpacity>
-          )}
-          
-          {has30DayBadgeIssue() && (
-            <TouchableOpacity 
-              style={[styles.checkAchievementsButton, { marginTop: 10, backgroundColor: '#FF9500' }]}
-              onPress={fix30DayBadge}
-              disabled={isCheckingAchievements}
-            >
-              <Text style={styles.checkAchievementsButtonText}>
-                {isCheckingAchievements ? 'Fixing...' : 'Fix 30-Day Badge'}
-              </Text>
-            </TouchableOpacity>
-          )}
-          
-          {hasJournalBadgeDiscrepancy() && (
-            <TouchableOpacity 
-              style={[styles.checkAchievementsButton, { marginTop: 10, backgroundColor: '#4CD964' }]}
-              onPress={handleForceCheckAchievements}
-              disabled={isCheckingAchievements}
-            >
-              <Text style={styles.checkAchievementsButtonText}>
-                {isCheckingAchievements ? 'Checking...' : 'Verify Journal Badges'}
-              </Text>
-            </TouchableOpacity>
+          {/* Only show points to next level if there are points */}
+          {pointsToNextLevel > 0 && (
+            <Text style={styles.nextLevelText}>
+              {pointsToNextLevel} points to Level {level + 1}
+            </Text>
           )}
         </Animated.View>
         
@@ -506,7 +585,7 @@ export default function AchievementsScreen() {
                     locked={!badge.unlocked}
                     days={category === 'streak' ? extractNumberFromString(badge.name) : null}
                     delay={badgeIndex * 50}
-                    onPress={() => {}}
+                    onPress={() => handleBadgePress(badge)}
                   />
                 ))}
               </View>
@@ -580,6 +659,11 @@ export default function AchievementsScreen() {
     </View>
   );
 
+  const handleBadgePress = (badge: Achievement) => {
+    setSelectedBadge(badge);
+    setBadgeModalVisible(true);
+  };
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <StatusBar barStyle="light-content" />
@@ -631,6 +715,61 @@ export default function AchievementsScreen() {
       >
         {activeTab === 'badges' ? renderBadgesTab() : renderCompanionTab()}
       </ScrollView>
+
+      {/* Badge Details Modal */}
+      {selectedBadge && (
+        <Modal
+          visible={badgeModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setBadgeModalVisible(false)}
+        >
+          <BlurView intensity={30} tint="dark" style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <View style={{
+              width: 320,
+              borderRadius: 20,
+              padding: 28,
+              alignItems: 'center',
+              backgroundColor: 'rgba(31, 41, 55, 0.95)',
+              borderWidth: 1,
+              borderColor: 'rgba(255,255,255,0.08)',
+              shadowColor: '#000',
+              shadowOpacity: 0.18,
+              shadowRadius: 16,
+              elevation: 8,
+            }}>
+              <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#fff', marginBottom: 10, textAlign: 'center' }}>
+                {selectedBadge.name}
+              </Text>
+              <Text style={{ fontSize: 15, color: '#D1D5DB', textAlign: 'center', marginBottom: 18, marginTop: 2 }}>
+                {selectedBadge.description}
+              </Text>
+              {selectedBadge.unlockCriteria && (
+                <Text style={{ fontSize: 14, color: '#A5B4FC', textAlign: 'center', marginBottom: 18 }}>
+                  Unlock Criteria: {selectedBadge.unlockCriteria}
+                </Text>
+              )}
+              <Text style={{ fontSize: 16, color: selectedBadge.unlocked ? '#34D399' : '#F87171', fontWeight: '600', marginBottom: 18 }}>
+                {selectedBadge.unlocked ? 'Unlocked' : 'Locked'}
+              </Text>
+              <TouchableOpacity
+                style={{
+                  backgroundColor: '#23272F',
+                  borderRadius: 10,
+                  paddingVertical: 12,
+                  paddingHorizontal: 32,
+                  alignItems: 'center',
+                  borderWidth: 1,
+                  borderColor: 'rgba(255,255,255,0.12)',
+                }}
+                onPress={() => setBadgeModalVisible(false)}
+              >
+                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </BlurView>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -912,15 +1051,24 @@ const styles = StyleSheet.create({
   },
   checkAchievementsButton: {
     backgroundColor: '#6772FF',
-    padding: 12,
-    borderRadius: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
     alignItems: 'center',
-    marginTop: 16,
+    justifyContent: 'center',
+    marginTop: 20,
+    marginHorizontal: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 5,
   },
   checkAchievementsButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
     color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   badgeRarityText: {
     fontSize: 12,
@@ -964,232 +1112,67 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#FFFFFF',
   },
-
+  testButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  testButton: {
+    backgroundColor: 'rgba(50, 50, 50, 0.5)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 15,
+    marginHorizontal: 5,
+  },
+  testButtonText: {
+    color: '#fff',
+    fontSize: 12,
+  },
+  badgeStatsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  badgeStatsText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.8)',
+  },
+  debugButton: {
+    backgroundColor: 'rgba(255, 0, 0, 0.2)',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  debugButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
 });
 
 // Helper function to extract number from string (e.g. "90 Day Champion" -> 90)
 const extractNumberFromString = (str: string): number | null => {
-  const match = str.match(/(\d+)/);
-  return match ? parseInt(match[0]) : null;
-}
+  const matches = str.match(/\d+/);
+  return matches && matches.length > 0 ? parseInt(matches[0], 10) : null;
+};
 
-// Create additional well-designed badges for a category when needed
-const createAdditionalBadges = (category: string, count = 4): Achievement[] => {
-  const badges: Achievement[] = [];
-  
-  if (category === 'streak') {
-    const streakBadges: Achievement[] = [
-      {
-        id: 'custom-streak-1',
-        name: '7 Days',
-        description: 'Maintain a clean streak for a full week',
-        category: 'streak',
-        unlockCriteria: 'Maintain a 7-day streak',
-        unlocked: false
-      },
-      {
-        id: 'custom-streak-2',
-        name: '14 Days',
-        description: 'Maintain a clean streak for two weeks',
-        category: 'streak',
-        unlockCriteria: 'Maintain a 14-day streak',
-        unlocked: false
-      },
-      {
-        id: 'custom-streak-3',
-        name: '30 Days',
-        description: 'Maintain a clean streak for a full month',
-        category: 'streak',
-        unlockCriteria: 'Maintain a 30-day streak',
-        unlocked: false
-      },
-      {
-        id: 'custom-streak-4',
-        name: '90 Days',
-        description: 'Complete the standard reboot challenge',
-        category: 'streak',
-        unlockCriteria: 'Maintain a 90-day streak',
-        unlocked: false
-      }
-    ];
-    
-    for (let i = 0; i < count && i < streakBadges.length; i++) {
-      badges.push(streakBadges[i]);
-    }
-  } 
-  else if (category === 'journal') {
-    const journalBadges: Achievement[] = [
-      {
-        id: 'custom-journal-1',
-        name: 'First Entry',
-        description: 'Begin your self-reflection journey',
-        category: 'journal',
-        unlockCriteria: 'Create your first journal entry',
-        unlocked: false
-      },
-      {
-        id: 'custom-journal-2',
-        name: '7-Day Writer',
-        description: 'Journal consistently for a week',
-        category: 'journal',
-        unlockCriteria: 'Create 7 journal entries',
-        unlocked: false
-      },
-      {
-        id: 'custom-journal-3',
-        name: 'Deep Reflector',
-        description: 'Write a detailed entry about your progress',
-        category: 'journal',
-        unlockCriteria: 'Create a journal entry with 200+ words',
-        unlocked: false
-      },
-      {
-        id: 'custom-journal-4',
-        name: 'Gratitude Master',
-        description: 'Practice gratitude in your recovery journey',
-        category: 'journal',
-        unlockCriteria: 'Create 5 gratitude-focused entries',
-        unlocked: false
-      }
-    ];
-    
-    for (let i = 0; i < count && i < journalBadges.length; i++) {
-      badges.push(journalBadges[i]);
-    }
-  }
-  else if (category === 'challenge') {
-    const challengeBadges: Achievement[] = [
-      {
-        id: 'custom-challenge-1',
-        name: 'Challenge Taker',
-        description: 'Begin your first official challenge',
-        category: 'challenge',
-        unlockCriteria: 'Start your first challenge',
-        unlocked: false
-      },
-      {
-        id: 'custom-challenge-2',
-        name: 'Habit Replacer',
-        description: 'Successfully replace urges with healthy habits',
-        category: 'challenge',
-        unlockCriteria: 'Complete the Habit Replacement challenge',
-        unlocked: false
-      },
-      {
-        id: 'custom-challenge-3',
-        name: 'Morning Warrior',
-        description: 'Establish a positive morning routine',
-        category: 'challenge',
-        unlockCriteria: 'Complete 5 morning meditation sessions',
-        unlocked: false
-      },
-      {
-        id: 'custom-challenge-4',
-        name: 'Challenge Master',
-        description: 'Become proficient at completing challenges',
-        category: 'challenge',
-        unlockCriteria: 'Complete 5 different challenges',
-        unlocked: false
-      }
-    ];
-    
-    for (let i = 0; i < count && i < challengeBadges.length; i++) {
-      badges.push(challengeBadges[i]);
-    }
-  }
-  else if (category === 'meditation') {
-    const meditationBadges: Achievement[] = [
-      {
-        id: 'custom-meditation-1',
-        name: 'First Breath',
-        description: 'Begin your meditation practice',
-        category: 'meditation',
-        unlockCriteria: 'Complete your first meditation session',
-        unlocked: false
-      },
-      {
-        id: 'custom-meditation-2',
-        name: 'Mindful Week',
-        description: 'Develop a consistent meditation practice',
-        category: 'meditation',
-        unlockCriteria: 'Meditate for 7 consecutive days',
-        unlocked: false
-      },
-      {
-        id: 'custom-meditation-3',
-        name: 'Urge Surfer',
-        description: 'Use meditation to overcome urges',
-        category: 'meditation',
-        unlockCriteria: 'Use meditation during 3 urge moments',
-        unlocked: false
-      },
-      {
-        id: 'custom-meditation-4',
-        name: 'Zen Master',
-        description: 'Achieve deep focus in meditation',
-        category: 'meditation',
-        unlockCriteria: 'Complete a 20-minute meditation session',
-        unlocked: false
-      }
-    ];
-    
-    for (let i = 0; i < count && i < meditationBadges.length; i++) {
-      badges.push(meditationBadges[i]);
-    }
-  }
-  else if (category === 'workout') {
-    const workoutBadges: Achievement[] = [
-      {
-        id: 'custom-workout-1',
-        name: 'First Sweat',
-        description: 'Begin your fitness journey',
-        category: 'workout',
-        unlockCriteria: 'Complete your first workout session',
-        unlocked: false
-      },
-      {
-        id: 'custom-workout-2',
-        name: 'Consistency King',
-        description: 'Establish a regular workout routine',
-        category: 'workout',
-        unlockCriteria: 'Complete 10 workout sessions',
-        unlocked: false
-      },
-      {
-        id: 'custom-workout-3',
-        name: 'Urge Crusher',
-        description: 'Use exercise to overcome urges',
-        category: 'workout',
-        unlockCriteria: 'Record 5 workouts that helped with urges',
-        unlocked: false
-      },
-      {
-        id: 'custom-workout-4',
-        name: 'Endurance Master',
-        description: 'Push your physical limits',
-        category: 'workout',
-        unlockCriteria: 'Complete a 60-minute workout session',
-        unlocked: false
-      }
-    ];
-    
-    for (let i = 0; i < count && i < workoutBadges.length; i++) {
-      badges.push(workoutBadges[i]);
-    }
-  }
-  else {
-    // For any other category, create generic badges
+// Create placeholder badges to fill empty slots
+const createAdditionalBadges = (category: string, count: number): Achievement[] => {
+  const placeholders = [];
     for (let i = 0; i < count; i++) {
-      badges.push({
-        id: `${category}-badge-${i+1}`,
-        name: `${category.charAt(0).toUpperCase() + category.slice(1)} Expert`,
-        description: `Master your ${category} skills`,
+    placeholders.push({
+      id: `placeholder-${category}-${i}`,
+      name: 'Locked',
+      description: 'Keep using the app to unlock more badges!',
         category,
-        unlockCriteria: `Complete ${category} activities`,
-        unlocked: false
+      unlocked: false,
+      icon: 'lock',
+      unlockCriteria: 'Continue using the app to unlock'
       });
     }
-  }
-  
-  return badges;
+  return placeholders;
 };

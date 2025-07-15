@@ -8,11 +8,29 @@ import {
 } from 'react-native';
 import { useStreak } from '@/context/StreakContext';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay } from 'date-fns';
+import { getData, STORAGE_KEYS } from '@/utils/storage';
 
 export default function RecoveryCalendarWithoutButtons() {
   const { calendarHistory, streakStartDate } = useStreak();
   const [currentMonth, setCurrentMonth] = useState(new Date());
   
+  // Add state to track onboarding completion
+  const [isNewUser, setIsNewUser] = useState(true);
+  
+  // Check if user has completed onboarding
+  useEffect(() => {
+    async function checkOnboardingStatus() {
+      try {
+        const onboardingCompleted = await getData(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
+        setIsNewUser(onboardingCompleted === false);
+      } catch (err) {
+        console.error('RecoveryCalendar: Failed to check onboarding status', err);
+      }
+    }
+    
+    checkOnboardingStatus();
+  }, []);
+
   // Navigate to previous month
   const goToPreviousMonth = () => {
     setCurrentMonth(prevMonth => subMonths(prevMonth, 1));
@@ -33,7 +51,24 @@ export default function RecoveryCalendarWithoutButtons() {
   // Get day status (clean or relapse)
   const getDayStatus = (date: Date) => {
     const dateStr = format(date, 'yyyy-MM-dd');
-    return calendarHistory[dateStr] || null;
+
+    // If we have a recorded status, use it ("clean" or "relapse")
+    if (calendarHistory[dateStr]) {
+      return calendarHistory[dateStr];
+    }
+
+    // For today's date: 
+    // - If user completed onboarding and has begun their streak, show green
+    // - For a new user who hasn't completed onboarding, just highlight today normally
+    if (isSameDay(date, new Date())) {
+      if (!isNewUser && Boolean(streakStartDate) && Number(streakStartDate) !== 0) {
+        return 'clean';
+      }
+      // No return here means today gets the "today" highlight but isn't colored
+    }
+
+    // Otherwise no status
+    return null;
   };
 
   // Render the calendar

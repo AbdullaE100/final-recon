@@ -1,7 +1,0 @@
-===== BRACE BALANCE CHECK =====
-Final brace count: 0
-All braces are balanced!
-
-===== PARENTHESES BALANCE CHECK =====
-Final parentheses count: 0
-All parentheses are balanced!

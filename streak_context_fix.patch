@@ -1,0 +1,229 @@
+--- a/context/StreakContext.tsx
++++ b/context/StreakContext.tsx
+@@ -87,6 +87,7 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
+   const [streakStartDate, setStreakStartDateState] = useState<Date | null>(null);
+   const [streak, setStreakState] = useState(0);
+   const [isLoading, setIsLoading] = useState(true);
++  const [lastProcessedDate, setLastProcessedDate] = useState<string>('');
+   const gamification = useGamification();
+   const appState = useRef(AppState.currentState);
+   const lastActiveDateRef = useRef<Date>(new Date());
+@@ -162,6 +163,16 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
+     try {
+       // Get the current calendar history
+       const history = await getData<CalendarHistory>(STREAK_STORAGE_KEYS.CALENDAR_HISTORY, {});
++      const startISO = await getData<string | null>(STREAK_STORAGE_KEYS.STREAK_START_DATE, null);
++      const startDate = parseValidDate(startISO);
++      
++      // Always get a fresh Date object to ensure we're using the current system time
++      const today = new Date();
++      today.setHours(0, 0, 0, 0); // Start of day
++      const todayStr = format(today, DATE_FMT);
++      
++      // Check if we've already processed this date
++      if (todayStr === lastProcessedDate) {
++        return; // Skip if already processed this date
++      }
++      
++      // Update the last processed date
++      setLastProcessedDate(todayStr);
+       
+       if (!startDate) {
+         // Set up a new streak starting today
+         const today = new Date();
+@@ -182,7 +193,7 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
+         // Update local state
+         setCalendarHistory(newHistory);
+         setStreakStartDateState(today);
+-        setStreakState(1);
++        setStreakState(0); // New users should have streak 0
+         
+         lastActiveDateRef.current = today;
+         return;
+@@ -243,6 +254,12 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
+       const startISO = await getData<string | null>(STREAK_STORAGE_KEYS.STREAK_START_DATE, null);
+       const startDate = parseValidDate(startISO);
+       
++      // Get the current date
++      const today = new Date();
++      today.setHours(0, 0, 0, 0); // Start of day
++      const todayStr = format(today, DATE_FMT);
++      
++      // Set the initial processed date
++      setLastProcessedDate(todayStr);
+       // Update the local state with the latest data
+       setCalendarHistory(history);
+       setStreakStartDateState(startDate);
+@@ -292,7 +309,7 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
+-        console.log('[StreakContext] New user detected - setting up new streak');
++        console.log('[StreakContext] New user detected - setting up new streak with 0 days');
+         // Get current date for new streak
+         const today = new Date();
+         today.setHours(0, 0, 0, 0); // Start of day
+@@ -316,12 +333,12 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
+           const updatedUserData = {
+             ...userData,
+-            streak: 1,
++            streak: 0, // New users start with streak 0
+             startDate: today.getTime(),
+             lastCheckIn: Date.now()
+           };
+           await storeData(STORAGE_KEYS.USER_DATA, updatedUserData);
+         } catch (userDataError) {
+           console.error('[StreakContext] Error updating user data:', userDataError);
+@@ -330,7 +347,7 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
+         // Update local state
+         setCalendarHistory(newHistory);
+         setStreakStartDateState(today);
+-        setStreakState(1);
++        setStreakState(0);
+         
+         setIsLoading(false);
+         return;
+@@ -426,29 +443,24 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
+     const subscription = AppState.addEventListener('change', handleAppStateChange);
+     
+     // Check for date changes aggressively
+-    // This is critical for testing with manual date changes and ensuring real-time updates
++    // This is still frequent enough to catch date changes but won't cause performance issues
+     const checkDateInterval = setInterval(async () => {
+       try {
+         // Get a fresh Date object to ensure we're using the current system time
+         const freshToday = new Date();
+         freshToday.setHours(0, 0, 0, 0); // Start of day
+         const currentDateStr = format(freshToday, DATE_FMT);
+-        
+-        // Get the last active date from storage
+-        const lastActiveDateISO = await getData<string | null>(STREAK_STORAGE_KEYS.LAST_ACTIVE_DATE, null);
+-        const lastActiveDate = parseValidDate(lastActiveDateISO) || freshToday;
+-        const lastActiveDateStr = format(lastActiveDate, DATE_FMT);
+-        
+-        // Check if the date has changed
+-        if (currentDateStr !== lastActiveDateStr) {
++
++        // Only process if this is a new date
++        if (currentDateStr !== lastProcessedDate) {
++          console.log(`[StreakContext] Date change detected: ${lastProcessedDate} -> ${currentDateStr}`);
+           // Force a calendar update to ensure we're using the latest system date
+           await updateCalendarForNewDay();
+-          
+-          // Force a refresh to ensure streak is updated
+-          await forceRefresh();
+         }
++
+       } catch (error) {
+         console.error('[StreakContext] Error in date check interval:', error);
+       }
+-    }, 3000); // Check every 3 seconds - aggressive for testing
++    }, 10000); // Check every 10 seconds instead of 3
+     
+     // Run an immediate check when this effect is first setup
+     handleAppStateChange('active');
+@@ -457,7 +469,7 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
+       subscription.remove();
+       clearInterval(checkDateInterval);
+     };
+-  }, [updateCalendarForNewDay, forceRefresh]);
++  }, [updateCalendarForNewDay, lastProcessedDate]);
+       
+   // ---------- Actions ----------
+ 
+@@ -493,42 +505,46 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
+-      console.log(`[StreakContext] RECORDING RELAPSE: Date=${date.toISOString()}`);
+-      const relapseDay = startOfDay(date);
+-      const key = format(relapseDay, DATE_FMT);
+-      const today = startOfToday();
+-
+-      // Update the calendar history with the relapse
+-      const history = { ...calendarHistory };
+-      history[key] = 'relapse';
+-      
+-      // Save the updated calendar history
+-      await storeData(STREAK_STORAGE_KEYS.CALENDAR_HISTORY, history);
+-      
+-      // Clear the streak start date temporarily (will be reset to today when streak is set to 1)
+-      await storeData(STREAK_STORAGE_KEYS.STREAK_START_DATE, null as unknown as string);
+-
+-      // Update local state
+-      console.log('[StreakContext] Updating local state: streak=0, startDate=null');
+-      setCalendarHistory(history);
+-      setStreakStartDateState(null);
+-      setStreakState(0);
+-      
+-      // IMPORTANT: After a longer delay, set up the new streak start date for tomorrow
+-      // This ensures the calendar will show the correct colors after the relapse is recorded
+-      // We don't do this immediately to allow the UI to show 0 first
+-      setTimeout(async () => {
+-        try {
+-          // Set tomorrow as the new streak start date
+-          const tomorrow = new Date(today);
+-          tomorrow.setDate(tomorrow.getDate() + 1);
+-          
+-          // Mark today as the relapse day (redundant but for clarity)
+-          history[key] = 'relapse';
++      try {
++        console.log('[StreakContext] RECORDING RELAPSE: Date=' + date.toISOString());
++        const relapseDay = startOfDay(date);
++        const key = format(relapseDay, DATE_FMT);
++        const today = startOfToday();
++  
++        // Update the calendar history with the relapse
++        const history = { ...calendarHistory };
++        history[key] = 'relapse';
++        
++        // Save the updated calendar history
++        await storeData(STREAK_STORAGE_KEYS.CALENDAR_HISTORY, history);
++        
++        // Clear the streak start date
++        await storeData(STREAK_STORAGE_KEYS.STREAK_START_DATE, null);
++  
++        // Update local state
++        console.log('[StreakContext] Updating local state: streak=0, startDate=null');
++        setCalendarHistory(history);
++        setStreakStartDateState(null);
++        setStreakState(0);
++        
++        // IMPORTANT: Set up the new streak start date for tomorrow after a delay
++        setTimeout(async () => {
++          try {
++            // Set tomorrow as the new streak start date
++            const tomorrow = new Date(today);
++            tomorrow.setDate(tomorrow.getDate() + 1);
++            
++            // Get a fresh copy of history to avoid using stale data
++            const updatedHistory = await getData<CalendarHistory>(STREAK_STORAGE_KEYS.CALENDAR_HISTORY, {});
++            
++            // Ensure today is marked as relapse
++            updatedHistory[key] = 'relapse';
+-          // Mark tomorrow as clean to start the new streak
+-          const tomorrowKey = format(tomorrow, DATE_FMT);
+-          history[tomorrowKey] = 'clean';
++            // Mark tomorrow as clean to start the new streak
++            const tomorrowKey = format(tomorrow, DATE_FMT);
++            updatedHistory[tomorrowKey] = 'clean';
+           
+-          console.log(`[StreakContext] Setting up new streak starting from tomorrow (${tomorrowKey})`);
++            console.log('[StreakContext] Setting up new streak starting tomorrow: ' + tomorrowKey);
+           
+           // Save the updated history and start date
+-          await storeData(STREAK_STORAGE_KEYS.CALENDAR_HISTORY, history);
+-          await storeData(STREAK_STORAGE_KEYS.STREAK_START_DATE, tomorrow.toISOString() as unknown as string);
++          await storeData(STREAK_STORAGE_KEYS.CALENDAR_HISTORY, updatedHistory);
++          await storeData(STREAK_STORAGE_KEYS.STREAK_START_DATE, tomorrow.toISOString());
+           
+           // Update local state
+-          setCalendarHistory(history);
++          setCalendarHistory(updatedHistory);
+           setStreakStartDateState(tomorrow);
+         } catch (error) {
+           console.error('[StreakContext] Error setting up new streak:', error);
+@@ -536,6 +552,11 @@ export const StreakProvider: React.FC<{ children: React.ReactNode }> = ({
+       }, 3000); // Increased to 3000ms to ensure 0 is visible longer
+       
+       console.log('[StreakContext] RELAPSE RECORDING COMPLETE');
++      } catch (error) {
++        console.error('[StreakContext] ERROR recording relapse:', error);
++      }
+     },
+     [calendarHistory]
+   );

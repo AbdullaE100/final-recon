@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, StatusBar, Image } from 'react-native';
 import { useTheme } from '@/context/ThemeContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { 
@@ -102,17 +102,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onContinue }) => {
         entering={FadeIn.duration(800)}
       >
         {/* Logo mark */}
-        <Animated.View 
-          style={styles.logoMark}
-          entering={FadeIn.delay(400).duration(800)}
-        >
-          <LinearGradient
-            colors={['rgba(255,255,255,0.1)', 'rgba(255,255,255,0.05)']}
-            style={styles.logoMarkInner}
-          >
-            <Text style={styles.logoMarkText}>P</Text>
-          </LinearGradient>
-        </Animated.View>
+        {/* (Logo image removed as requested) */}
         
         {/* Brand name with high contrast */}
         <Animated.View 

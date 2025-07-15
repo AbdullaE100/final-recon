@@ -35,6 +35,7 @@ import LottieView from 'lottie-react-native';
 import { useTheme } from '@/context/ThemeContext';
 import { getData, STORAGE_KEYS } from '@/utils/storage';
 import { useGamification } from '@/context/GamificationContext';
+const logo = require('../assets/images/newlogo.png');
 
 const { width, height } = Dimensions.get('window');
 
@@ -229,7 +230,10 @@ export default function MyPledgeScreen() {
         scrollEventThrottle={16}
         entering={FadeIn.duration(500)}
       >
-        {/* Title container */}
+        {/* Logo and Title container */}
+        <Animated.View entering={FadeInDown.delay(150).duration(600)} style={{ alignItems: 'center', marginBottom: 8 }}>
+          <Image source={logo} style={{ width: 80, height: 80, resizeMode: 'contain', marginBottom: 8 }} />
+        </Animated.View>
         <Animated.View entering={FadeInDown.delay(200).duration(600)}>
           <Text style={styles.pledgeTitle}>YOUR PLEDGE</Text>
           <View style={styles.pledgeUnderline} />

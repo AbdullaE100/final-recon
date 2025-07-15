@@ -54,9 +54,12 @@ export function formatRelativeTime(timestamp: number): string {
  * Get start of day timestamp
  */
 export function getStartOfDay(date = new Date()): number {
-  const startOfDay = new Date(date);
-  startOfDay.setHours(0, 0, 0, 0);
-  return startOfDay.getTime();
+  // Create a new Date object to avoid modifying the input
+  const d = new Date(date);
+  // Set to start of day
+  d.setHours(0, 0, 0, 0);
+  // Return the timestamp directly
+  return d.getTime();
 }
 
 /**

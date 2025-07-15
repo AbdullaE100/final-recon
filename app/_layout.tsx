@@ -10,11 +10,11 @@ import { SubscriptionProvider } from '@/context/SubscriptionContext';
 import { useFonts } from 'expo-font';
 import { Nunito_400Regular, Nunito_600SemiBold, Nunito_700Bold } from '@expo-google-fonts/nunito';
 import { initializeStorage, getData, storeData, STORAGE_KEYS } from '@/utils/storage';
-import { initializeStreakData, checkAndAdjustStreak, scheduleDailyStreakCheck } from '@/utils/streakService';
 import { Alert } from 'react-native';
 import { supabase } from '@/utils/supabaseClient';
 import { initializeHermesGuard } from '@/utils/hermesguard';
 import { StreakProvider } from '@/context/StreakContext';
+import { fixNewUserStreak, fix30DayBug } from '@/utils/resetStreakData';
 
 // Initialize Hermes compatibility guard immediately
 initializeHermesGuard();
@@ -43,54 +43,21 @@ export default function RootLayout() {
         await initializeStorage();
         console.log('Storage initialized successfully');
         
-        // Step 2: Initialize Supabase connection
+        // Step 2: Check Supabase connection (optional)
         try {
-          // Test Supabase connection
-          const { data, error } = await supabase.from('streaks').select('count', { count: 'exact', head: true });
-          
+          const { error } = await supabase.from('streaks').select('count', { count: 'exact', head: true });
           if (error) {
             console.warn('Supabase connection error, will use local storage:', error.message);
           } else {
             console.log('Successfully connected to Supabase');
-            
-            // Initialize streak data in Supabase
-            try {
-              await initializeStreakData();
-              
-              // Explicitly check and adjust streak if needed
-              try {
-                console.log('Checking and adjusting streak based on last check-in date...');
-                const adjustedData = await checkAndAdjustStreak();
-                console.log(`Streak status: ${adjustedData.streak} days (last check-in: ${new Date(adjustedData.lastCheckIn).toLocaleDateString()})`);
-                
-                // Initialize the daily streak check scheduler
-                scheduleDailyStreakCheck();
-              } catch (adjustError) {
-                console.warn('Error adjusting streak:', adjustError);
-              }
-            } catch (streakError: any) {
-              const isNetworkError = streakError?.message?.includes('Network request failed') || 
-                                   streakError?.message?.includes('fetch') ||
-                                   !navigator.onLine;
-              
-              if (isNetworkError) {
-                console.log('Network unavailable during streak initialization, will retry later');
-              } else {
-                console.warn('Failed to initialize streak data, continuing anyway:', streakError);
-              }
-            }
           }
         } catch (supabaseError: any) {
-          const isNetworkError = supabaseError?.message?.includes('Network request failed') || 
-                               supabaseError?.message?.includes('fetch') ||
-                               !navigator.onLine;
-          
-          if (isNetworkError) {
-            console.log('Network unavailable, app will work offline with local storage');
-          } else {
-            console.warn('Failed to connect to Supabase, will use local storage:', supabaseError);
-          }
+          console.warn('Failed to connect to Supabase, will use local storage:', supabaseError.message);
         }
+        
+        // EMERGENCY FIX: Reset streak for new users or if 30-day bug is detected
+        await fixNewUserStreak();
+        await fix30DayBug();
         
         // Step 3: Verify critical data can be loaded
         try {

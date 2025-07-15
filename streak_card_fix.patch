@@ -1,0 +1,287 @@
+--- a/components/home/StreakCard.tsx
++++ b/components/home/StreakCard.tsx
+@@ -1,11 +1,11 @@
+ import React, { useState, useEffect, useRef } from 'react';
+ import { View, Text, StyleSheet, Animated } from 'react-native';
+ import { BlurView } from 'expo-blur';
+ import { useGamification } from '@/context/GamificationContext';
+ import { useTheme } from '@/context/ThemeContext';
+ import { LinearGradient } from 'expo-linear-gradient';
+ import { ActivityIndicator } from 'react-native';
+-import { getData, STORAGE_KEYS, removeData } from '@/utils/storage';
++import { getData, STORAGE_KEYS } from '@/utils/storage';
+ import { useStreak } from '@/context/StreakContext';
+ 
+ interface StreakCardProps {
+@@ -14,7 +14,7 @@ interface StreakCardProps {
+ 
+ export const StreakCard: React.FC<StreakCardProps> = ({ streak: propStreak }) => {
+   const gamification = useGamification() || { streak: 0 };
+-  const contextStreak = gamification.streak;
++  const { streak: contextStreak, forceRefresh } = useStreak();
+   const { colors } = useTheme();
+   
+   // Add loading state to prevent flash of incorrect values
+@@ -26,102 +26,81 @@ export const StreakCard: React.FC<StreakCardProps> = ({ streak: propStreak }) =>
+   
+   // Animated values for smooth transitions
+   const fadeAnim = useRef(new Animated.Value(0)).current;
+   const scaleAnim = useRef(new Animated.Value(0.9)).current;
+   
+-  // Initialize streak value once we have data from props/context
+-  useEffect(() => {
+-    let initialStreak = propStreak ?? contextStreak ?? 0;
+-
+-    // If the user hasn't finished onboarding yet, ensure streak starts at 0
+-    (async () => {
+-      try {
+-        const isOnboardingCompleted = await getData(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
+-        const isNewUser = isOnboardingCompleted === false;
+-        if (isNewUser) {
+-          initialStreak = 0;
+-        }
+-      } catch (e) {
+-        console.error('StreakCard: Failed to read onboarding status', e);
+-      }
+-
+-      setDisplayStreak(initialStreak);
+-      prevStreakRef.current = initialStreak;
+-    })();
+-  }, []);
++  // Check for new user status
++  const checkIsNewUser = async () => {
++    try {
++      const isOnboardingCompleted = await getData(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
++      return isOnboardingCompleted === false;
++    } catch (e) {
++      console.error('StreakCard: Failed to check onboarding status', e);
++      return false;
++    }
++  };
+   
+-  // On initial mount
++  // Initialize streak value once we have data from props/context
+   useEffect(() => {
+-    // Use a longer timeout to ensure data is fully loaded
+-    const timer = setTimeout(async () => {
+-      let safeStreak = propStreak ?? contextStreak ?? 0;
+-      
+-      // SAFETY CHECK: Check if user is new (onboarding not completed)
++    const initializeStreak = async () => {
+       try {
+-        const isOnboardingCompleted = await getData(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
+-        const isNewUser = isOnboardingCompleted === false;
++        // Force a refresh to ensure we have the latest streak data
++        await forceRefresh();
++        
++        // Check if this is a new user
++        const isNewUser = await checkIsNewUser();
+         
+-        // CRITICAL EMERGENCY FIX: For ANY user showing 30+ days, reset to 0 
+-        if (safeStreak >= 30) {
+-          console.error(`StreakCard: CRITICAL - Found suspicious streak value: ${safeStreak}. Emergency reset to 0.`);
+-          
+-          // Clear ALL streak related data
+-          await Promise.all([
+-            removeData(STORAGE_KEYS.STREAK_DATA),
+-            removeData(STORAGE_KEYS.CALENDAR_HISTORY),
+-            removeData(STORAGE_KEYS.STREAK_START_DATE),
+-            removeData('clearmind:manual-streak-value'),
+-            removeData('clearmind:backup-streak-value'),
+-            removeData('clearmind:failsafe-streak-value')
+-          ]);
+-          
+-          // Force display to 0
+-          safeStreak = 0;
+-        }
+-        // New user should ALWAYS have streak 0
+-        else if (isNewUser && safeStreak !== 0) {
+-          console.log('StreakCard: NEW USER DETECTED. Forcing streak display to 0.');
+-          safeStreak = 0;
++        // Use the streak from context or props
++        let initialStreak = propStreak ?? contextStreak ?? 0;
++        
++        // New users always have streak 0
++        if (isNewUser) {
++          console.log('StreakCard: New user detected - forcing streak to 0');
++          initialStreak = 0;
+         }
+-      } catch (error) {
+-        console.error('StreakCard: Error checking user status:', error);
+-      }
+-      
+-      // Set the final streak value
+-      setDisplayStreak(safeStreak);
+-      prevStreakRef.current = safeStreak;
+-      
+-      // Fade in with the correct value
+-      Animated.parallel([
+-        Animated.timing(fadeAnim, {
+-          toValue: 1,
+-          duration: 500,
+-          useNativeDriver: true,
+-        }),
+-        Animated.spring(scaleAnim, {
+-          toValue: 1,
+-          friction: 7,
+-          tension: 40,
+-          useNativeDriver: true,
+-        })
+-      ]).start(() => {
+-        setIsLoading(false);
+-      });
+-    }, 800);
++        
++        console.log(`StreakCard: Initializing with streak=${initialStreak}, isNewUser=${isNewUser}`);
++        
++        setDisplayStreak(initialStreak);
++        prevStreakRef.current = initialStreak;
++        
++        // Fade in with the correct value after a short delay
++        setTimeout(() => {
++          Animated.parallel([
++            Animated.timing(fadeAnim, {
++              toValue: 1,
++              duration: 500,
++              useNativeDriver: true,
++            }),
++            Animated.spring(scaleAnim, {
++              toValue: 1,
++              friction: 7,
++              tension: 40,
++              useNativeDriver: true,
++            })
++          ]).start(() => {
++            setIsLoading(false);
++          });
++        }, 500);
++      } catch (e) {
++        console.error('StreakCard: Failed to initialize streak', e);
++        setIsLoading(false);
++      }
++    };
+     
+-    return () => clearTimeout(timer);
+-  }, []);
++    initializeStreak();
++  }, [forceRefresh, propStreak, contextStreak]);
+   
+-  // Handle streak updates after initial load
++  // Handle streak updates from context or props
+   useEffect(() => {
+     if (!isLoading) {
+-      const newStreak = propStreak ?? contextStreak ?? 0;
+-      
+-      // Only animate if the streak has actually changed
+-      if (newStreak !== displayStreak) {
+-        console.log(`StreakCard: Streak changed from ${displayStreak} to ${newStreak}`);
+-        
+-        // Different animations for incrementing vs decrementing
++      (async () => {
++        try {
++          // Check if this is a new user
++          const isNewUser = await checkIsNewUser();
++          
++          // Get the latest streak value
++          let newStreak = propStreak ?? contextStreak ?? 0;
++          
++          // New users always have a streak of 0
++          if (isNewUser) {
++            newStreak = 0;
++          }
++          
++          // Only animate if the streak has actually changed
++          if (newStreak !== displayStreak) {
++            console.log(`StreakCard: Streak changed from ${displayStreak} to ${newStreak}`);
++            
++            // Different animations for incrementing vs decrementing
+@@ -178,15 +157,15 @@ export const StreakCard: React.FC<StreakCardProps> = ({ streak: propStreak }) =>
+         
+         // Update ref for next comparison
+         prevStreakRef.current = newStreak;
+-      }
+-    }
+-  }, [propStreak, contextStreak, isLoading]);
++          }
++        } catch (error) {
++          console.error('StreakCard: Error updating streak:', error);
++        }
++      })();
++    }
++  }, [propStreak, contextStreak, isLoading, displayStreak, fadeAnim, scaleAnim]);
+   
+   // Determine streak level and colors
+   const getStreakStyle = () => {
+@@ -225,62 +204,62 @@ export const StreakCard: React.FC<StreakCardProps> = ({ streak: propStreak }) =>
+ 
+ const styles = StyleSheet.create({
+   container: {
+-    borderRadius: 15,
++    borderRadius: 16,
+     overflow: 'hidden',
++    marginBottom: 16,
+     borderWidth: 1,
+-    marginHorizontal: 16,
+-    marginVertical: 8,
++    borderColor: 'rgba(255,255,255,0.1)',
+   },
+   gradient: {
+-    borderRadius: 15,
++    borderRadius: 16,
++    overflow: 'hidden',
+   },
+   content: {
+-    padding: 16,
++    paddingVertical: 16,
++    paddingHorizontal: 8,
+     alignItems: 'center',
++    justifyContent: 'center',
+   },
+   label: {
+-    fontSize: 16,
++    fontSize: 14,
++    textAlign: 'center',
+     opacity: 0.8,
++    fontWeight: '500',
+   },
+   streakCountContainer: {
+-    height: 70,
++    height: 100,
++    alignItems: 'center',
+     justifyContent: 'center',
+-    alignItems: 'center',
+   },
+   streakCount: {
+-    fontSize: 48,
++    fontSize: 72,
+     fontWeight: 'bold',
+-    marginVertical: 8,
+-  },
+-  loader: {
+-    marginVertical: 17, // Match the height of the streak count
++    textAlign: 'center',
+   },
+   streakStart: {
+-    color: '#FFA500',
++    color: '#FFA726', // Gentle orange
+   },
+   streakBeginner: {
+-    color: '#4CAF50',
++    color: '#66BB6A', // Gentle green
+   },
+   streakIntermediate: {
+-    color: '#2196F3',
++    color: '#29B6F6', // Light blue
+   },
+   streakAdvanced: {
+-    color: '#9C27B0',
++    color: '#AB47BC', // Purple
+   },
+   streakMaster: {
+-    color: '#F44336',
++    color: '#F44336', // Red
++  },
++  loader: {
++    marginVertical: 20,
+   }
+ });

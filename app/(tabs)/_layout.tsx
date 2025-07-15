@@ -8,11 +8,11 @@ import { supabase } from '@/utils/supabaseClient';
 
 export default function TabLayout() {
   const { colors } = useTheme();
-  const { user, session } = useAuth();
+  const { session, loading } = useAuth();
 
   useEffect(() => {
-    // Force refresh authentication on app startup
-    const checkAndRefreshAuth = async () => {
+    const initializeApp = async () => {
+      // Force refresh authentication on app startup
       console.log("Tab layout: Checking auth status...");
       const { data, error } = await supabase.auth.refreshSession();
       console.log("Auth refresh result:", { 
@@ -21,8 +21,8 @@ export default function TabLayout() {
         error: error?.message
       });
     };
-    
-    checkAndRefreshAuth();
+
+    initializeApp();
   }, []);
 
   return (

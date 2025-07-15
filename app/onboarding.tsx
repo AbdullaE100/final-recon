@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { StyleSheet, View, SafeAreaView, StatusBar, Text, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, View, SafeAreaView, StatusBar, Text, TouchableOpacity, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/context/ThemeContext';
 import WelcomeScreen from '@/components/onboarding/WelcomeScreen';
@@ -9,9 +9,11 @@ import CommitmentScreen from '@/components/onboarding/CommitmentScreen';
 import CompanionSelectionScreen, { CompanionChoice } from '@/components/onboarding/CompanionSelectionScreen';
 import UsernameSetupScreen from '@/components/onboarding/UsernameSetupScreen';
 import StreakReveal from '@/components/companions/StreakReveal';
-import { storeData, STORAGE_KEYS, getData } from '@/utils/storage';
+import { storeData, STORAGE_KEYS, getData, clearAllData } from '@/utils/storage';
 import { supabase } from '@/utils/supabaseClient';
 import { useAuth } from '@/context/AuthContext';
+
+import { format } from 'date-fns';
 
 // Define the user preferences interface
 interface UserPreferences {
@@ -62,8 +64,15 @@ export default function OnboardingScreen() {
   };
 
   // Handle saving quiz answers
-  const handleQuizComplete = (answers: Record<string, string>) => {
-    setQuizAnswers(answers);
+  const handleQuizComplete = (answers: Record<string, string | string[]>) => {
+    // Ensure answers are strings, not string arrays, for this component's state
+    const singleAnswers: Record<string, string> = {};
+    for (const key in answers) {
+      if (typeof answers[key] === 'string') {
+        singleAnswers[key] = answers[key] as string;
+      }
+    }
+    setQuizAnswers(singleAnswers);
     handleNext();
   };
 
@@ -84,6 +93,69 @@ export default function OnboardingScreen() {
     if (!selectedCompanion) {
       console.warn("Companion not selected before attempting to complete onboarding.");
     }
+    
+    // EMERGENCY FIX: Aggressively reset all streak data for new users
+    console.log('EMERGENCY FIX: Completely resetting all streak data for new user');
+    
+    // Define all streak-related keys to clear
+    const allStreakKeys = [
+      'clearmind:streak_data',
+      `clearmind:streak_data:DEFAULT_USER_ID`,
+      'clearmind:calendar_history',
+      'clearmind:streak_start_date',
+      'clearmind:manual-streak-value',
+      'clearmind:backup-streak-value',
+      'clearmind:failsafe-streak-value',
+      'clearmind:last-streak-update-time',
+      'clearmind:previous-streak-value',
+      'clearmind:last-streak-reset-time',
+    ];
+    
+    try {
+      // Clear on web platform
+      if (Platform.OS === 'web') {
+        allStreakKeys.forEach(key => window.localStorage.removeItem(key));
+        
+        // Reset window variable if it exists
+        if (typeof window !== 'undefined') {
+          (window as any)._lastStreakUpdate = {
+            streak: 1,
+            timestamp: Date.now(),
+          };
+        }
+      }
+      
+      // Force set clean streak data for day 1
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const newStreakData = {
+        streak: 0, // Set initial streak to 0 for new users
+        lastCheckIn: Date.now(),
+        startDate: today.getTime(),
+        hourCount: 0
+      };
+      
+      await storeData(STORAGE_KEYS.STREAK_DATA, newStreakData);
+      await storeData(`clearmind:streak_data:DEFAULT_USER_ID`, newStreakData);
+      
+      // Force set day 1 in calendar history
+      const calendarHistory = {
+        [format(today, 'yyyy-MM-dd')]: 'clean'
+      };
+      await storeData(STORAGE_KEYS.CALENDAR_HISTORY, calendarHistory);
+      await storeData(STORAGE_KEYS.STREAK_START_DATE, today.toISOString());
+      
+      // Set all failsafe values to 0 for new users
+      await storeData('clearmind:manual-streak-value', '0');
+      await storeData('clearmind:backup-streak-value', '0');
+      await storeData('clearmind:failsafe-streak-value', '0');
+      
+      console.log('EMERGENCY FIX: Successfully reset all streak data to 0 days for new user');
+    } catch (error) {
+      console.error('EMERGENCY FIX: Error resetting streak data:', error);
+    }
+    
     // Save user preferences and onboarding status
     await storeData(STORAGE_KEYS.ONBOARDING_COMPLETED, true);
     
@@ -105,37 +177,9 @@ export default function OnboardingScreen() {
     console.log('Saving updated preferences with keys:', Object.keys(updatedPreferences));
     await storeData(STORAGE_KEYS.USER_PREFERENCES, updatedPreferences);
     
-    // Create anonymous user profile in Supabase if we have Supabase connection and not logged in
-    try {
-      if (username && !user) {
-        // Generate a unique anonymous ID
-        const deviceId = `device_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-        
-        // Create or update user profile in Supabase
-        const { data, error } = await supabase
-          .from('user_profiles')
-          .upsert({
-            device_id: deviceId,
-            username: username,
-            preferences: updatedPreferences,
-            created_at: new Date().toISOString(),
-            last_sync: new Date().toISOString()
-          })
-          .select();
-          
-        if (error) {
-          console.warn('Failed to save user profile to Supabase:', error.message);
-        } else {
-          console.log('Successfully created user profile in Supabase');
-          
-          // Store the deviceId for future reference
-          await storeData(STORAGE_KEYS.DEVICE_ID, deviceId);
-        }
-      }
-    } catch (error) {
-      console.warn('Error creating user profile:', error);
-      // Continue even if Supabase sync fails - local data is still saved
-    }
+    // Always generate a new device ID for new onboarding
+    const deviceId = `device_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    await storeData(STORAGE_KEYS.DEVICE_ID, deviceId);
     
     // Navigate directly to main app, skipping the free trial screen
     router.replace('/(tabs)' as any);
@@ -206,6 +250,37 @@ export default function OnboardingScreen() {
         return null;
     }
   };
+
+  // The logic for clearing data has been moved to _layout.tsx to prevent race conditions.
+  // This ensures that data is cleared *before* any contexts attempt to load it.
+  // useEffect(() => {
+  //   const initializeOnboarding = async () => {
+  //     // Set a flag to indicate that onboarding is in progress
+  //     await storeData(STORAGE_KEYS.ONBOARDING_IN_PROGRESS, true);
+  //
+  //     // Clear all previous data to ensure a fresh start
+  //     await clearAllData();
+  //
+  //     // Remove all failsafe/manual/backup streak keys
+  //     const streakKeys = [
+  //       'clearmind:manual-streak-value',
+  //       'clearmind:backup-streak-value',
+  //       'clearmind:failsafe-streak-value',
+  //       'clearmind:last-streak-update-time',
+  //       'clearmind:previous-streak-value',
+  //       'clearmind:last-streak-reset-time',
+  //     ];
+  //
+  //     if (Platform.OS === 'web') {
+  //       streakKeys.forEach(key => window.localStorage.removeItem(key));
+  //       if (window._lastStreakUpdate) delete window._lastStreakUpdate;
+  //     } else {
+  //       await AsyncStorage.multiRemove(streakKeys);
+  //     }
+  //   };
+  //
+  //   initializeOnboarding();
+  // }, []);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>

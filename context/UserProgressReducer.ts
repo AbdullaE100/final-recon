@@ -1,7 +1,6 @@
 import { UserProgress, Achievement } from '@/types/gamification';
 import { storeData, STORAGE_KEYS } from '@/utils/storage';
-import { updateWidgetStreakData } from '@/utils/streakService';
-import { Platform } from 'react-native';
+import { Platform, NativeModules } from 'react-native';
 
 // Action Types
 export enum UserProgressActionType {
@@ -73,12 +72,17 @@ export const batchedStorageUpdate = async (data: UserProgress): Promise<void> =>
     await storeData(STORAGE_KEYS.USER_DATA, data);
     
     // Also update widget if on iOS
-    if (Platform.OS === 'ios') {
-      await updateWidgetStreakData(
-        data.streak, 
-        data.lastCheckIn || Date.now(), 
-        data.lastCheckIn || Date.now()
-      );
+    if (Platform.OS === 'ios' && NativeModules.WidgetUpdaterModule) {
+      try {
+        // Use the native module directly instead of the deleted streakService
+        await NativeModules.WidgetUpdaterModule.updateWidget(
+          data.streak, 
+          data.startDate || Date.now(), 
+          data.lastCheckIn || Date.now()
+        );
+      } catch (widgetError) {
+        console.log('Widget update failed:', widgetError);
+      }
     }
   } catch (error) {
     console.error('Failed to update storage:', error);
@@ -208,12 +212,29 @@ export const userProgressReducer = (
         streak: 0,
         level: 1,
         points: 0,
+        totalPoints: 0,
         lastCheckIn: 0,
         dailyCheckedIn: false,
         badgesEarned: [],
         challengesCompleted: [],
         challengesActive: [],
         achievements: [],
+        journalEntries: [],
+        activeChallenges: [],
+        availableChallenges: [],
+        completedChallenges: [],
+        companion: null,
+        startDate: Date.now(),
+        activityStats: {
+          totalMeditationMinutes: 0,
+          totalWorkoutMinutes: 0,
+          totalHabitReplacements: 0,
+          meditationStreak: 0,
+          workoutStreak: 0,
+          activityLogs: [],
+          totalReadingMinutes: 0,
+          readingStreak: 0
+        }
       };
       
       // Schedule storage update

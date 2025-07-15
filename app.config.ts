@@ -21,7 +21,12 @@ export default {
       "**/*"
     ],
     ios: {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "fetch"
+        ]
+      }
     },
     android: {
       "adaptiveIcon": {
