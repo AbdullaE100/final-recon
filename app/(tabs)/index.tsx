@@ -14,6 +14,8 @@ import {
   Alert,
   ActivityIndicator,
   Button,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
@@ -37,7 +39,7 @@ import { useStreak } from '@/context/StreakContext';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import BrainMetrics from '@/components/home/BrainMetrics';
 import RecoveryCalendar from '@/components/home/RecoveryCalendar';
-import { setFailsafeStreakValue , loadStreakData } from '@/utils/streakService';
+import { resetAllStreakData, resetStreakToOne } from '@/utils/resetStreakData';
 import { storeData, STORAGE_KEYS, getData } from '@/utils/storage';
 import useAchievementNotification from '@/hooks/useAchievementNotification';
 import LottieView from 'lottie-react-native';
@@ -108,7 +110,6 @@ const DatePickerModal = ({
             onChange={(_, selectedDate) => {
               if (selectedDate) setDate(selectedDate);
             }}
-            maximumDate={new Date()}
             style={{ height: 150 }}
             textColor={colors.text}
           />
@@ -142,7 +143,7 @@ const DatePickerModal = ({
 const StreakCard = () => {
   const { colors } = useTheme();
   const gamification = useGamification();
-  const { setStreakStartDate, recordRelapse } = useStreak();
+  const { setStreakStartDate, recordRelapse, forceRefresh } = useStreak();
   const [isDatePickerVisible, setDatePickerVisible] = useState(false);
   const [isRelapseModalVisible, setRelapseModalVisible] = useState(false);
   const [localStreak, setLocalStreak] = useState(gamification?.streak ?? 0);
@@ -153,12 +154,114 @@ const StreakCard = () => {
   const streakValueRef = React.useRef(gamification?.streak ?? 0);
   const lastUpdateTimestamp = React.useRef(Date.now());
   const [forceRender, setForceRender] = useState(0);
+  const prevStreakRef = React.useRef(gamification?.streak ?? 0);
+  const appState = React.useRef(AppState.currentState);
+  const lastRefreshDate = React.useRef(new Date());
 
   // Safely access gamification properties
   const streak = gamification?.streak ?? 0;
   const setStreak = gamification?.setStreak ?? (() => Promise.resolve());
   const companion = gamification?.companion;
   const achievements = gamification?.achievements ?? [];
+  
+  // Add direct date check to ensure streak is always up to date
+  useEffect(() => {
+    // This effect runs on mount and ensures the streak is correct based on the current system date
+    const checkCurrentDate = async () => {
+      try {
+        console.log('StreakCard: Performing direct date check');
+        
+        // Get the current system date
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Start of day
+        const todayStr = today.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
+        
+        console.log(`StreakCard: Current system date: ${todayStr}`);
+        
+        // Force a refresh to ensure we're using the latest system date
+        await forceRefresh();
+        
+        // Get the current streak from context - force a re-render by getting it directly
+        const currentStreak = gamification?.streak ?? 0;
+        
+        console.log(`StreakCard: Current streak from context: ${currentStreak}, local streak: ${localStreak}`);
+        
+        // Always update the local streak to match the context
+        if (currentStreak !== localStreak) {
+          console.log(`StreakCard: Direct date check updating streak from ${localStreak} to ${currentStreak}`);
+          setLocalStreak(currentStreak);
+          streakValueRef.current = currentStreak;
+          
+          // Trigger animation when streak changes
+          animation.value = 0;
+          animation.value = withSequence(
+            withTiming(1.15, { duration: 400, easing: Easing.out(Easing.cubic) }),
+            withTiming(1, { duration: 300, easing: Easing.inOut(Easing.cubic) })
+          );
+        }
+        
+        // Force a re-render regardless of whether the streak changed
+        setForceRender(prev => prev + 1);
+      } catch (error) {
+        console.error('StreakCard: Error in checkCurrentDate:', error);
+      }
+    };
+    
+    // Run the check immediately
+    checkCurrentDate();
+    
+    // Also set up an interval to check periodically - critical for manual date changes
+    const checkInterval = setInterval(checkCurrentDate, 2000);
+    
+    // Clean up interval on unmount
+    return () => clearInterval(checkInterval);
+  }, [forceRefresh, gamification?.streak, localStreak, animation, setForceRender]);
+  
+  // Add AppState listener to refresh streak when app becomes active
+  useEffect(() => {
+    const handleAppStateChange = async (nextAppState: AppStateStatus) => {
+      // Only run this when the app comes to the foreground
+      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+        console.log('StreakCard: App has come to the foreground, refreshing streak');
+        
+        // Always force a refresh when app comes to foreground
+        await forceRefresh();
+        
+        // Get the current streak from context
+        const currentStreak = gamification?.streak ?? 0;
+        
+        // Update local streak if needed
+        if (currentStreak !== localStreak) {
+          console.log(`StreakCard: AppState change updating streak from ${localStreak} to ${currentStreak}`);
+          setLocalStreak(currentStreak);
+          streakValueRef.current = currentStreak;
+          
+          // Trigger animation when streak changes
+          animation.value = 0;
+          animation.value = withSequence(
+            withTiming(1.15, { duration: 400, easing: Easing.out(Easing.cubic) }),
+            withTiming(1, { duration: 300, easing: Easing.inOut(Easing.cubic) })
+          );
+        }
+        
+        // Update last refresh date
+        lastRefreshDate.current = new Date();
+      }
+      
+      appState.current = nextAppState;
+    };
+    
+    // Subscribe to app state changes
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    
+    // Run an immediate check when this effect is first setup
+    handleAppStateChange('active');
+    
+    // Cleanup subscription
+    return () => {
+      subscription.remove();
+    };
+  }, [forceRefresh, gamification?.streak, localStreak, animation]);
   
   // Get companion stage - directly calculate based on badge count for most reliable results
   const unlockedBadgesCount = achievements.filter(badge => badge.unlocked).length;
@@ -202,43 +305,53 @@ const StreakCard = () => {
   
   // Keep local state in sync with context
   useEffect(() => {
-    // Prevent streaks of 0 from overriding valid streak values 
-    if (streak === 0 && streakValueRef.current > 0 && !intentionalReset) {
-      return;
-    }
+    const newStreak = gamification?.streak ?? 0;
     
-    // Only update if not in the middle of a manual update
-    if (!isUpdating) {
-      // Update state and ref if streak is valid
-      if (streak > 0 || intentionalReset) {
-        setLocalStreak(streak);
-        streakValueRef.current = streak;
-        lastUpdateTimestamp.current = Date.now();
-        
-        // Reset intentional reset flag after it's been applied
-        if (intentionalReset) {
-          setIntentionalReset(false);
-        }
-        
-        // Trigger animation when streak changes
+    console.log(`StreakCard: Context streak changed to ${newStreak}, local streak is ${localStreak}`);
+    
+    // Always update local state to reflect the gamification context's streak
+    if (newStreak !== localStreak) {
+      console.log(`StreakCard: Updating local streak from ${localStreak} to ${newStreak}`);
+      setLocalStreak(newStreak);
+      streakValueRef.current = newStreak;
+      lastUpdateTimestamp.current = Date.now();
+      
+      // Trigger animation when streak changes to a non-zero value or from a non-zero to zero
+      if (newStreak > 0 || prevStreakRef.current > 0) {
         animation.value = 0;
         animation.value = withSequence(
           withTiming(1.15, { duration: 400, easing: Easing.out(Easing.cubic) }),
           withTiming(1, { duration: 300, easing: Easing.inOut(Easing.cubic) })
         );
-      } else if (streakValueRef.current === 0) {
-        // Only update to 0 if the ref is also 0 (legitimate reset)
-        setLocalStreak(0);
       }
+      prevStreakRef.current = newStreak; // Update the ref for next comparison
+      
+      // Force a re-render to ensure the UI updates
+      setForceRender(prev => prev + 1);
     }
-  }, [streak, isUpdating, intentionalReset, animation]);
+    
+    // Reset intentional reset flag if it was set (it's handled by recordRelapse now)
+    if (intentionalReset) {
+      setIntentionalReset(false);
+    }
+    
+    // Force a refresh every time this effect runs to ensure we have the latest streak
+    const refreshTimer = setTimeout(async () => {
+      await forceRefresh();
+    }, 1000);
+    
+    return () => clearTimeout(refreshTimer);
+    
+  }, [gamification?.streak, localStreak, isUpdating, intentionalReset, animation, forceRefresh, forceRender]);
   
   // Safety recovery mechanism - if streak gets reset unintentionally, restore from ref
   useEffect(() => {
-    if (localStreak === 0 && streakValueRef.current > 0 && !intentionalReset) {
-      // Schedule recovery to avoid immediate state conflicts
+    // This mechanism should only trigger if the local streak becomes 0 unexpectedly
+    // and the context streak is still positive, and it's not an intentional reset
+    if (localStreak === 0 && (gamification?.streak ?? 0) > 0 && !intentionalReset) {
+      console.log('StreakCard: Triggering recovery, localStreak was 0 but context is positive');
       const recoveryTimer = setTimeout(() => {
-        setLocalStreak(streakValueRef.current);
+        setLocalStreak(gamification?.streak ?? 0);
         
         // Force a re-render after recovery
         setForceRender(prev => prev + 1);
@@ -246,7 +359,7 @@ const StreakCard = () => {
       
       return () => clearTimeout(recoveryTimer);
     }
-  }, [localStreak, intentionalReset]);
+  }, [localStreak, gamification?.streak, intentionalReset]);
   
   // Calculate the start date based on streak
   const getStreakStartDate = () => {
@@ -381,56 +494,143 @@ const StreakCard = () => {
   
   // Handle relapse confirmation
   const handleRelapseConfirm = async () => {
+    console.log('handleRelapseConfirm: Starting...');
+    setRelapseModalVisible(false);
+    
     try {
-      // Immediately close the modal to prevent UI lock
-      setRelapseModalVisible(false);
+      // Show streak counter animation going to 0
+      animation.value = withSequence(
+        withTiming(0.85, { duration: 300, easing: Easing.in(Easing.cubic) }),
+        withTiming(1, {
+          duration: 500,
+          easing: Easing.out(Easing.cubic),
+        })
+      );
       
-      // Haptic feedback
-      if (Platform.OS !== 'web') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      // First record the relapse for the calendar history
+      const relapseDate = new Date();
+      console.log('handleRelapseConfirm: Recording relapse for date', relapseDate);
+      try {
+        // Direct call to recordRelapse
+        await recordRelapse(relapseDate);
+        console.log('handleRelapseConfirm: Relapse recorded successfully');
+        
+        // Force refresh to ensure all data is updated
+        await forceRefresh();
+        console.log('handleRelapseConfirm: Force refreshed after relapse');
+      } catch (relapseError) {
+        console.error('handleRelapseConfirm: Error recording relapse:', relapseError);
+        // Continue even if recordRelapse fails - we'll still try to update the UI
       }
       
-      // Get the current date to use as relapse date
-      const relapseDate = new Date();
+      // Update gamification context streak
+      if (gamification?.setStreak) {
+        try {
+          await gamification.setStreak(0);
+          console.log('handleRelapseConfirm: Gamification streak reset to 0');
+        } catch (gamificationError) {
+          console.error('handleRelapseConfirm: Error updating gamification streak:', gamificationError);
+          // Continue even if gamification update fails
+        }
+      }
       
-      // Call the context function to record the relapse
-      await recordRelapse(relapseDate);
+      // Show achievement notification
+      try {
+        showAchievement({
+          title: "Streak Reset",
+          description: "Your streak has been reset. Today is a new beginning.",
+          buttonText: "Continue"
+        });
+      } catch (notificationError) {
+        console.error('handleRelapseConfirm: Error showing achievement notification:', notificationError);
+        // Continue even if notification fails
+      }
       
-      // Show feedback to the user
-      showAchievement({
-        title: "Streak Reset",
-        description: "Your streak has been reset. Today is a new beginning.",
-        buttonText: "Continue"
-      });
+      // Reset the streak to 1 day after a delay
+      setTimeout(async () => {
+        try {
+          console.log('handleRelapseConfirm: Now resetting streak to 1 day...');
+          
+          // Import the resetStreakToOne function directly
+          const { resetStreakToOne } = require('@/utils/resetStreakData');
+          
+          try {
+            await resetStreakToOne();
+            console.log('handleRelapseConfirm: Streak successfully reset to 1');
+            
+            // REMOVING THIS SECOND forceRefresh THAT CAUSES INFINITE LOOP
+            // await forceRefresh();
+            // console.log('handleRelapseConfirm: Force refreshed after reset to 1');
+            
+            // Update local state to 1 with a slight delay
+            setTimeout(() => {
+              setLocalStreak(1);
+              streakValueRef.current = 1;
+              
+              // Trigger animation to show 1
+              animation.value = withSequence(
+                withTiming(1.15, { duration: 400, easing: Easing.out(Easing.cubic) }),
+                withTiming(1, { duration: 300, easing: Easing.inOut(Easing.cubic) })
+              );
+              
+              // Force a re-render
+              setForceRender(prev => prev + 1);
+            }, 500);
+          } catch (error) {
+            console.error('handleRelapseConfirm: Error in resetStreakToOne:', error);
+            
+            // Fallback method if resetStreakToOne fails
+            try {
+              await forceRefresh();
+              console.log('handleRelapseConfirm: Forced refresh as fallback');
+              
+              // Set local state to 1 as fallback
+              setLocalStreak(1);
+              streakValueRef.current = 1;
+              setForceRender(prev => prev + 1);
+            } catch (refreshError) {
+              console.error('handleRelapseConfirm: Error in forceRefresh fallback:', refreshError);
+            }
+          }
+        } catch (error) {
+          console.error('handleRelapseConfirm: Error in setTimeout callback:', error);
+        }
+      }, 3000); // 3 second delay to ensure 0 is visible
 
     } catch (error) {
-      console.error('Error in handleRelapseConfirm:', error);
-      // Ensure UI is not stuck if there's an error
+      console.error('handleRelapseConfirm: Error recording relapse:', error);
       setRelapseModalVisible(false);
-      showAchievement({
-        title: 'Error',
-        description: 'There was a problem recording your relapse. Please try again.',
-        buttonText: 'OK'
-      });
+      try {
+        showAchievement({
+          title: 'Error',
+          description: 'There was a problem recording your relapse. Please try again.',
+          buttonText: 'OK'
+        });
+      } catch (notificationError) {
+        console.error('handleRelapseConfirm: Error showing error notification:', notificationError);
+        // If even the notification fails, try a basic alert as last resort
+        Alert.alert('Error', 'There was a problem recording your relapse. Please try again.');
+      }
     }
   };
   
   // Get motivation message based on streak length
-  const getMotivationMessage = () => {
-    if (localStreak === 0) return "Let's start your journey today!";
-    if (localStreak === 1) return "First day - you've got this!";
-    if (localStreak < 7) return "Building momentum - keep going!";
-    if (localStreak < 30) return "Great progress - you're developing new habits!";
-    if (localStreak < 90) return "Impressive discipline - stay strong!";
+  const getMotivationMessage = (streak: number) => {
+    if (streak === 0) return "Let's start your journey today!";
+    if (streak === 1) return "First day - you've got this!";
+    if (streak < 7) return "Building momentum - keep going!";
+    if (streak < 30) return "Great progress - you're developing new habits!";
+    if (streak < 90) return "Impressive discipline - stay strong!";
     return "Extraordinary achievement - truly inspiring!";
   };
   
   // Get streak color based on length
   const getStreakColor = () => {
-    if (localStreak === 0) return colors.text;
-    if (localStreak < 7) return '#3498db';
-    if (localStreak < 30) return '#2ecc71';
-    if (localStreak < 90) return '#f39c12';
+    const currentStreak = gamification?.streak ?? 0;
+    if (currentStreak === 0) return colors.text;
+    if (currentStreak < 7) return '#3498db';
+    if (currentStreak < 30) return '#2ecc71';
+    if (currentStreak < 90) return '#f39c12';
     return '#e74c3c';
   };
   
@@ -442,37 +642,56 @@ const StreakCard = () => {
       animationType="fade"
       onRequestClose={() => setRelapseModalVisible(false)}
     >
-      <BlurView intensity={60} style={styles.modalOverlay}>
-        <View style={[styles.relapseModalContainer, { backgroundColor: colors.card }]}>
-          <View style={styles.relapseModalIcon}>
-            <AlertTriangle size={40} color="#f39c12" />
-          </View>
-          
-          <Text style={[styles.relapseModalTitle, { color: colors.text }]}>
+      <BlurView intensity={30} tint="dark" style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <View style={{
+          width: 320,
+          borderRadius: 20,
+          padding: 28,
+          alignItems: 'center',
+          backgroundColor: 'rgba(31, 41, 55, 0.95)',
+          borderWidth: 1,
+          borderColor: 'rgba(255,255,255,0.08)',
+          shadowColor: '#000',
+          shadowOpacity: 0.18,
+          shadowRadius: 16,
+          elevation: 8,
+        }}>
+          <LinearGradient colors={['#23272F', '#181A20']} style={StyleSheet.absoluteFillObject} />
+          <AlertTriangle size={40} color="#FBBF24" style={{ marginBottom: 18 }} />
+          <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#fff', marginBottom: 10, textAlign: 'center' }}>
             Record Relapse
           </Text>
-          
-          <Text style={[styles.relapseModalMessage, { color: colors.secondaryText }]}>
+          <Text style={{ fontSize: 15, color: '#D1D5DB', textAlign: 'center', marginBottom: 28, marginTop: 2 }}>
             This will reset your current streak to 0 days. Remember, this is part of the journey. Each setback is an opportunity to learn and grow stronger.
           </Text>
-          
-          <View style={styles.relapseModalActions}>
+          <View style={{ flexDirection: 'row', width: '100%', justifyContent: 'space-between', marginTop: 8 }}>
             <TouchableOpacity
-              style={styles.relapseModalCancelButton}
+              style={{
+                flex: 1,
+                backgroundColor: '#23272F',
+                borderRadius: 10,
+                paddingVertical: 12,
+                marginRight: 8,
+                alignItems: 'center',
+                borderWidth: 1,
+                borderColor: 'rgba(255,255,255,0.12)',
+              }}
               onPress={() => setRelapseModalVisible(false)}
             >
-              <Text style={{ color: colors.secondaryText, fontWeight: '500' }}>
-                Cancel
-              </Text>
+              <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>Cancel</Text>
             </TouchableOpacity>
-            
             <TouchableOpacity
-              style={styles.relapseModalConfirmButton}
+              style={{
+                flex: 1,
+                backgroundColor: '#FBBF24',
+                borderRadius: 10,
+                paddingVertical: 12,
+                marginLeft: 8,
+                alignItems: 'center',
+              }}
               onPress={handleRelapseConfirm}
             >
-              <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>
-                Confirm
-              </Text>
+              <Text style={{ color: '#23272F', fontWeight: '700', fontSize: 16 }}>Confirm</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -497,7 +716,12 @@ const StreakCard = () => {
         {/* Top section */}
         <View style={styles.streakCardTop}>
           <View style={styles.streakCardLabel}>
-            <Flame size={20} color={getStreakColor()} style={styles.flameIcon} />
+            <Flame 
+              size={20} 
+              color={getStreakColor()} 
+              style={styles.flameIcon} 
+              key={`flame-${gamification.streak}-${forceRender}`}
+            />
             <Text style={styles.streakCardLabelText}>
               CURRENT STREAK
             </Text>
@@ -529,16 +753,17 @@ const StreakCard = () => {
         {/* Middle section - clean streak display */}
         <View style={styles.streakCardMiddle}>
             <Animated.Text 
+              key={`streak-${forceRender}-${gamification.streak}`}
               style={[
                 styles.streakCardNumber, 
               { color: getStreakColor() }, 
                 streakNumberStyle
               ]}
             >
-              {localStreak}
+              {gamification.streak}
             </Animated.Text>
           <Text style={styles.streakCardUnit}>
-              {localStreak === 1 ? 'DAY' : 'DAYS'}
+              {gamification.streak === 1 ? 'DAY' : 'DAYS'}
             </Text>
         </View>
         
@@ -552,10 +777,10 @@ const StreakCard = () => {
           </View>
           
           <Text style={styles.streakCardMotivation}>
-            {getMotivationMessage()}
+            {getMotivationMessage(gamification.streak)}
           </Text>
           
-          {localStreak > 0 && (
+          {gamification.streak > 0 && (
             <TouchableOpacity
               style={styles.relapseButton}
               onPress={() => setRelapseModalVisible(true)}
@@ -675,7 +900,7 @@ export default function HomeScreen() {
   const [username, setUsername] = useState('');
   const [isUsernameModalVisible, setUsernameModalVisible] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
-  const { setStreakStartDate, recordRelapse } = useStreak();
+  const { setStreakStartDate, recordRelapse, forceRefresh } = useStreak();
 
   useEffect(() => {
     const loadUserData = async () => {
@@ -685,7 +910,6 @@ export default function HomeScreen() {
         if (userPreferences && (userPreferences as any).username) {
           setUsername((userPreferences as any).username);
         }
-        await loadStreakData();
       } catch (error) {
         console.error('Error loading user data:', error);
       }
@@ -869,10 +1093,10 @@ const styles = StyleSheet.create({
   
   // Modal styles
   modalOverlay: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    padding: 20,
   },
   datePickerContainer: {
     width: width * 0.85,
@@ -897,47 +1121,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     width: '48%',
     alignItems: 'center',
-  },
-  relapseModalContainer: {
-    width: width * 0.85,
-    borderRadius: 20,
-    padding: 24,
-  },
-  relapseModalIcon: {
-    alignSelf: 'center',
-    marginBottom: 16,
-  },
-  relapseModalTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  relapseModalMessage: {
-    fontSize: 15,
-    textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 22,
-  },
-  relapseModalActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  relapseModalCancelButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    width: '48%',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  relapseModalConfirmButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    width: '48%',
-    alignItems: 'center',
-    backgroundColor: '#f39c12',
   },
   quoteCardWrapper: {
     borderRadius: 20,
