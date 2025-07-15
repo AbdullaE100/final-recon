@@ -21,7 +21,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { resetStreakToOne } from '@/utils/resetStreakData';
 import { useCurrentUserId } from '@/hooks/useCurrentUserId';
-import { isProcessing } from '@/utils/processingLock';
 
 // Initial challenges
 const initialChallenges: Challenge[] = [
@@ -1192,10 +1191,6 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
 
   useEffect(() => {
     const loadData = async () => {
-      if (isProcessing()) {
-        console.log('[GamificationContext] Skipping loadData: Processing lock is active.');
-        return;
-      }
       console.log('[GamificationContext] Starting to load data...');
       try {
         console.log('GamificationContext: Loading data...');
@@ -1262,10 +1257,6 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   // Add AppState listener to check for date changes when app resumes
   useEffect(() => {
     const handleAppStateChange = async (nextAppState: AppStateStatus) => {
-      if (isProcessing()) {
-        console.log('[GamificationContext] Skipping AppState change handler: Processing lock is active.');
-        return;
-      }
       // Only run this when the app comes to the foreground
       if (
         appState.current.match(/inactive|background/) &&
@@ -1772,10 +1763,6 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
 
   // EMERGENCY FIX: Add a function to set streak for new users
   const setStreak = async (days: number, startDate?: number, options?: { skipPersistence?: boolean }) => {
-    if (isProcessing()) {
-      console.log('[GamificationContext] Skipping setStreak: Processing lock is active.');
-      return;
-    }
     try {
       console.log(`[GamificationContext] setStreak called with: days=${days}, startDate=${startDate || 'not provided'}`);
       

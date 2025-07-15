@@ -1,14 +1,14 @@
 let isLocked = false;
 let lockTimeout: ReturnType<typeof setTimeout> | null = null;
 
-export const acquireLock = (duration: number = 5000): boolean => {
+export const acquireLock = (duration: number = 8000): boolean => {
   if (isLocked) {
-    console.warn('[ProcessingLock] Lock already acquired. Skipping new lock.');
+    console.warn('[ProcessingLock] Lock already acquired. Aborting new request.');
     return false;
   }
 
   isLocked = true;
-  console.log(`[ProcessingLock] Lock acquired for ${duration}ms.`);
+  console.log(`[ProcessingLock] Lock acquired for up to ${duration}ms.`);
 
   if (lockTimeout) {
     clearTimeout(lockTimeout);
@@ -17,7 +17,7 @@ export const acquireLock = (duration: number = 5000): boolean => {
   lockTimeout = setTimeout(() => {
     isLocked = false;
     lockTimeout = null;
-    console.log('[ProcessingLock] Lock released automatically.');
+    console.log('[ProcessingLock] Lock released automatically due to timeout.');
   }, duration);
 
   return true;
@@ -28,8 +28,10 @@ export const releaseLock = () => {
     clearTimeout(lockTimeout);
     lockTimeout = null;
   }
-  isLocked = false;
-  console.log('[ProcessingLock] Lock released manually.');
+  if (isLocked) {
+    isLocked = false;
+    console.log('[ProcessingLock] Lock released manually.');
+  }
 };
 
 export const isProcessing = (): boolean => {
