@@ -1056,7 +1056,6 @@ interface GamificationContextType {
   resetData: () => void;
   exportData: () => void;
   importData: () => void;
-  setStreak: (days: number, startDate?: number) => void;
   
   // Helpers
   getLevelProgress: () => number;
@@ -1092,6 +1091,12 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   const userId = useCurrentUserId();
   // Track app state for background/foreground transitions
   const appState = useRef(AppState.currentState);
+
+  // Ref: Hold latest userProgress for effects without causing re-renders
+  const userProgressRef = useRef(userProgress);
+  useEffect(() => {
+    userProgressRef.current = userProgress;
+  }, [userProgress]);
 
   // Force refresh all data from storage
   const forceRefresh = async () => {
@@ -1169,9 +1174,19 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   const updateProgress = (updates: Partial<UserProgress>, options?: { skipSave?: boolean }) => {
     setUserProgress(prev => {
       const newState = { ...prev, ...updates };
+      
       if (!options?.skipSave) {
+        // Save all user progress
         storeData(STORAGE_KEYS.USER_DATA, newState);
+        
+        // If achievements are being updated, also save them directly
+        if (updates.achievements) {
+          saveAchievements(updates.achievements).catch(e => 
+            console.error('GamificationContext: Error saving achievements in updateProgress:', e)
+          );
+        }
       }
+      
       return newState;
     });
   };
@@ -1191,7 +1206,6 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
 
   useEffect(() => {
     const loadData = async () => {
-      console.log('[GamificationContext] Starting to load data...');
       try {
         console.log('GamificationContext: Loading data...');
         setIsLoading(true);
@@ -1213,10 +1227,24 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
         const savedCompletedChallenges = await getData(STORAGE_KEYS.CHALLENGES, []);
         
         // Load achievements
-        const savedAchievements = await getData(STORAGE_KEYS.ACHIEVEMENTS, []);
+        let savedAchievements = await getData(STORAGE_KEYS.ACHIEVEMENTS, []);
+        
+        // Initialize achievements if they don't exist
+        if (!savedAchievements || savedAchievements.length === 0) {
+          console.log('GamificationContext: No saved achievements found. Initializing default achievements.');
+          savedAchievements = initialAchievements;
+          // Save the initialized achievements
+          await storeData(STORAGE_KEYS.ACHIEVEMENTS, initialAchievements);
+        } else {
+          console.log(`GamificationContext: Loaded ${savedAchievements.length} achievements from storage`);
+        }
         
         // Load companion data
         const savedCompanion = await getData(STORAGE_KEYS.COMPANION_DATA, null);
+        console.log("GamificationContext: Loaded companion data:", 
+          savedCompanion ? 
+          `ID: ${savedCompanion.id}, Type: ${savedCompanion.type}, Name: ${savedCompanion.name}` : 
+          'No companion data found');
         
         // Load activity stats
         const savedActivityStats = await getData(STORAGE_KEYS.ACTIVITY_STATS, defaultActivityStats);
@@ -1236,15 +1264,20 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
         const isOnboardingCompleted = await getData(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
         const isNewUser = isOnboardingCompleted === false;
         
-        // For new users, ensure streak is set to 0
-        if (isNewUser) {
-          console.log('GamificationContext: New user detected - setting streak to 0');
-          setStreak(0);
-        }
+        // Streak initialization for new users is now handled in StreakContext
         
         setDataLoaded(true);
         setIsLoading(false);
         console.log('GamificationContext: Data loaded successfully');
+        
+        // Check for achievement unlocks after data is loaded
+        if (!isNewUser) {
+          setTimeout(() => {
+            checkAllAchievementTypes().catch(e => 
+              console.error('Error checking achievements after load:', e)
+            );
+          }, 1000);
+        }
       } catch (error) {
         console.error('GamificationContext: Error loading data:', error);
         setIsLoading(false);
@@ -1263,21 +1296,19 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
         nextAppState === 'active'
       ) {
         console.log('App has come to the foreground!');
-        
         // Check if we need to update the streak
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
-        const lastCheck = userProgress.lastCheckIn ? new Date(userProgress.lastCheckIn) : null;
-        
+        const lastCheck = userProgressRef.current.lastCheckIn ? new Date(userProgressRef.current.lastCheckIn) : null;
         if (!lastCheck || !isSameDay(lastCheck, today)) {
           console.log('GamificationContext: Day changed since last check, updating data...');
-          
-          // Load data again
+          // Only update if streak is not already correct
           try {
             setIsLoading(true);
             const savedData = await getData(STORAGE_KEYS.USER_DATA, defaultUserProgress);
-            setUserProgress(savedData);
+            if (savedData.streak !== userProgressRef.current.streak) {
+              setUserProgress(savedData);
+            }
             setIsLoading(false);
           } catch (error) {
             console.error('GamificationContext: Error refreshing data:', error);
@@ -1285,21 +1316,17 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
           }
         }
       }
-      
       appState.current = nextAppState;
     };
-
     // Subscribe to app state changes
     const appStateSubscription = AppState.addEventListener('change', handleAppStateChange);
-
     // Run an immediate check when this effect is first setup
     handleAppStateChange('active');
-
     // Cleanup subscription
     return () => {
       appStateSubscription.remove();
     };
-  }, [userProgress.streak]); // Include streak in dependencies to avoid checking too frequently with same value
+  }, []); // Remove userProgress.streak from dependencies
   
   const addJournalEntry = (
     content: string, 
@@ -1361,6 +1388,8 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       userProgress.completedChallenges.find(c => c.id === id);
     if (!challenge) return;
 
+    console.log(`GamificationContext: Completing challenge: ${challenge.title} (${challenge.id})`);
+
     // Mark challenge as completed (existing logic)
     const newPoints = points + challenge.points;
     const newTotalPoints = totalPoints + challenge.points;
@@ -1368,6 +1397,7 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     const newActiveChallenges = activeChallenges.filter(c => c.id !== id);
     const newCompletedChallenges = [...(completedChallenges || []), { ...challenge, completedAt: new Date().toISOString(), status: 'completed' }];
 
+    // Update state
     updateProgress({
       points: newPoints,
       totalPoints: newTotalPoints,
@@ -1375,23 +1405,97 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       completedChallenges: newCompletedChallenges,
     });
     
-    await checkChallengeAchievements(newCompletedChallenges);
-    await checkAndEvolveCompanion();
-
-    // Unlock badge if this challenge has a badge reward
+    // Ensure badges are unlocked when a challenge is completed
+    console.log(`Challenge completed: ${challenge.title} (${challenge.id})`);
+    
+    // Check for challenge-specific badge rewards
     if (challenge.rewards && challenge.rewards.badgeId) {
       const badgeId = challenge.rewards.badgeId;
-      const currentAchievements = [...userProgress.achievements];
-      const badge = currentAchievements.find(a => a.id === badgeId);
-      if (badge && !badge.unlocked) {
-        badge.unlocked = true;
-        updateProgress({ achievements: currentAchievements });
-        showAchievement?.({
-          title: badge.name || 'Challenge Badge Unlocked',
-          description: badge.description || 'Unlocked a badge by completing a challenge!',
-          buttonText: 'Awesome!'
-        });
+      console.log(`Challenge has badge reward: ${badgeId}`);
+      unlockBadgeById(badgeId, 'Challenge Complete!');
+    }
+    
+    // Check for multi-challenge achievement badges
+    await checkChallengeCountAchievements(newCompletedChallenges);
+    
+    // Also check for other achievement types
+    await checkChallengeAchievements(newCompletedChallenges);
+    await checkAllAchievementTypes();
+    await checkAndEvolveCompanion();
+  };
+
+  // Check achievements based on challenge counts
+  const checkChallengeCountAchievements = async (completed?: Challenge[]): Promise<boolean> => {
+    try {
+      const completedChallenges = completed || userProgress.completedChallenges;
+      const challengeCount = completedChallenges.length;
+      
+      console.log(`GamificationContext: Checking challenge count achievements. Completed challenges: ${challengeCount}`);
+      
+      if (!userProgress.achievements || userProgress.achievements.length === 0) {
+        console.log('GamificationContext: No achievements available to check for challenge badges');
+        return false;
       }
+      
+      let updated = false;
+      const currentAchievements = [...userProgress.achievements];
+      
+      // Define the challenge count thresholds
+      const challengeThresholds = [
+        { count: 1, badgeId: 'badge-challenge-first' },
+        { count: 5, badgeId: 'badge-challenge-1' },
+        { count: 10, badgeId: 'badge-challenge-expert' },
+      ];
+      
+      // Check each threshold
+      for (const threshold of challengeThresholds) {
+        if (challengeCount >= threshold.count) {
+          const badge = currentAchievements.find(b => b.id === threshold.badgeId);
+          
+          if (badge && !badge.unlocked) {
+            badge.unlocked = true;
+            updated = true;
+            console.log(`GamificationContext: Unlocked ${badge.name} badge (${threshold.count} challenges completed)`);
+            
+            // Show achievement notification
+            showAchievement?.({
+              title: badge.name,
+              description: badge.description,
+              buttonText: 'Great job!'
+            });
+          }
+        }
+      }
+      
+      // Check if user has challenges from different categories
+      const challengeCategories = new Set(completedChallenges.map(c => c.type));
+      if (challengeCategories.size >= 3) {
+        const varietyBadge = currentAchievements.find(b => b.id === 'badge-challenge-variety');
+        if (varietyBadge && !varietyBadge.unlocked) {
+          varietyBadge.unlocked = true;
+          updated = true;
+          console.log(`GamificationContext: Unlocked ${varietyBadge.name} badge (challenges from ${challengeCategories.size} categories)`);
+          
+          showAchievement?.({
+            title: varietyBadge.name,
+            description: varietyBadge.description,
+            buttonText: 'Versatile!'
+          });
+        }
+      }
+      
+      // Save if any badges were unlocked
+      if (updated) {
+        updateProgress({ achievements: currentAchievements });
+        console.log('GamificationContext: Updated achievements after checking challenge count badges');
+      } else {
+        console.log('GamificationContext: No new challenge count badges unlocked');
+      }
+      
+      return updated;
+    } catch (error) {
+      console.error('GamificationContext: Error checking challenge count achievements:', error);
+      return false;
     }
   };
 
@@ -1587,145 +1691,87 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   const forceResetAllChallenges = async (): Promise<boolean> => {
     return false;
   };
-  const forceCheckStreakAchievements = async (): Promise<boolean> => {
-    console.log('GamificationContext: forceCheckStreakAchievements called');
-    try {
-      // Get current achievements
-      const currentAchievements = [...userProgress.achievements];
-      let updated = false;
 
-      // Check for streak badges - new improved approach
-      console.log(`Current streak: ${streak} days`);
+  // Check and unlock streak badges based on current streak
+  const checkStreakAchievements = async (): Promise<boolean> => {
+    try {
+      console.log(`GamificationContext: Checking streak achievements. Current streak: ${userProgress.streak}`);
       
-      // Unlock all streak badges based on streak value
-      currentAchievements
-        .filter(badge => badge.category === 'streak')
-        .forEach(badge => {
-          // Try to extract the required days from the badge name or unlockCriteria
-          let requiredDays = 0;
+      if (!userProgress.achievements || userProgress.achievements.length === 0) {
+        console.log('GamificationContext: No achievements available to check for streak badges');
+        return false;
+      }
+      
+      let updated = false;
+      const currentAchievements = [...userProgress.achievements];
+      const currentStreak = userProgress.streak;
+      
+      // Define the streak thresholds and their corresponding badge IDs
+      const streakThresholds = [
+        { days: 1, badgeId: 'badge-streak-1day' },
+        { days: 3, badgeId: 'badge-streak-3days' },
+        { days: 5, badgeId: 'badge-streak-5days' },
+        { days: 7, badgeId: 'badge-streak-1' },
+        { days: 14, badgeId: 'badge-streak-2weeks' },
+        { days: 30, badgeId: 'badge-streak-2' },
+        { days: 45, badgeId: 'badge-streak-45days' },
+        { days: 60, badgeId: 'badge-streak-60days' },
+        { days: 75, badgeId: 'badge-streak-75days' },
+        { days: 90, badgeId: 'badge-streak-3' },
+        { days: 120, badgeId: 'badge-streak-120days' },
+        { days: 180, badgeId: 'badge-streak-6months' },
+        { days: 270, badgeId: 'badge-streak-9months' },
+        { days: 365, badgeId: 'badge-streak-1year' },
+      ];
+      
+      // Check each threshold and unlock the badge if streak is sufficient
+      for (const threshold of streakThresholds) {
+        if (currentStreak >= threshold.days) {
+          const badge = currentAchievements.find(b => b.id === threshold.badgeId);
           
-          // Try to parse from unlockCriteria first
-          const criteriaMatch = badge.unlockCriteria?.match(/(\d+)/);
-          if (criteriaMatch) {
-            requiredDays = parseInt(criteriaMatch[1], 10);
-          } 
-          
-          // If not found, try to parse from name
-          if (!requiredDays) {
-            const nameMatch = badge.name?.match(/(\d+)/);
-            if (nameMatch) {
-              requiredDays = parseInt(nameMatch[1], 10);
-            }
-          }
-          
-          // Some badges may have specific IDs we can check as a fallback
-          if (!requiredDays) {
-            if (badge.id === 'badge-streak-1' || badge.id === 'badge-streak-7days') {
-              requiredDays = 7;
-            } else if (badge.id === 'badge-streak-2' || badge.id === 'badge-streak-30days') {
-              requiredDays = 30;
-            } else if (badge.id === 'badge-streak-3' || badge.id === 'badge-streak-90days') {
-              requiredDays = 90;
-            } else if (badge.id === 'badge-streak-4' || badge.id === 'badge-streak-365days') {
-              requiredDays = 365;
-            }
-          }
-          
-          // If we found a required days value and the streak meets or exceeds it
-          if (requiredDays > 0 && streak >= requiredDays && !badge.unlocked) {
-            console.log(`Unlocking badge: ${badge.name} (${badge.id}) - Required: ${requiredDays} days, Current streak: ${streak} days`);
+          if (badge && !badge.unlocked) {
             badge.unlocked = true;
             updated = true;
+            console.log(`GamificationContext: Unlocked ${badge.name} badge (${threshold.days} day streak)`);
             
             // Show achievement notification
             showAchievement?.({
-              title: badge.name || `${requiredDays}-Day Streak`,
-              description: badge.description || `Maintained a ${requiredDays}-day streak`,
+              title: badge.name,
+              description: badge.description,
               buttonText: 'Awesome!'
             });
           }
-        });
-
-      // Check for journal badges - keep the existing code
-      const journalCount = journalEntries.length;
-      
-      if (journalCount >= 1) {
-        const firstJournalBadge = currentAchievements.find(badge => 
-          badge.id === 'badge-journal-first' || 
-          badge.id === 'badge-journal-1'
-        );
-        if (firstJournalBadge && !firstJournalBadge.unlocked) {
-          firstJournalBadge.unlocked = true;
-          updated = true;
-          console.log('GamificationContext: Unlocked first journal badge');
-          showAchievement?.({
-            title: firstJournalBadge.name || 'First Journal Entry',
-            description: firstJournalBadge.description || 'Created your first journal entry',
-            buttonText: 'Keep it up!'
-          });
         }
       }
       
-      if (journalCount >= 3) {
-        const threeJournalBadge = currentAchievements.find(badge => 
-          badge.id === 'badge-journal-3'
-        );
-        if (threeJournalBadge && !threeJournalBadge.unlocked) {
-          threeJournalBadge.unlocked = true;
-          updated = true;
-          console.log('GamificationContext: Unlocked 3 journal entries badge');
-          showAchievement?.({
-            title: threeJournalBadge.name || '3 Journal Entries',
-            description: threeJournalBadge.description || 'Created 3 journal entries',
-            buttonText: 'Well done!'
-          });
-        }
-      }
-      
-      if (journalCount >= 10) {
-        const tenJournalBadge = currentAchievements.find(badge => 
-          badge.id === 'badge-journal-2' ||
-          badge.id === 'badge-journal-10'
-        );
-        if (tenJournalBadge && !tenJournalBadge.unlocked) {
-          tenJournalBadge.unlocked = true;
-          updated = true;
-          console.log('GamificationContext: Unlocked 10 journal entries badge');
-          showAchievement?.({
-            title: tenJournalBadge.name || '10 Journal Entries',
-            description: tenJournalBadge.description || 'Created 10 journal entries',
-            buttonText: 'Keep journaling!'
-          });
-        }
-      }
-      
-      if (journalCount >= 20) {
-        const twentyJournalBadge = currentAchievements.find(badge => 
-          badge.id === 'badge-journal-master' ||
-          badge.id === 'badge-journal-20'
-        );
-        if (twentyJournalBadge && !twentyJournalBadge.unlocked) {
-          twentyJournalBadge.unlocked = true;
-          updated = true;
-          console.log('GamificationContext: Unlocked 20 journal entries badge');
-          showAchievement?.({
-            title: twentyJournalBadge.name || '20 Journal Entries',
-            description: twentyJournalBadge.description || 'Created 20 journal entries',
-            buttonText: 'Keep writing!'
-          });
-        }
-      }
-
-      // If any badges were updated, update the state
+      // Save if any badges were unlocked
       if (updated) {
         updateProgress({ achievements: currentAchievements });
+        console.log('GamificationContext: Updated achievements after checking streak badges');
+      } else {
+        console.log('GamificationContext: No new streak badges unlocked');
       }
-
+      
       return updated;
     } catch (error) {
-      console.error('GamificationContext: Error in forceCheckStreakAchievements:', error);
+      console.error('GamificationContext: Error checking streak achievements:', error);
       return false;
     }
+  };
+
+  const forceCheckStreakAchievements = async (): Promise<boolean> => {
+    console.log('GamificationContext: forceCheckStreakAchievements called');
+    
+    // First, make sure we have achievements to work with
+    if (!userProgress.achievements || userProgress.achievements.length === 0) {
+      console.log('No achievements found, creating placeholder badges');
+      await storeData(STORAGE_KEYS.ACHIEVEMENTS, initialAchievements);
+      updateProgress({ achievements: initialAchievements });
+      console.log('Initialized achievements');
+    }
+    
+    // Check for streak achievements 
+    return await checkStreakAchievements();
   };
 
   const fix30DayBadge = async (): Promise<boolean> => {
@@ -1885,7 +1931,37 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   const getPointsToNextLevel = (): number => {
     return 0;
   };
-  const setCompanion = (companion: Companion) => {};
+  const setCompanion = (companion: Companion) => {
+    try {
+      console.log(`GamificationContext: Setting companion - ${companion.name} (${companion.type})`);
+      
+      // Create a user companion from the base companion
+      const userCompanion: UserCompanion = {
+        ...companion,
+        lastInteraction: Date.now(),
+        lastCheckIn: Date.now(),
+        happinessLevel: 100,
+        isEvolutionReady: false,
+        bondLevel: 10,
+        feedingHistory: [],
+        unlockedSnacks: 1,
+        creationTime: Date.now(),
+        isNewUser: true
+      };
+      
+      // Save to storage
+      storeData(STORAGE_KEYS.COMPANION_DATA, userCompanion);
+      
+      // Update in state
+      updateProgress({ companion: userCompanion });
+      
+      console.log(`GamificationContext: Companion set successfully - ${companion.name} (${companion.type})`);
+      return true;
+    } catch (error) {
+      console.error('GamificationContext: Error setting companion:', error);
+      return false;
+    }
+  };
   const updateCompanionExperience = async (amount: number, actionType?: XpActionType): Promise<{ isLevelUp: boolean; isEvolutionReady: boolean; } | undefined> => {
     return undefined;
   };
@@ -1903,7 +1979,43 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
   };
   const resetCompanion = async () => {};
   const checkAllAchievementTypes = async (): Promise<boolean> => {
+    console.log('GamificationContext: Checking all achievement types');
+    
+    try {
+      // First ensure we have achievements to check
+      if (!userProgress.achievements || userProgress.achievements.length === 0) {
+        console.log('GamificationContext: No achievements to check');
+        await storeData(STORAGE_KEYS.ACHIEVEMENTS, initialAchievements);
+        updateProgress({ achievements: initialAchievements });
+        console.log('GamificationContext: Initialized achievements from defaults');
+        return true;
+      }
+      
+      let anyUpdated = false;
+      
+      // 1. Check streak achievements
+      const streakUpdated = await checkStreakAchievements();
+      anyUpdated = anyUpdated || streakUpdated;
+      
+      // 2. Check journal achievements 
+      const journalUpdated = await checkJournalAchievements(journalEntries);
+      anyUpdated = anyUpdated || journalUpdated;
+      
+      // 3. Check challenge achievements
+      const challengeUpdated = await checkChallengeCountAchievements();
+      anyUpdated = anyUpdated || challengeUpdated;
+      
+      // 4. Check companion evolution achievements
+      if (companion && companion.currentLevel > 1) {
+        const companionUpdated = await checkCompanionAchievements();
+        anyUpdated = anyUpdated || companionUpdated;
+      }
+      
+      return anyUpdated;
+    } catch (error) {
+      console.error('GamificationContext: Error checking all achievement types:', error);
       return false;
+    }
   };
   const testUnlock15Badges = async (): Promise<boolean> => {
     try {
@@ -1959,24 +2071,120 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     }
     return updated;
   };
-  const checkJournalAchievements = async (entries?: JournalEntry[]) => {};
+  const checkJournalAchievements = async (entries?: JournalEntry[]): Promise<boolean> => {
+    try {
+      const journalCount = entries?.length || 0;
+      console.log(`GamificationContext: Checking journal achievements. Journal count: ${journalCount}`);
+      
+      if (!userProgress.achievements || userProgress.achievements.length === 0) {
+        console.log('GamificationContext: No achievements available to check for journal badges');
+        return false;
+      }
+      
+      let updated = false;
+      const currentAchievements = [...userProgress.achievements];
+      
+      // Define the journal thresholds and their corresponding badge IDs
+      const journalThresholds = [
+        { count: 1, badgeId: 'badge-journal-first' },
+        { count: 3, badgeId: 'badge-journal-3' },
+        { count: 10, badgeId: 'badge-journal-2' },
+        { count: 20, badgeId: 'badge-journal-master' },
+      ];
+      
+      // Check each threshold
+      for (const threshold of journalThresholds) {
+        if (journalCount >= threshold.count) {
+          const badge = currentAchievements.find(b => b.id === threshold.badgeId);
+          
+          if (badge && !badge.unlocked) {
+            badge.unlocked = true;
+            updated = true;
+            console.log(`GamificationContext: Unlocked ${badge.name} badge (${threshold.count} journal entries)`);
+            
+            // Show achievement notification
+            showBadgeUnlockNotification(badge);
+          }
+        }
+      }
+      
+      // Save if any badges were unlocked
+      if (updated) {
+        updateProgress({ achievements: currentAchievements });
+        console.log('GamificationContext: Updated achievements after checking journal badges');
+      } else {
+        console.log('GamificationContext: No new journal badges unlocked');
+      }
+      
+      return updated;
+    } catch (error) {
+      console.error('GamificationContext: Error checking journal achievements:', error);
+      return false;
+    }
+  };
   const checkAndEvolveCompanion = async () => {};
 
-  // Helper to unlock a badge by ID
+  // Show badge unlock notification with enhanced effects
+  const showBadgeUnlockNotification = (badge: Achievement) => {
+    if (!showAchievement) return;
+    
+    console.log(`GamificationContext: Showing badge unlock notification for ${badge.name}`);
+    
+    // Get badge category to customize button text
+    let buttonText = 'Awesome!';
+    switch (badge.category) {
+      case 'streak':
+        buttonText = 'Keep it up!';
+        break;
+      case 'challenge':
+        buttonText = 'Great job!';
+        break;
+      case 'journal':
+        buttonText = 'Well done!';
+        break;
+      case 'meditation':
+        buttonText = 'Zen master!';
+        break;
+      default:
+        buttonText = 'Awesome!';
+    }
+    
+    showAchievement({
+      title: `${badge.name}`,
+      description: badge.description,
+      buttonText: buttonText
+    });
+  };
+  
+  // Modified unlockBadgeById to use the enhanced notification
   const unlockBadgeById = (badgeId: string, customButtonText?: string) => {
     const currentAchievements = [...userProgress.achievements];
     const badge = currentAchievements.find(b => b.id === badgeId);
     if (badge && !badge.unlocked) {
       badge.unlocked = true;
       updateProgress({ achievements: currentAchievements });
-      showAchievement?.({
-        title: badge.name,
-        description: badge.description,
-        buttonText: customButtonText || 'Awesome!'
-      });
+      
+      // Also directly save to storage for extra safety
+      saveAchievements(currentAchievements);
+      
+      // Show enhanced notification
+      showBadgeUnlockNotification(badge);
       return true;
     }
     return false;
+  };
+  
+  // Function to directly save achievements to persistent storage
+  const saveAchievements = async (achievements: Achievement[]) => {
+    try {
+      console.log(`GamificationContext: Saving ${achievements.length} achievements to storage`);
+      await storeData(STORAGE_KEYS.ACHIEVEMENTS, achievements);
+      console.log('GamificationContext: Achievements saved successfully');
+      return true;
+    } catch (error) {
+      console.error('GamificationContext: Error saving achievements:', error);
+      return false;
+    }
   };
 
   // Example: Unlock app badge after onboarding
@@ -1996,7 +2204,6 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
     // This effect runs when streak changes or startDate changes
     if (isKnown730Bug(streak)) {
       console.error(`[GamificationContext] CRITICAL: Detected 730-day bug (current streak: ${streak}). Applying emergency fix...`);
-      
       // Show alert to user
       Alert.alert(
         '⚠️ Data Issue Detected',
@@ -2008,7 +2215,7 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
               try {
                 await resetStreakToOne();
                 forceRefresh();
-                setStreak(1, Date.now());
+                // Streak bug fixes are now handled in StreakContext
               } catch (e) {
                 console.error('[GamificationContext] Error fixing 730-day bug:', e);
               }
@@ -2018,13 +2225,12 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       );
     } else if (isFutureStartDateBug(streak, userProgress.startDate)) {
       console.error(`[GamificationContext] CRITICAL: Detected 30-day bug with future start date (${new Date(userProgress.startDate || 0).toISOString()}). Applying emergency fix...`);
-      
       // Fix immediately without alert since this is a critical issue
       (async () => {
         try {
           await resetStreakToOne();
           forceRefresh();
-          setStreak(1, Date.now());
+          // Streak bug fixes are now handled in StreakContext
           console.log('[GamificationContext] 30-day bug with future date fixed. Streak reset to 1.');
         } catch (e) {
           console.error('[GamificationContext] Error fixing 30-day bug:', e);
@@ -2032,6 +2238,61 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
       })();
     }
   }, [streak, userProgress.startDate]);
+
+  // Check companion achievements based on companion evolution
+  const checkCompanionAchievements = async (): Promise<boolean> => {
+    try {
+      if (!companion) {
+        console.log('GamificationContext: No companion available to check for companion badges');
+        return false;
+      }
+      
+      console.log(`GamificationContext: Checking companion achievements. Companion level: ${companion.currentLevel}`);
+      
+      if (!userProgress.achievements || userProgress.achievements.length === 0) {
+        console.log('GamificationContext: No achievements available to check for companion badges');
+        return false;
+      }
+      
+      let updated = false;
+      const currentAchievements = [...userProgress.achievements];
+      
+      // Define the companion evolution thresholds
+      const companionThresholds = [
+        { level: 2, badgeId: 'badge-companion-evolution-1' },
+        { level: 3, badgeId: 'badge-companion-evolution-2' },
+      ];
+      
+      // Check each threshold
+      for (const threshold of companionThresholds) {
+        if (companion.currentLevel >= threshold.level) {
+          const badge = currentAchievements.find(b => b.id === threshold.badgeId);
+          
+          if (badge && !badge.unlocked) {
+            badge.unlocked = true;
+            updated = true;
+            console.log(`GamificationContext: Unlocked ${badge.name} badge (companion level ${threshold.level})`);
+            
+            // Show achievement notification
+            showBadgeUnlockNotification(badge);
+          }
+        }
+      }
+      
+      // Save if any badges were unlocked
+      if (updated) {
+        updateProgress({ achievements: currentAchievements });
+        console.log('GamificationContext: Updated achievements after checking companion badges');
+      } else {
+        console.log('GamificationContext: No new companion badges unlocked');
+      }
+      
+      return updated;
+    } catch (error) {
+      console.error('GamificationContext: Error checking companion achievements:', error);
+      return false;
+    }
+  };
 
   return (
     <GamificationContext.Provider
@@ -2058,7 +2319,6 @@ export const GamificationProvider: React.FC<{children: React.ReactNode}> = ({ ch
         resetData,
         exportData,
         importData,
-        setStreak,
         getLevelProgress,
         getPointsToNextLevel,
         getPersonalizedGreeting,

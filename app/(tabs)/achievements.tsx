@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Pressable, Platform, ColorValue , StatusBar, Alert, Modal } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Pressable, Platform, ColorValue , StatusBar, Alert, Modal, ActivityIndicator } from 'react-native';
 import { useGamification } from '@/context/GamificationContext';
 import { SafeAreaView , useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -17,7 +17,6 @@ import LottieView from 'lottie-react-native';
 import { Achievement } from '@/types/gamification';
 import { storeData, getData, STORAGE_KEYS } from '@/utils/storage';
 import { useStreak } from '@/context/StreakContext';
-import { resetAllStreakData } from '@/utils/resetStreakData';
 
 // Define types
 interface BadgeItemProps {
@@ -63,7 +62,7 @@ const BadgeItem: React.FC<BadgeItemProps> = ({
       style={styles.badgeItemWrapper}
     >
       <Pressable 
-        style={styles.badgeItem} 
+        style={[styles.badgeItem, locked ? styles.lockedBadgeItem : styles.unlockedBadgeItem]} 
         onPress={onPress}
         android_ripple={{ color: 'rgba(255,255,255,0.1)', borderless: true }}
       >
@@ -82,14 +81,29 @@ const BadgeItem: React.FC<BadgeItemProps> = ({
           )}
         </View>
         <View style={styles.badgeTextContainer}>
-          <Text style={styles.badgeTitle} numberOfLines={2}>
+          <Text style={[styles.badgeTitle, locked ? {} : styles.unlockedBadgeTitle]} numberOfLines={2}>
             {days ? `${days} Day${days > 1 ? 's' : ''}` : title}
           </Text>
-          <Text style={styles.badgeDescription} numberOfLines={3}>
+          <Text style={[styles.badgeDescription, locked ? {} : styles.unlockedBadgeDescription]} numberOfLines={3}>
             {days ? `Maintain a ${days}-day clean streak` : description}
           </Text>
         </View>
       </Pressable>
+    </Animated.View>
+  );
+};
+
+// This component will be used to handle the rendering of badges header
+// It will NOT include the "Refresh badges" button
+const BadgesHeader = ({ achievementsCount }: { achievementsCount: number }) => {
+  return (
+    <Animated.View 
+      entering={FadeInDown.delay(200).duration(500)} 
+      style={styles.badgesHeader}
+    >
+      <Text style={styles.sectionTitle}>
+        Badges ({achievementsCount}/36)
+      </Text>
     </Animated.View>
   );
 };
@@ -106,89 +120,96 @@ export default function AchievementsScreen() {
     getCompanionStage,
     forceCheckStreakAchievements,
     journalEntries = [],
-    fix30DayBadge: contextFix30DayBadge
+    fix30DayBadge: contextFix30DayBadge,
+    checkAllAchievementTypes
   } = gamification || {};
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<'badges' | 'companion'>('badges');
   const [isCheckingAchievements, setIsCheckingAchievements] = useState(false);
   const [selectedBadge, setSelectedBadge] = useState<Achievement | null>(null);
   const [badgeModalVisible, setBadgeModalVisible] = useState(false);
+  const [displayBadges, setDisplayBadges] = useState<Achievement[]>([]);
 
-  // Automatically check and update badges when component mounts
+  // If achievements is empty, use placeholder badges for display
   useEffect(() => {
-    console.log('Achievements screen mounted, verifying badges automatically...');
-    if (forceCheckStreakAchievements) forceCheckStreakAchievements();
-    // Optionally, check other badge types here too
-  }, []); // Only run on mount
-  
+    const defaultCategories = ['streak', 'journal', 'challenge', 'meditation'];
+    
+    if (!achievements || achievements.length === 0) {
+      console.log('Creating placeholder badges for display');
+      const placeholderBadges: Achievement[] = [];
+      
+      defaultCategories.forEach(category => {
+        for (let i = 0; i < 4; i++) {
+          placeholderBadges.push({
+            id: `placeholder-${category}-${i}`,
+            name: category === 'streak' ? 
+              [7, 30, 90, 365][i] + ' Days' : 
+              'Achievement ' + (i + 1),
+            description: category === 'streak' ? 
+              `Maintain a ${[7, 30, 90, 365][i]}-day clean streak` :
+              'Keep using the app to unlock more badges!',
+            category,
+            unlocked: false,
+            icon: 'lock',
+            unlockCriteria: 'Continue using the app to unlock'
+          });
+        }
+      });
+      
+      setDisplayBadges(placeholderBadges);
+    } else {
+      setDisplayBadges(achievements);
+    }
+  }, [achievements]);
+
   // Calculate progress percentage
   const progressPercentage = (points / totalPoints) * 100;
   const pointsToNextLevel = totalPoints - points;
   
   // Count unlocked badges
-  const unlockedBadgesCount = achievements.filter(badge => badge.unlocked).length;
+  const unlockedBadgesCount = displayBadges.filter(badge => badge.unlocked).length;
   
   // Get specific badges
-  const sevenDayBadge = achievements?.find(badge => badge.id === 'badge-streak-1');
-  const thirtyDayBadge = achievements?.find(badge => badge.id === 'badge-streak-2');
-  const ninetyDayBadge = achievements?.find(badge => badge.id === 'badge-streak-3');
-  const journalBadge = achievements?.find(badge => badge.id === 'badge-journal-1');
-  const journalStreakBadge = achievements?.find(badge => badge.id === 'badge-journal-2');
-  const challengeBadge = achievements?.find(badge => badge.id === 'badge-challenge-1');
+  const sevenDayBadge = displayBadges?.find(badge => badge.id === 'badge-streak-1');
+  const thirtyDayBadge = displayBadges?.find(badge => badge.id === 'badge-streak-2');
+  const ninetyDayBadge = displayBadges?.find(badge => badge.id === 'badge-streak-3');
+  const journalBadge = displayBadges?.find(badge => badge.id === 'badge-journal-1');
+  const journalStreakBadge = displayBadges?.find(badge => badge.id === 'badge-journal-2');
+  const challengeBadge = displayBadges?.find(badge => badge.id === 'badge-challenge-1');
   
   // Get the proper companion stage based purely on badge count
   const companionStage = unlockedBadgesCount >= 30 ? 3 : unlockedBadgesCount >= 15 ? 2 : 1;
   
   console.log("ACHIEVEMENTS: Badge count =", unlockedBadgesCount, "Companion stage =", companionStage);
   
-  // Debug function to unlock badges if none are shown
-  const handleDebugBadges = async () => {
-    if (unlockedBadgesCount === 0 && typeof gamification?.testUnlock15Badges === 'function') {
-      console.log("Attempting to unlock 15 badges for debugging...");
-      setIsCheckingAchievements(true);
+  // Automatically check for badge unlocks when component mounts
+  useEffect(() => {
+    // Check for all types of achievements, including challenge badges
+    const checkAchievements = async () => {
       try {
-        const result = await gamification.testUnlock15Badges();
-        console.log("Debug badge unlock result:", result);
+        console.log('Achievements screen: Checking all badge types on mount');
+        setIsCheckingAchievements(true);
+        
+        // First check streak achievements
+        if (typeof forceCheckStreakAchievements === 'function') {
+          console.log('Checking streak achievements');
+          await forceCheckStreakAchievements();
+        }
+        
+        // Then check all other achievement types (challenges, journal, etc.)
+        if (typeof checkAllAchievementTypes === 'function') {
+          console.log('Checking all other achievement types');
+          await checkAllAchievementTypes();
+        }
       } catch (error) {
-        console.error("Error unlocking debug badges:", error);
+        console.error('Error checking achievements:', error);
       } finally {
         setIsCheckingAchievements(false);
       }
-    }
-  };
-
-  // Function to reset all app data
-  const handleResetAllData = () => {
-    Alert.alert(
-      "Reset All Data",
-      "This will reset all your streak data and calendar history. This action cannot be undone.",
-      [
-        {
-          text: "Cancel",
-          style: "cancel"
-        },
-        {
-          text: "Reset",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              setIsCheckingAchievements(true);
-              await resetAllStreakData();
-              
-              // Force reload the page
-              setTimeout(() => {
-                window.location.reload();
-              }, 500);
-            } catch (error) {
-              console.error("Error resetting data:", error);
-            } finally {
-              setIsCheckingAchievements(false);
-            }
-          }
-        }
-      ]
-    );
-  };
+    };
+    
+    checkAchievements();
+  }, []);
 
   // Create simple fixed streak badges array
   const streakBadges = [
@@ -251,78 +272,13 @@ export default function AchievementsScreen() {
     }
   ];
   
-  // Add a function to specifically fix the 30-day badge
-  const fix30DayBadge = async () => {
-    try {
-    setIsCheckingAchievements(true);
-      
-      // Use the direct fix function from the context
-      if (typeof contextFix30DayBadge === 'function') {
-        const result = await contextFix30DayBadge();
-        
-        console.log(`Result of fixing 30-day badge:`, result);
-        
-        if (result) {
-          console.log('Successfully fixed 30-day badge');
-        } else {
-          console.log('Could not fix 30-day badge. Check console for details.');
-        }
-      } else {
-        console.log('Fix30DayBadge function not available in context');
-      }
-    } catch (error) {
-      console.error('Error fixing 30-day badge:', error);
-    } finally {
-      setIsCheckingAchievements(false);
-    }
-  };
-
-  // Refactored: Only use forceCheckStreakAchievements from context
-  const verifyAndUnlockAchievements = async () => {
-    try {
-      setIsCheckingAchievements(true);
-      if (typeof forceCheckStreakAchievements === 'function') {
-        console.log('Calling forceCheckStreakAchievements from context...');
-        await forceCheckStreakAchievements();
-      }
-      if (typeof contextFix30DayBadge === 'function' && streak >= 30) {
-        await contextFix30DayBadge();
-      }
-      console.log('Badge verification via context complete');
-    } catch (error) {
-      console.error('Error verifying achievements:', error);
-    } finally {
-      setIsCheckingAchievements(false);
-    }
-  };
-
-  // Always check for badge unlocks on mount and when streak/journal changes
-  useEffect(() => {
-    verifyAndUnlockAchievements();
-  }, [streak, journalEntries.length]);
-
-  // Replace the hasJournalBadgeDiscrepancy with a more general function
-  const hasUnlockedBadgeDiscrepancy = () => {
-    // Always return true to make the button always available
-    return true;
-  };
-  
-  // Check if any streak badges should be unlocked but aren't
-  const hasStreakBadgeDiscrepancy = 
-    (streak >= 7 && sevenDayBadge && !sevenDayBadge.unlocked) ||
-    (streak >= 30 && thirtyDayBadge && !thirtyDayBadge.unlocked) ||
-    (streak >= 90 && ninetyDayBadge && !ninetyDayBadge.unlocked);
-  
-  // Add a flag to detect missing journal badges
-  const has30DayBadgeIssue = () => {
-    const thirtyDayBadge = achievements.find(a => a.id === 'badge-streak-2' || a.id === 'badge-streak-30days');
-    return streak >= 30 && thirtyDayBadge && !thirtyDayBadge.unlocked;
-  };
-  
   // Get companion animation source based on stage and type
   const getCompanionSource = () => {
     // The companion's type determines which companion to show
-    const companionType = companion?.type || 'water';
+    // IMPORTANT: Read from companion?.type first, fallback only if missing
+    console.log(`Looking for companion type: ${companion?.type || 'none'}, name: ${companion?.name || 'none'}`);
+    
+    const companionType = companion?.type || 'plant'; // Default to plant/Drowsi instead of water
     
     if (companionType === 'plant') {
       // Drowsi (Panda) animations
@@ -338,32 +294,69 @@ export default function AchievementsScreen() {
       // Snuglur animations
       switch (companionStage) {
         case 3:
-          return require('../../baby monster stage 3.json');
+          return require('@/assets/lottie/baby_monster_stage3.json');
         case 2:
-          return require('../../baby monster stage 2.json');
+          return require('@/assets/lottie/baby_monster_stage2.json');
         default:
-          return require('../../baby monster stage 1.json');
+          return require('@/assets/lottie/baby_monster_stage1.json');
       }
-    } else {
-      // Stripes (Tiger) animations
+    } else if (companionType === 'water') {
+      // Stripes (Tiger) animations - IMPORTANT: This is specifically for the tiger (Stripes)
+      console.log("Using Stripes (tiger) animations");
       switch (companionStage) {
         case 3:
-          return require('../../baby tiger stage 3.json');
+          return require('@/assets/lottie/baby_tiger_stage3.json');
         case 2:
-          return require('../../baby tiger stage 2.json');
+          return require('@/assets/lottie/baby_tiger_stage2.json');
         default:
-          return require('../../baby tiger stage 1.json');
+          return require('@/assets/lottie/baby_tiger_stage1.json');
+      }
+    } else {
+      // Default to Drowsi (Panda) animations if type is unknown
+      // This ensures we don't accidentally show the wrong animation
+      console.warn(`Unknown companion type: ${companionType}, defaulting to Drowsi`);
+      switch (companionStage) {
+        case 3:
+          return require('@/assets/lottie/panda/panda_stage3.json');
+        case 2:
+          return require('@/assets/lottie/panda/panda_stage2.json');
+        default:
+          return require('@/assets/lottie/baby_panda_stage1.json');
       }
     }
   };
   
   // Get companion name and description based on type and stage
   const getCompanionInfo = () => {
-    const companionType = companion?.type || 'water';
+    // Determine the companion type - ensure it's consistent with the animation source
+    let companionType = companion?.type || 'plant'; // Default to plant/Drowsi
+    
+    // Debug companion info
+    console.log(`Companion before detection - type: ${companionType}, name: ${companion?.name || 'none'}`);
+    
+    // Force override with correct type if needed - this ensures the name matches the animation
+    const source = getCompanionSource().toString();
+    
+    // Log the source for debugging
+    console.log(`Animation source: ${source.substring(0, 50)}...`);
+    
+    if (source.includes('panda')) {
+      console.log('Animation source includes panda - using plant type (Drowsi)');
+      companionType = 'plant';
+    } else if (source.includes('monster')) {
+      console.log('Animation source includes monster - using fire type (Snuglur)');
+      companionType = 'fire';
+    } else if (source.includes('tiger')) {
+      console.log('Animation source includes tiger - using water type (Stripes)');
+      companionType = 'water';
+    }
+    
+    // Log final companion type
+    console.log(`Final companion type: ${companionType}`);
     
     if (companionType === 'plant') {
       return {
-        name: companion?.name || 'Drowsi',
+        name: 'Drowsi', // Always use 'Drowsi' for plant type, ignore any custom name
         descriptions: [
           "Falls asleep faster than your urges — let him nap, so you don't relapse.",
           "Growing stronger from your consistency, Drowsi now enjoys mindful eating. His noodle ritual brings focus and patience.",
@@ -372,7 +365,7 @@ export default function AchievementsScreen() {
       };
     } else if (companionType === 'fire') {
       return {
-        name: companion?.name || 'Snuglur',
+        name: 'Snuglur', // Always use 'Snuglur' for fire type
         descriptions: [
           "Warm and playful, this little creature is your constant reminder to stay strong and focused.",
           "As your discipline grows, so does Snuglur's fiery spirit, burning away temptations with newfound intensity.",
@@ -381,7 +374,7 @@ export default function AchievementsScreen() {
       };
     } else {
       return {
-        name: companion?.name || 'Stripes',
+        name: 'Stripes', // Always use 'Stripes' for water type
         descriptions: [
           "Half tiger, half therapist — growls when you're about to mess up.",
           "Tiger shark of sobriety — all the bite of willpower with the wet nose of accountability.",
@@ -394,8 +387,18 @@ export default function AchievementsScreen() {
   const companionInfo = getCompanionInfo();
   
   const renderBadgesTab = () => {
+    // Show loading state while checking achievements
+    if (isCheckingAchievements) {
+      return (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#6772FF" />
+          <Text style={styles.loadingText}>Loading achievements...</Text>
+        </View>
+      );
+    }
+
     // Group badges by category
-    const badgesByCategory = achievements ? achievements.reduce((acc: any, badge) => {
+    const badgesByCategory = displayBadges ? displayBadges.reduce((acc: any, badge) => {
       if (!acc[badge.category]) {
         acc[badge.category] = [];
       }
@@ -484,23 +487,10 @@ export default function AchievementsScreen() {
           {/* Badge counts */}
           <View style={styles.badgeStatsContainer}>
             <Text style={styles.badgeStatsText}>
-              {unlockedBadgesCount} / {achievements?.length || 0} badges unlocked
+              {unlockedBadgesCount} / {displayBadges?.length || 0} badges unlocked
             </Text>
             
-            {/* Debug button when no badges are unlocked */}
-            {unlockedBadgesCount === 0 && (
-              <TouchableOpacity 
-                style={styles.debugButton}
-                onPress={handleDebugBadges}
-                disabled={isCheckingAchievements}
-              >
-                {isCheckingAchievements ? (
-                  <Text style={styles.debugButtonText}>Unlocking...</Text>
-                ) : (
-                  <Text style={styles.debugButtonText}>Debug Badges</Text>
-                )}
-              </TouchableOpacity>
-            )}
+            {/* Remove the instructional text as requested by user */}
           </View>
           
           {/* Only show points to next level if there are points */}
@@ -512,11 +502,7 @@ export default function AchievementsScreen() {
         </Animated.View>
         
         {/* Badges Section */}
-        <Animated.View entering={FadeInDown.delay(200).duration(500)} style={styles.badgesHeader}>
-          <Text style={styles.sectionTitle}>
-            Badges ({achievements ? achievements.filter(a => a.unlocked).length : 0}/36)
-          </Text>
-        </Animated.View>
+        <BadgesHeader achievementsCount={unlockedBadgesCount} />
         
         {/* Display badges by category */}
         {sortedCategories.map((category, categoryIndex) => {
@@ -663,6 +649,42 @@ export default function AchievementsScreen() {
     setSelectedBadge(badge);
     setBadgeModalVisible(true);
   };
+
+  // Create a proper badges array if achievements are not available or empty
+  useEffect(() => {
+    if (!achievements || achievements.length === 0) {
+      console.log('No achievements found, creating placeholder badges');
+      const defaultCategories = ['streak', 'journal', 'challenge', 'meditation'];
+      const placeholderBadges: Achievement[] = [];
+      
+      defaultCategories.forEach(category => {
+        for (let i = 0; i < 4; i++) {
+          placeholderBadges.push({
+            id: `placeholder-${category}-${i}`,
+            name: category === 'streak' ? 
+              [7, 30, 90, 365][i] + ' Days' : 
+              'Achievement ' + (i + 1),
+            description: category === 'streak' ? 
+              `Maintain a ${[7, 30, 90, 365][i]}-day clean streak` :
+              'Keep using the app to unlock more badges!',
+            category,
+            unlocked: false,
+            icon: 'lock',
+            unlockCriteria: 'Continue using the app to unlock'
+          });
+        }
+      });
+      
+      // Manually set badges for display in the component state
+      // This won't affect the global context but will ensure badges display
+      // badgesToShow = placeholderBadges; // This line is removed as per the new_code
+      
+      // Force the check for streak achievements if we have a streak but no badges
+      if (streak > 0 && forceCheckStreakAchievements) {
+        forceCheckStreakAchievements();
+      }
+    }
+  }, [achievements]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -1139,18 +1161,38 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: 'rgba(255,255,255,0.8)',
   },
-  debugButton: {
-    backgroundColor: 'rgba(255, 0, 0, 0.2)',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    alignItems: 'center',
+  loadingContainer: {
+    flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
   },
-  debugButtonText: {
-    color: '#fff',
+  loadingText: {
+    marginTop: 10,
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 16,
+  },
+  lockedBadgeItem: {
+    opacity: 0.5,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+  },
+  unlockedBadgeItem: {
+    opacity: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderWidth: 1,
+  },
+  unlockedBadgeTitle: {
+    color: '#FFFFFF',
+  },
+  unlockedBadgeDescription: {
+    color: 'rgba(255,255,255,0.7)',
+  },
+  badgeTipText: {
     fontSize: 14,
-    fontWeight: '500',
+    color: 'rgba(255,255,255,0.6)',
+    textAlign: 'center',
+    marginTop: 10,
   },
 });
 

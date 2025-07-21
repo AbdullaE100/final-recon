@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, SafeAreaView, StatusBar, Text, TouchableOpacity, Platform } from 'react-native';
+import { StyleSheet, View, SafeAreaView, StatusBar, Text, TouchableOpacity, Platform, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/context/ThemeContext';
 import WelcomeScreen from '@/components/onboarding/WelcomeScreen';
@@ -79,10 +79,26 @@ export default function OnboardingScreen() {
   // Handle companion selection
   const handleCompanionSelect = (companion: CompanionChoice) => {
     setSelectedCompanion(companion);
+    // We'll complete the onboarding process directly here after setting the companion
+    // This ensures the companion is set before we try to complete onboarding
+    setTimeout(() => {
+      completeOnboardingAndNavigate();
+    }, 300); // Small delay to ensure state update has completed
   };
 
   // This function is called when the user confirms their companion choice
   const handleCompanionSelectionComplete = async () => {
+    // Check if companion is selected before proceeding
+    if (!selectedCompanion) {
+      console.warn("Please select a companion before proceeding.");
+      Alert.alert(
+        "Companion Required",
+        "Please select a companion to continue.",
+        [{ text: "OK", onPress: () => {} }]
+      );
+      return;
+    }
+    
     await completeOnboardingAndNavigate();
   };
 

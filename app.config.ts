@@ -4,13 +4,13 @@ export default {
   expo: {
     name: "ClearMind",
     slug: "clearmind",
-    version: "1.0.0",
+    version: "1.1.0",
     orientation: "portrait",
-    icon: "./assets/images/icon.png",
+    icon: "./assets/images/logo.png",
     scheme: "myapp",
     userInterfaceStyle: "automatic",
     splash: {
-      image: "./assets/images/splash.png",
+      image: "./assets/images/logo.png", // Updated to use the new logo
       resizeMode: "contain",
       backgroundColor: "#ffffff"
     },
@@ -22,6 +22,8 @@ export default {
     ],
     ios: {
       "supportsTablet": true,
+      "bundleIdentifier": "com.abu2002.clearmind",
+      "buildNumber": "40",
       "infoPlist": {
         "UIBackgroundModes": [
           "fetch"
@@ -30,17 +32,18 @@ export default {
     },
     android: {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "foregroundImage": "./assets/images/logo.png",
         "backgroundColor": "#FFFFFF"
       }
     },
     web: {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/logo.png"
     },
     plugins: [
-      "expo-router"
+      "expo-router",
+      "expo-web-browser"
     ],
     experiments: {
       "typedRoutes": true
@@ -48,6 +51,9 @@ export default {
     extra: {
       supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
       supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+      eas: {
+        projectId: "8f82e74f-1ebb-4ef3-bbd4-88c67f8b9790"
+      }
     },
   }
 }; 

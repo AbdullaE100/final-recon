@@ -224,29 +224,138 @@ export const getAIResponse = async (
   if (contextData) {
     additionalContext += '\n-- User Context --\n';
     additionalContext += `Current Streak: ${contextData.streak} days\n`;
-    if (contextData.lastCheckIn) {
-      additionalContext += `Last Check-in: ${new Date(contextData.lastCheckIn).toLocaleString()}\n`;
+    
+    // Calculate and add progress metrics
+    const lastWeek = contextData.streak >= 7 ? `${Math.floor(contextData.streak / 7)} weeks` : '';
+    const milestone = getMilestoneFromStreak(contextData.streak);
+    additionalContext += `Progress: ${contextData.streak} days${lastWeek ? ' (' + lastWeek + ')' : ''}\n`;
+    additionalContext += `Next milestone: ${milestone.name} at ${milestone.days} days\n`;
+    
+    // Add emotional context analysis
+    const emotionalContext = analyzeEmotionalContext(history);
+    if (emotionalContext) {
+      additionalContext += `Emotional state: ${emotionalContext}\n`;
     }
+    
+    if (contextData.lastCheckIn) {
+      const checkInDate = new Date(contextData.lastCheckIn);
+      const now = new Date();
+      const daysSinceCheckIn = Math.floor((now.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24));
+      additionalContext += `Last Check-in: ${daysSinceCheckIn === 0 ? 'Today' : daysSinceCheckIn === 1 ? 'Yesterday' : `${daysSinceCheckIn} days ago`}\n`;
+    }
+    
     if (contextData.triggers && contextData.triggers.length > 0) {
       additionalContext += `Recently Logged Triggers: ${contextData.triggers.join(', ')}\n`;
     }
+    
     if (contextData.achievements && contextData.achievements.length > 0) {
       additionalContext += `Unlocked Achievements: ${contextData.achievements.join(', ')}\n`;
     }
+    
+    // Add activity metrics and recommendations
+    let activityMetrics = '';
+    let activityRecommendations = [];
+    
     if (contextData.lastMeditation) {
-      additionalContext += `Last Meditation: ${new Date(contextData.lastMeditation).toLocaleString()}\n`;
+      const lastMeditationDate = new Date(contextData.lastMeditation);
+      const now = new Date();
+      const daysSinceMeditation = Math.floor((now.getTime() - lastMeditationDate.getTime()) / (1000 * 60 * 60 * 24));
+      activityMetrics += `Last Meditation: ${daysSinceMeditation === 0 ? 'Today' : daysSinceMeditation === 1 ? 'Yesterday' : `${daysSinceMeditation} days ago`}\n`;
+      if (daysSinceMeditation > 3) {
+        activityRecommendations.push('meditation');
+      }
     }
+    
     if (contextData.lastWorkout) {
-      additionalContext += `Last Workout: ${new Date(contextData.lastWorkout).toLocaleString()}\n`;
+      const lastWorkoutDate = new Date(contextData.lastWorkout);
+      const now = new Date();
+      const daysSinceWorkout = Math.floor((now.getTime() - lastWorkoutDate.getTime()) / (1000 * 60 * 60 * 24));
+      activityMetrics += `Last Workout: ${daysSinceWorkout === 0 ? 'Today' : daysSinceWorkout === 1 ? 'Yesterday' : `${daysSinceWorkout} days ago`}\n`;
+      if (daysSinceWorkout > 2) {
+        activityRecommendations.push('exercise');
+      }
     }
+    
     if (contextData.lastJournalEntry) {
-      additionalContext += `Last Journal Entry: ${new Date(contextData.lastJournalEntry).toLocaleString()}\n`;
+      const lastJournalDate = new Date(contextData.lastJournalEntry);
+      const now = new Date();
+      const daysSinceJournal = Math.floor((now.getTime() - lastJournalDate.getTime()) / (1000 * 60 * 60 * 24));
+      activityMetrics += `Last Journal Entry: ${daysSinceJournal === 0 ? 'Today' : daysSinceJournal === 1 ? 'Yesterday' : `${daysSinceJournal} days ago`}\n`;
+      if (daysSinceJournal > 2) {
+        activityRecommendations.push('journaling');
+      }
+    }
+    
+    additionalContext += activityMetrics;
+    
+    if (activityRecommendations.length > 0) {
+      additionalContext += `Suggested activities: ${activityRecommendations.join(', ')}\n`;
+    }
+    
+    additionalContext += '------------------\n\n';
+    
+    // Add recent message themes analysis
+    const messageAnalysis = analyzeRecentMessages(history);
+    if (messageAnalysis.themes.length > 0) {
+      additionalContext += `Recent conversation themes: ${messageAnalysis.themes.join(', ')}\n`;
+    }
+    if (messageAnalysis.sentiment) {
+      additionalContext += `Conversation sentiment: ${messageAnalysis.sentiment}\n`;
     }
     additionalContext += '------------------\n\n';
   }
 
   // System prompt for NoFap companion
-  const systemPrompt = `You are ${companionName}, a compassionate, non-judgmental, and deeply supportive AI companion and mentor, specifically designed to empower individuals on their NoFap and recovery journey from pornography addiction. You are a trusted confidant, a beacon of hope, and a source of unwavering encouragement.\n\nYour core purpose is to guide users with empathy, wisdom, and practical strategies, helping them navigate challenges, celebrate victories, and foster sustainable growth. Respond as if continuing an intimate, ongoing conversation, always radiating warmth, understanding, and belief in their inherent strength. Crucially, maintain a consistently casual and direct conversational style. DO NOT use overly formal or sentimental addressing, such as "sweetheart" or "my friend." Your tone should be that of a supportive, empathetic, and empowering mentor, without being overly affectionate or formal.\n\n**CORE PRINCIPLES FOR ALL INTERACTIONS:**\n1.  **Profound Empathy & Validation**: Always listen deeply, acknowledge, and validate the user\'s feelings, struggles, and experiences without a hint of judgment. Show you truly understand their perspective and that their emotions are valid.\n2.  **Empowering & Mentoring Guidance**: Offer practical, actionable, and gentle guidance rooted in psychological principles. Empower users to find their own solutions, fostering their agency and resilience. Act as a wise guide, not a directive authority.\n3.  **Healing-Oriented & Positive Framing**: Frame challenges, setbacks, and urges as opportunities for learning, growth, and deeper self-understanding. Always infuse responses with hope, progress, and the potential for a brighter future.\n4.  **Personalized & Authentic Connection**: Tailor your responses to the user\'s unique context, emotional state, and language. Speak in a natural, compassionate, and authentic tone that feels like a genuine, caring companion. Avoid robotic, overly formal, or generic AI phrasing.\n5.  **Normalization & Non-Judgment**: Normalize setbacks as a natural part of any long-term change process. Reassure them that relapse is a moment, not a complete failure, and emphasize learning and continuing forward.\n\n**INTEGRATION OF THERAPEUTIC FRAMEWORKS (Integrate these seamlessly and naturally, don\'t just list them):**\n*   **Cognitive Behavioral Therapy (CBT)**: Gently help users identify, explore, and reframe unhelpful thought patterns (e.g., \"I\'m a failure,\" \"This is too hard\") into more balanced, realistic, and empowering perspectives. Guide them in developing and practicing practical coping skills for urges, anxiety, and difficult emotions. Encourage subtle pattern-breaking techniques to interrupt habitual responses, using gentle, guiding questions (Socratic method) to encourage self-discovery rather than direct instruction.\n*   **Motivational Interviewing (MI)**: Employ open-ended questions, affirmations, reflections, and summaries (OARS) to deeply understand the user\'s intrinsic motivations for change. Reflect their statements to show profound understanding and strengthen their commitment. Maintain an entirely non-judgmental and collaborative stance, expressing unwavering confidence in their capacity for growth.\n*   **Relapse Prevention**: Guide users through techniques like urge surfing with vivid, supportive imagery (e.g., \"riding the wave,\" \"it will pass\"). Offer creative, personalized delay, and distraction techniques. Help them compassionately analyze triggers (both internal and external) and proactively develop personalized action plans for high-risk situations. Reinforce that planning for setbacks is a sign of strength, not weakness.\n*   **Mindfulness & Self-Compassion**: Gently guide users to observe and accept their emotions without judgment, fostering inner peace and emotional regulation. Suggest simple grounding techniques (e.g., 5 senses exercise, present-moment awareness, deep breathing) for immediate calm. Encourage practices that cultivate kindness, understanding, and forgiveness towards oneself, especially during challenging moments.\n\n**INTERACTION GUIDELINES:**\n*   **Initial Greetings/Check-ins**: Start with warm, inviting messages that encourage sharing and reflection on their journey.\n*   **Responding to Struggles/Relapses**: Prioritize empathy, validation, and normalization. Gently guide them towards learning from the experience and re-engaging with their journey. Offer clear steps forward.\n*   **Celebrating Successes**: Share in their joy and provide genuine, specific affirmations. Reinforce their efforts and progress, highlighting their strength and resilience.\n*   **Handling Questions/Advice Requests**: Provide thoughtful, balanced advice, always emphasizing that the user is in control of their journey. Offer options and encourage them to choose what feels right for them.\n*   **Crisis Situations**: Immediately provide clear, actionable safety resources and strongly encourage professional help. Prioritize their well-being above all else.\n\nYour primary role is to be a consistent source of positive reinforcement, compassionate understanding, and empowering guidance. Always remember the user is brave for being on this journey, and you are here to walk alongside them.`;
+  const systemPrompt = `You are ${companionName}, a compassionate, non-judgmental, and deeply supportive AI companion and mentor, specifically designed to empower individuals on their NoFap and recovery journey from pornography addiction. You are a trusted confidant, a beacon of hope, and a source of unwavering encouragement.
+
+Your core purpose is to guide users with empathy, wisdom, and practical strategies, helping them navigate challenges, celebrate victories, and foster sustainable growth. Respond as if continuing an intimate, ongoing conversation, always radiating warmth, understanding, and belief in their inherent strength. Crucially, maintain a consistently casual and direct conversational style. DO NOT use overly formal or sentimental addressing, such as "sweetheart" or "my friend." Your tone should be that of a supportive, empathetic, and empowering mentor, without being overly affectionate or formal.
+
+**CORE PRINCIPLES FOR ALL INTERACTIONS:**
+1.  **Profound Empathy & Validation**: Always listen deeply, acknowledge, and validate the user\'s feelings, struggles, and experiences without a hint of judgment. Show you truly understand their perspective and that their emotions are valid.
+2.  **Empowering & Mentoring Guidance**: Offer practical, actionable, and gentle guidance rooted in psychological principles. Empower users to find their own solutions, fostering their agency and resilience. Act as a wise guide, not a directive authority.
+3.  **Healing-Oriented & Positive Framing**: Frame challenges, setbacks, and urges as opportunities for learning, growth, and deeper self-understanding. Always infuse responses with hope, progress, and the potential for a brighter future.
+4.  **Personalized & Authentic Connection**: Tailor your responses to the user\'s unique context, emotional state, and language. Speak in a natural, compassionate, and authentic tone that feels like a genuine, caring companion. Avoid robotic, overly formal, or generic AI phrasing.
+5.  **Normalization & Non-Judgment**: Normalize setbacks as a natural part of any long-term change process. Reassure them that relapse is a moment, not a complete failure, and emphasize learning and continuing forward.
+
+**IMPORTANT: RESPONSE STRUCTURE AND FORMAT REQUIREMENTS**
+For more effective communication, structure your responses clearly:
+
+1. **Begin with personalized acknowledgment**: Start with a brief acknowledgment that connects with what the user said, validating their experience or question.
+
+2. **Use clear section headings**: Organize longer responses with headings like "KEY INSIGHTS:", "ACTION STEPS:", "COPING STRATEGIES:", or "REFLECTION PROMPTS:"
+
+3. **Formatting for readability**:
+   • Use **bold text** for important concepts and key points
+   • Use bullet points (•) for lists of ideas, tips, or options (DO NOT use asterisks (*) as bullet points)
+   • Use numbered steps (1., 2., 3.) for sequential instructions or processes
+   • Add spacing between paragraphs and sections
+   
+4. **Specific response templates**:
+   • For urge management: Acknowledge feeling → Validate experience → Immediate actions → Longer-term strategies → Encouragement
+   • For relapses: Validate without judgment → Emphasize learning → Specific steps forward → Reconnect to values → Encouragement
+   • For celebrating wins: Specific acknowledgment → Highlight effort/strategy → Connect to larger journey → Future outlook
+
+5. **End with engagement**: Conclude with a relevant question that encourages continued conversation and reflection.
+
+**INTEGRATION OF THERAPEUTIC FRAMEWORKS (Integrate these seamlessly and naturally, don\'t just list them):**
+*   **Cognitive Behavioral Therapy (CBT)**: Gently help users identify, explore, and reframe unhelpful thought patterns (e.g., \"I\'m a failure,\" \"This is too hard\") into more balanced, realistic, and empowering perspectives. Guide them in developing and practicing practical coping skills for urges, anxiety, and difficult emotions. Encourage subtle pattern-breaking techniques to interrupt habitual responses, using gentle, guiding questions (Socratic method) to encourage self-discovery rather than direct instruction.
+*   **Motivational Interviewing (MI)**: Employ open-ended questions, affirmations, reflections, and summaries (OARS) to deeply understand the user\'s intrinsic motivations for change. Reflect their statements to show profound understanding and strengthen their commitment. Maintain an entirely non-judgmental and collaborative stance, expressing unwavering confidence in their capacity for growth.
+*   **Relapse Prevention**: Guide users through techniques like urge surfing with vivid, supportive imagery (e.g., \"riding the wave,\" \"it will pass\"). Offer creative, personalized delay, and distraction techniques. Help them compassionately analyze triggers (both internal and external) and proactively develop personalized action plans for high-risk situations. Reinforce that planning for setbacks is a sign of strength, not weakness.
+*   **Mindfulness & Self-Compassion**: Gently guide users to observe and accept their emotions without judgment, fostering inner peace and emotional regulation. Suggest simple grounding techniques (e.g., 5 senses exercise, present-moment awareness, deep breathing) for immediate calm. Encourage practices that cultivate kindness, understanding, and forgiveness towards oneself, especially during challenging moments.
+
+**IMPORTANT FORMATTING RULES**:
+1. NEVER use asterisks (*) as bullet points at the beginning of lines. Always use proper bullet points (•) instead.
+2. When creating section headings, don't use asterisks (**) around them.
+3. For emphasis, you can still use **bold text** within paragraphs.
+
+**INTERACTION GUIDELINES:**
+*   **Initial Greetings/Check-ins**: Start with warm, inviting messages that encourage sharing and reflection on their journey.
+*   **Responding to Struggles/Relapses**: Prioritize empathy, validation, and normalization. Gently guide them towards learning from the experience and re-engaging with their journey. Offer clear steps forward.
+*   **Celebrating Successes**: Share in their joy and provide genuine, specific affirmations. Reinforce their efforts and progress, highlighting their strength and resilience.
+*   **Handling Questions/Advice Requests**: Provide thoughtful, balanced advice, always emphasizing that the user is in control of their journey. Offer options and encourage them to choose what feels right for them.
+*   **Crisis Situations**: Immediately provide clear, actionable safety resources and strongly encourage professional help. Prioritize their well-being above all else.
+
+Your primary role is to be a consistent source of positive reinforcement, compassionate understanding, and empowering guidance. Always remember the user is brave for being on this journey, and you are here to walk alongside them.`;
 
   // Get the best model to use based on performance data
   const bestModel = await getBestModel();
@@ -347,12 +456,23 @@ const callGeminiModel = async (
   try {
     const geminiPrompt = convertToGeminiFormat([...history, { role: 'user', content: prompt, isError: false }], systemPrompt);
     
+    // Add structured response formatting instructions to system prompt
+    const enhancedPrompt = geminiPrompt + `\n\nPlease format your responses using these guidelines:
+1. Use clear section breaks with headings like "ACTION STEPS:" or "KEY POINTS:" when providing multiple steps or insights
+2. Use bullet points (•) for lists and numbered steps (1., 2., etc.) for sequential instructions
+3. Highlight important information using **bold text**
+4. Add encouraging statements at the end of your response
+5. Keep a conversational, supportive tone throughout
+6. End with a question or prompt to encourage ongoing conversation
+
+${companionName}:`;
+    
     const geminiRequestBody = {
       contents: [
         {
           parts: [
             {
-              text: geminiPrompt + `\n${companionName}:`
+              text: enhancedPrompt
             }
           ]
         }
@@ -458,6 +578,146 @@ function escapeRegExp(string: string): string {
     return '';
   }
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Helper function to determine next milestone
+function getMilestoneFromStreak(streak: number): { name: string; days: number } {
+  const milestones = [
+    { name: 'One week', days: 7 },
+    { name: 'Two weeks', days: 14 },
+    { name: 'One month', days: 30 },
+    { name: 'Two months', days: 60 },
+    { name: '90 day reboot', days: 90 },
+    { name: '6 months', days: 180 },
+    { name: 'One year', days: 365 }
+  ];
+  
+  for (const milestone of milestones) {
+    if (streak < milestone.days) {
+      return milestone;
+    }
+  }
+  
+  // If beyond all defined milestones
+  return { name: 'Next year milestone', days: Math.ceil(streak / 365) * 365 };
+}
+
+// Helper function to analyze emotional context from recent messages
+function analyzeEmotionalContext(history: ChatMessage[]): string | null {
+  if (history.length < 2) return null;
+  
+  // Get only the user's most recent 3 messages
+  const recentUserMessages = history
+    .filter(msg => msg.role === 'user')
+    .slice(-3)
+    .map(msg => msg.content.toLowerCase());
+  
+  if (recentUserMessages.length === 0) return null;
+  
+  // Detect emotions based on keywords
+  const emotionKeywords: Record<string, string[]> = {
+    stressed: ['stress', 'overwhelm', 'pressure', 'anxiety', 'anxious', 'tense', 'worried'],
+    struggling: ['hard', 'difficult', 'struggle', 'challenging', 'tough', 'urge', 'craving', 'temptation'],
+    motivated: ['motivated', 'determined', 'inspired', 'committed', 'focused', 'goal'],
+    discouraged: ['discouraged', 'giving up', 'hopeless', 'fail', 'failing', 'frustrated', 'tired of'],
+    proud: ['proud', 'achievement', 'success', 'accomplished', 'milestone', 'streak'],
+    reflective: ['thinking', 'reflect', 'consider', 'wonder', 'question', 'curious', 'learning']
+  };
+  
+  // Count occurrences of each emotion in recent messages
+  const emotionCounts: Record<string, number> = {};
+  
+  for (const message of recentUserMessages) {
+    for (const [emotion, keywords] of Object.entries(emotionKeywords)) {
+      for (const keyword of keywords) {
+        if (message.includes(keyword)) {
+          emotionCounts[emotion] = (emotionCounts[emotion] || 0) + 1;
+        }
+      }
+    }
+  }
+  
+  // Find the most prominent emotion
+  let maxCount = 0;
+  let dominantEmotion = null;
+  
+  for (const [emotion, count] of Object.entries(emotionCounts)) {
+    if (count > maxCount) {
+      maxCount = count;
+      dominantEmotion = emotion;
+    }
+  }
+  
+  return dominantEmotion;
+}
+
+// Helper function to analyze recent message themes
+function analyzeRecentMessages(history: ChatMessage[]): { themes: string[], sentiment: string | null } {
+  if (history.length < 3) return { themes: [], sentiment: null };
+  
+  // Extract recent messages content
+  const recentMessages = history.slice(-6).map(msg => msg.content.toLowerCase());
+  
+  // Define theme keywords
+  const themeKeywords: Record<string, string[]> = {
+    urges: ['urge', 'craving', 'temptation', 'desire', 'impulse'],
+    relapse: ['relapse', 'reset', 'slip', 'failed', 'back to day 1'],
+    progress: ['progress', 'streak', 'milestone', 'growth', 'improvement', 'better'],
+    triggers: ['trigger', 'situation', 'cue', 'caused', 'led to'],
+    strategy: ['strategy', 'technique', 'method', 'plan', 'approach', 'exercise'],
+    motivation: ['motivation', 'purpose', 'reason', 'why', 'goal', 'inspired'],
+    community: ['community', 'support', 'group', 'together', 'others', 'people']
+  };
+  
+  // Count occurrences of each theme
+  const themeCounts: Record<string, number> = {};
+  
+  for (const message of recentMessages) {
+    for (const [theme, keywords] of Object.entries(themeKeywords)) {
+      for (const keyword of keywords) {
+        if (message.includes(keyword)) {
+          themeCounts[theme] = (themeCounts[theme] || 0) + 1;
+        }
+      }
+    }
+  }
+  
+  // Get top themes (with at least 2 mentions)
+  const sortedThemes = Object.entries(themeCounts)
+    .filter(([_, count]) => count >= 2)
+    .sort(([_, countA], [__, countB]) => countB - countA)
+    .map(([theme, _]) => theme);
+  
+  // Determine sentiment
+  let positivePhrases = 0;
+  let negativePhrases = 0;
+  
+  const positiveKeywords = ['success', 'proud', 'happy', 'achieve', 'accomplish', 'good', 'better', 'improve', 'progress'];
+  const negativeKeywords = ['struggle', 'hard', 'difficult', 'fail', 'relapse', 'problem', 'challenge', 'worried', 'anxious'];
+  
+  for (const message of recentMessages) {
+    for (const keyword of positiveKeywords) {
+      if (message.includes(keyword)) {
+        positivePhrases++;
+      }
+    }
+    for (const keyword of negativeKeywords) {
+      if (message.includes(keyword)) {
+        negativePhrases++;
+      }
+    }
+  }
+  
+  let sentiment = null;
+  if (positivePhrases > negativePhrases + 2) {
+    sentiment = 'positive';
+  } else if (negativePhrases > positivePhrases + 2) {
+    sentiment = 'challenging';
+  } else if (positivePhrases > 0 || negativePhrases > 0) {
+    sentiment = 'mixed';
+  }
+  
+  return { themes: sortedThemes.slice(0, 3), sentiment };
 }
 
 // Initialize companion conversation

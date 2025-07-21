@@ -127,7 +127,7 @@ const CompanionChat = () => {
         default:
           return require('@/assets/lottie/baby_monster_stage1.json');
       }
-    } else {
+    } else if (companionType === 'water') {
       /** Stripes (Tiger) animations */
       switch (companionStage) {
         case 3:
@@ -136,6 +136,17 @@ const CompanionChat = () => {
           return require('@/assets/lottie/baby_tiger_stage2.json');
         default:
           return require('@/assets/lottie/baby_tiger_stage1.json');
+      }
+    } else {
+      /** Default to Drowsi (Panda) animations if type is unknown */
+      console.warn(`Unknown companion type: ${companionType}, defaulting to Drowsi`);
+      switch (companionStage) {
+        case 3:
+          return require('@/assets/lottie/panda/panda_stage3.json');
+        case 2:
+          return require('@/assets/lottie/panda/panda_stage2.json');
+        default:
+          return require('@/assets/lottie/baby_panda_stage1.json');
       }
     }
   };
@@ -384,25 +395,86 @@ const CompanionChat = () => {
     await startCognitiveReframe();
   };
   
-  // Render message bubbles
-  // Function to parse and render markdown-like formatting
+  // Function to improve rendering of formatted text with better handling of section titles, bullet points, and bold text
   const renderFormattedText = (text: string) => {
-    const parts = text.split(/\*\*(.*?)\*\*/g);
+    // Remove asterisks at the beginning of lines but keep the content
+    text = text.replace(/^\s*\*\s+/gm, '• ');
     
+    // Split text into sections if it contains section headings
+    if (text.includes(':') && /[A-Z\s]+:/.test(text)) {
+      const sections = text.split(/([A-Z][A-Z\s]+:)/g).filter(Boolean);
+      
+      return (
+        <Text style={[styles.messageText, { color: '#FFFFFF' }]}>
+          {sections.map((part, index) => {
+            // Section headings (all caps followed by colon)
+            if (/^[A-Z][A-Z\s]+:$/.test(part)) {
+              return (
+                <Text key={index} style={styles.sectionHeading}>
+                  {'\n\n'}{part.replace(/\*\*/g, '')}{' '}
+                </Text>
+              );
+            }
+            
+            // Process content within sections
+            return processTextContent(part, index);
+          })}
+        </Text>
+      );
+    }
+    
+    // If no sections, just process the whole text
     return (
       <Text style={[styles.messageText, { color: '#FFFFFF' }]}>
-        {parts.map((part, index) => {
-          // Every odd index is bold text (between **)
-          if (index % 2 === 1) {
-            return (
-              <Text key={index} style={{ fontWeight: 'bold' }}>
-                {part}
-              </Text>
-            );
-          }
-          return part;
-        })}
+        {processTextContent(text, 0)}
       </Text>
+    );
+  };
+
+  // Helper function to process text content, handling bold, bullets and numbered lists
+  const processTextContent = (text: string, key: number) => {
+    // Replace bullet points with proper bullets and remove asterisks at line start
+    text = text.replace(/^(\s*)-\s+/gm, '$1• ');
+    text = text.replace(/^\s*\*\s+/gm, '• ');
+    
+    // Remove double asterisks from section headings
+    text = text.replace(/\*\*([^*]+)\*\*:/g, '$1:');
+    
+    // Split by different paragraph and line break patterns
+    const paragraphs = text.split(/\n{2,}|\n(?=•|\d+\.)/g);
+    
+    return (
+      <React.Fragment key={key}>
+        {paragraphs.map((paragraph, pIndex) => {
+          // Process bold text
+          const parts = paragraph.split(/\*\*(.*?)\*\*/g);
+          
+          // Check if this is a bullet point or numbered list item
+          const isBullet = paragraph.trim().startsWith('•');
+          const isNumbered = /^\d+\./.test(paragraph.trim());
+          const listItemStyle = isBullet ? styles.bulletPoint : 
+                                isNumbered ? styles.numberedItem : null;
+          
+          return (
+            <React.Fragment key={`p-${pIndex}`}>
+              {pIndex > 0 && <Text>{'\n\n'}</Text>}
+              <Text style={listItemStyle}>
+                {parts.map((part, index) => {
+                  // Every odd index is bold text (between **)
+                  if (index % 2 === 1) {
+                    return (
+                      <Text key={`bold-${index}`} style={styles.boldText}>
+                        {part}
+                      </Text>
+                    );
+                  }
+                  return part;
+                })}
+              </Text>
+            </React.Fragment>
+          );
+        })}
+      </React.Fragment>
     );
   };
 
@@ -1584,6 +1656,29 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  sectionHeading: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginTop: 10,
+    marginBottom: 5,
+  },
+  bulletPoint: {
+    marginLeft: 15,
+    fontSize: 16,
+    lineHeight: 24,
+    color: '#FFFFFF',
+  },
+  numberedItem: {
+    marginLeft: 15,
+    fontSize: 16,
+    lineHeight: 24,
+    color: '#FFFFFF',
+  },
+  boldText: {
+    fontWeight: 'bold',
+    color: '#FFFFFF',
   },
 });
 

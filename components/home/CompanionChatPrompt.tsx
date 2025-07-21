@@ -68,7 +68,7 @@ const CompanionChatPrompt = () => {
         default:
           return require('../../baby monster stage 1.json');
       }
-    } else {
+    } else if (companionType === 'water') {
       // Stripes (Tiger) animations
       switch (companionStage) {
         case 3:
@@ -77,6 +77,17 @@ const CompanionChatPrompt = () => {
           return require('../../baby tiger stage 2.json');
         default:
           return require('../../baby tiger stage 1.json');
+      }
+    } else {
+      // Default to Drowsi (Panda) animations if type is unknown
+      console.warn(`Unknown companion type: ${companionType}, defaulting to Drowsi`);
+      switch (companionStage) {
+        case 3:
+          return require('@/assets/lottie/panda/panda_stage3.json');
+        case 2:
+          return require('@/assets/lottie/panda/panda_stage2.json');
+        default:
+          return require('@/assets/lottie/baby_panda_stage1.json');
       }
     }
   };

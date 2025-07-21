@@ -1,270 +1,517 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
-  Dimensions,
   TouchableOpacity,
-  AppState,
-  Platform,
-  Alert,
+  Dimensions,
+  ScrollView,
+  StatusBar,
+  TextInput,
   Modal,
+  Platform,
+  KeyboardAvoidingView,
+  Alert,
+  ActivityIndicator,
+  Button,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
-import { useTheme } from '@/context/ThemeContext';
-import { useGamification } from '@/context/GamificationContext';
-import { useStreak } from '@/context/StreakContext';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
-import {
-  Brain,
-  Zap,
-  ShieldCheck,
-  TrendingUp,
-  Award,
-  BookOpen,
-  Calendar,
-  MessageSquare,
-  AlertTriangle,
-} from 'lucide-react-native';
-import useAchievementNotification from '@/hooks/useAchievementNotification';
-import CompanionCard from '@/components/home/CompanionCard';
-import ChallengePreview from '@/components/home/ChallengePreview';
-import BrainMetrics from '@/components/home/BrainMetrics';
-import CompanionChatPrompt from '@/components/home/CompanionChatPrompt';
-import { useAuth } from '@/context/AuthContext';
 import Animated, {
   useSharedValue,
-  withTiming,
   useAnimatedStyle,
+  withSpring,
+  withTiming,
+  interpolate,
   Easing,
   withSequence,
+  withDelay,
+  Extrapolate
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
+import { BlurView } from 'expo-blur';
+import { Calendar, Clock, Check, Calendar as CalendarIcon, AlertTriangle, Flame, MoreVertical, Sparkles, Zap } from 'lucide-react-native';
+import { useGamification } from '@/context/GamificationContext';
+import { useTheme } from '@/context/ThemeContext';
+import { useStreak } from '@/context/StreakContext';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import BrainMetrics from '@/components/home/BrainMetrics';
+import RecoveryCalendar from '@/components/home/RecoveryCalendar';
+import { resetAllStreakData, resetStreakToOne } from '@/utils/resetStreakData';
+import { storeData, STORAGE_KEYS, getData } from '@/utils/storage';
+import useAchievementNotification from '@/hooks/useAchievementNotification';
+import LottieView from 'lottie-react-native';
+import CompanionChatPrompt from '@/components/home/CompanionChatPrompt';
+import { CompanionChatProvider } from '@/context/CompanionChatContext';
+import { useAuth } from '@/context/AuthContext';
+import { format, addDays, differenceInDays, startOfToday, isBefore, parseISO } from 'date-fns';
+import StreakCardNew from '@/components/home/StreakCardNew';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 const getGreeting = () => {
-  const hour = new Date().getHours();
-  if (hour < 12) return 'Good Morning';
-  if (hour < 18) return 'Good Afternoon';
-  return 'Good Evening';
+  const hours = new Date().getHours();
+  if (hours < 12) return 'Good morning';
+  if (hours < 17) return 'Good afternoon';
+  return 'Good evening';
 };
 
-export default function HomeScreen() {
-  const { colors } = useTheme();
-  const { streak: contextStreak, performRelapse } = useStreak();
-  const { user } = useAuth();
-  const { showAchievement } = useAchievementNotification();
-  const { activeChallenges } = useGamification() || {}; // Get active challenges
-
-  const [localStreak, setLocalStreak] = useState(contextStreak);
-  const [isRelapseModalVisible, setRelapseModalVisible] = useState(false);
-  const [forceRender, setForceRender] = useState(0);
-
-  const streakValueRef = useRef(contextStreak);
-  const animation = useSharedValue(1);
-
+// Custom hook for streak animation
+const useStreakAnimation = (value: number, delay = 0) => {
+  const animation = useSharedValue(0);
+  
   useEffect(() => {
-    setLocalStreak(contextStreak);
-    streakValueRef.current = contextStreak;
-  }, [contextStreak]);
+    animation.value = 0;
+    animation.value = withDelay(
+      delay,
+      withSequence(
+        withTiming(1.15, { duration: 400, easing: Easing.out(Easing.cubic) }),
+        withTiming(1, { duration: 300, easing: Easing.inOut(Easing.cubic) })
+      )
+    );
+  }, [value, delay]);
+  
+  return animation;
+};
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: animation.value }],
-  }));
+// Date selection modal for editing streak start date
+const DatePickerModal = ({ 
+  visible, 
+  onClose, 
+  onConfirm, 
+  currentDate = new Date() 
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onConfirm: (date: Date) => void;
+  currentDate?: Date;
+}) => {
+  const [date, setDate] = useState(currentDate);
+  const { colors } = useTheme();
+  
+  return (
+    <Modal
+      transparent
+      visible={visible}
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <BlurView intensity={60} style={styles.modalOverlay}>
+        <View style={[styles.datePickerContainer, { backgroundColor: colors.card }]}>
+          <Text style={[styles.datePickerTitle, { color: colors.text }]}>
+            Select Start Date
+          </Text>
+          
+          <DateTimePicker
+            value={date}
+            mode="date"
+            display="spinner"
+            onChange={(_, selectedDate) => {
+              if (selectedDate) setDate(selectedDate);
+            }}
+            style={{ height: 150 }}
+            textColor={colors.text}
+          />
+          
+          <View style={styles.datePickerActions}>
+            <TouchableOpacity
+              style={[styles.datePickerButton, { backgroundColor: 'transparent' }]}
+              onPress={onClose}
+            >
+              <Text style={{ color: colors.secondaryText, fontWeight: '500' }}>
+                Cancel
+              </Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.datePickerButton, { backgroundColor: colors.primary }]}
+              onPress={() => onConfirm(date)}
+            >
+              <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>
+                Confirm
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </BlurView>
+    </Modal>
+  );
+};
 
-  const handleRelapseConfirm = async () => {
-    console.log('handleRelapseConfirm: Initiating relapse process.');
-    setRelapseModalVisible(false);
-
-    setLocalStreak(0);
-    animation.value = withTiming(0, { duration: 400 });
-
+// Quote of the day
+const DailyQuote = () => {
+  const { colors } = useTheme();
+  const [quoteIndex, setQuoteIndex] = useState<number>(0);
+  
+  const quotes = [
+    "Every day is a new opportunity to grow stronger, to live healthier, and to thrive.",
+    "The greatest glory in living lies not in never falling, but in rising every time we fall.",
+    "Your future is created by what you do today, not tomorrow.",
+    "The secret of change is to focus all your energy not on fighting the old, but on building the new.",
+    "You don't have to be great to start, but you have to start to be great.",
+    "Success is not final, failure is not fatal: it is the courage to continue that counts.",
+    "The only person you should try to be better than is the person you were yesterday.",
+    "Strength does not come from what you can do. It comes from overcoming the things you thought you couldn't.",
+    "Don't count the days, make the days count.",
+    "Discipline is choosing between what you want now and what you want most.",
+    "The harder the battle, the sweeter the victory.",
+    "It's not about perfect. It's about effort. When you bring that effort every day, that's where transformation happens.",
+    "What you resist persists. What you embrace dissolves.",
+    "The difference between who you are and who you want to be is what you do.",
+    "The man who moves a mountain begins by carrying away small stones.",
+    "The pain you feel today will be the strength you feel tomorrow.",
+    "We are what we repeatedly do. Excellence, then, is not an act, but a habit.",
+    "It always seems impossible until it's done.",
+    "Every accomplishment begins with the decision to try."
+  ];
+  
+  // Get a consistent quote based on the day of the month
+  useEffect(() => {
     try {
-      await performRelapse();
-      console.log('handleRelapseConfirm: Centralized relapse function has completed.');
-      showAchievement({
-        title: 'Streak Reset',
-        description: 'A new journey begins now.',
-        buttonText: 'Continue',
+    const day = new Date().getDate();
+      const index = day % quotes.length;
+      setQuoteIndex(index >= 0 && index < quotes.length ? index : 0);
+    } catch (error) {
+      console.error('Error setting initial quote index:', error);
+      setQuoteIndex(0);
+    }
+  }, []);
+
+  // Simple quote rotation without animations
+  const rotateQuote = () => {
+    try {
+      // Simple tap feedback
+      if (Platform.OS !== 'web') {
+        try {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        } catch (error) {}
+      }
+      
+      // Update quote index (simple approach)
+      setQuoteIndex((prev) => {
+        const next = (prev + 1) % quotes.length;
+        return next;
       });
     } catch (error) {
-      console.error('handleRelapseConfirm: Error during performRelapse call', error);
-      Alert.alert('Error', 'An unexpected error occurred while resetting your streak.');
+      console.error('Error rotating quote:', error);
     }
   };
+  
+  return (
+    <TouchableOpacity 
+      onPress={rotateQuote} 
+      activeOpacity={0.8}
+      style={styles.quoteCardWrapper}
+    >
+      <LinearGradient
+        colors={['rgba(30, 30, 35, 0.8)', 'rgba(20, 20, 25, 0.9)']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.quoteCardGradient}
+      >
+        <View style={styles.quoteInnerBorder}>
+      <Text style={[styles.quoteText, { color: colors.secondaryText }]}>
+            {`"${quotes[quoteIndex] || quotes[0]}"`}
+      </Text>
+          
+          <View style={styles.quoteActionHint}>
+            <Text style={styles.quoteActionText}>Tap for more inspiration</Text>
+    </View>
+        </View>
+      </LinearGradient>
+    </TouchableOpacity>
+  );
+};
 
-  const getMotivationMessage = (streak: number) => {
-    if (streak === 0) return "Let's start your journey today!";
-    if (streak === 1) return "First day - you've got this!";
-    if (streak < 7) return 'Building momentum - keep going!';
-    if (streak < 30) return "Great progress - you're developing new habits!";
-    if (streak < 90) return 'Impressive discipline - stay strong!';
-    return 'Extraordinary achievement - truly inspiring!';
-  };
+// Main component
+export default function HomeScreen() {
+  const { colors } = useTheme();
+  const gamification = useGamification();
+  const insets = useSafeAreaInsets();
+  const [username, setUsername] = useState('');
+  const [isUsernameModalVisible, setUsernameModalVisible] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(false);
+  const { setStreakStartDate, recordRelapse, forceRefresh } = useStreak();
+
+  useEffect(() => {
+    const loadUserData = async () => {
+      if (!gamification) return;
+      try {
+        const userPreferences = await getData(STORAGE_KEYS.USER_PREFERENCES, {});
+        if (userPreferences && (userPreferences as any).username) {
+          setUsername((userPreferences as any).username);
+        }
+      } catch (error) {
+        console.error('Error loading user data:', error);
+      }
+    };
+    loadUserData();
+  }, [gamification]);
+
+  if (!gamification || (gamification as any).isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  const {
+    getPersonalizedGreeting,
+  } = gamification;
+
+  const barStyle = colors.text === '#FFFFFF' || colors.text === '#FFF' || colors.text.toLowerCase() === '#ffffff' ? 'light-content' : 'dark-content';
 
   return (
-    <LinearGradient
-      colors={[colors.background, colors.background]} // Use background as fallback
-      style={styles.container}
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
+        style={[styles.scrollView, { backgroundColor: colors.background }]}
+        contentContainerStyle={[
+          styles.scrollContentContainer,
+          { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }
+        ]}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
       >
-        <Text style={[styles.greeting, { color: colors.text }]}>
-          {getGreeting()}, {user?.email || 'User'}
-        </Text>
+        <StatusBar barStyle={barStyle} />
+        
+        <View style={styles.headerContainer}>
+          <Text style={[styles.greetingText, { color: colors.text }]}>
+            {getPersonalizedGreeting(username)}
+          </Text>
+        </View>
 
-        <TouchableOpacity onPress={() => setRelapseModalVisible(true)}>
-          <Animated.View style={[styles.streakCardWrapper, animatedStyle]}>
-            <BlurView intensity={30} tint="dark" style={styles.streakCard}>
-              <Text style={[styles.streakLabel, { color: colors.text }]}>Current Streak</Text>
-              <Text style={[styles.streakCount, { color: colors.primary }]}>{localStreak}</Text>
-              <Text style={[styles.streakLabel, { color: colors.text }]}>
-                {localStreak === 1 ? 'Day' : 'Days'}
-              </Text>
-            </BlurView>
-          </Animated.View>
-        </TouchableOpacity>
-
-        <Text style={[styles.motivation, { color: colors.text }]}>
-          {getMotivationMessage(localStreak)}
-        </Text>
-
-        <CompanionCard />
-        {activeChallenges && activeChallenges.length > 0 && (
-          <ChallengePreview challenge={activeChallenges[0]} />
-        )}
-        <BrainMetrics />
+        <StreakCardNew />
+        
         <CompanionChatPrompt />
-      </ScrollView>
+        
+        <BrainMetrics />
+        
+        <RecoveryCalendar />
+        
+        <DailyQuote />
 
-      <Modal
-        transparent
-        visible={isRelapseModalVisible}
-        animationType="fade"
-        onRequestClose={() => setRelapseModalVisible(false)}
-      >
-        <BlurView intensity={30} tint="dark" style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <AlertTriangle size={40} color="#FBBF24" style={{ marginBottom: 18 }} />
-            <Text style={styles.modalTitle}>Record Relapse</Text>
-            <Text style={styles.modalDescription}>
-              This will reset your current streak to 0 days. Remember, this is part of the journey.
-            </Text>
-            <View style={styles.modalButtonContainer}>
-              <TouchableOpacity
-                style={styles.modalButtonSecondary}
-                onPress={() => setRelapseModalVisible(false)}
-              >
-                <Text style={styles.modalButtonTextSecondary}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.modalButtonPrimary} onPress={handleRelapseConfirm}>
-                <Text style={styles.modalButtonTextPrimary}>Confirm</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </BlurView>
-      </Modal>
-    </LinearGradient>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  scrollView: {
     flex: 1,
   },
-  scrollContent: {
-    padding: 16,
-    paddingTop: Platform.OS === 'android' ? 40 : 60,
+  scrollContentContainer: {
+    paddingHorizontal: 20,
   },
-  greeting: {
+  headerContainer: {
+    marginBottom: 24,
+  },
+  greetingText: {
     fontSize: 28,
     fontWeight: 'bold',
-    marginBottom: 24,
   },
   streakCardWrapper: {
-    marginBottom: 16,
+    borderRadius: 20,
+    overflow: 'hidden',
+    marginBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 5,
   },
   streakCard: {
-    borderRadius: 16,
-    padding: 24,
+    borderRadius: 20,
+    padding: 32,
+    backgroundColor: '#181820',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  streakCardTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    overflow: 'hidden',
+    marginBottom: 36,
   },
-  streakLabel: {
-    fontSize: 16,
-    opacity: 0.8,
+  streakCardLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  streakCount: {
-    fontSize: 80,
-    fontWeight: 'bold',
-    marginVertical: 8,
+  flameIcon: {
+    marginRight: 10,
   },
-  motivation: {
-    textAlign: 'center',
-    fontSize: 16,
-    marginBottom: 24,
+  streakCardLabelText: {
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: 1.5,
+    color: 'rgba(255, 255, 255, 0.6)',
+    textTransform: 'uppercase',
   },
-  modalContainer: {
-    flex: 1,
+  streakCardEditButton: {
+    width: 36,
+    height: 36,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  modalContent: {
-    width: 320,
-    borderRadius: 20,
-    padding: 28,
-    alignItems: 'center',
-    backgroundColor: 'rgba(31, 41, 55, 0.95)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  modalDescription: {
-    fontSize: 15,
-    color: '#D1D5DB',
-    textAlign: 'center',
-    marginBottom: 28,
-  },
-  modalButtonContainer: {
+  topRightControls: {
     flexDirection: 'row',
-    width: '100%',
-    justifyContent: 'space-between',
-  },
-  modalButtonPrimary: {
-    flex: 1,
-    backgroundColor: '#FBBF24',
-    borderRadius: 10,
-    paddingVertical: 12,
-    marginLeft: 8,
     alignItems: 'center',
+    gap: 10,
   },
-  modalButtonTextPrimary: {
-    color: '#23272F',
+  streakCardMiddle: {
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  streakCardNumber: {
+    fontSize: 120,
     fontWeight: '700',
-    fontSize: 16,
+    marginBottom: 4,
+    letterSpacing: -4,
+    lineHeight: 120,
   },
-  modalButtonSecondary: {
-    flex: 1,
-    backgroundColor: '#23272F',
-    borderRadius: 10,
-    paddingVertical: 12,
-    marginRight: 8,
+  streakCardUnit: {
+    fontSize: 16,
+    fontWeight: '500',
+    textTransform: 'uppercase',
+    letterSpacing: 6,
+    color: 'rgba(255, 255, 255, 0.5)',
+  },
+  streakCardBottom: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+    paddingTop: 24,
+  },
+  streakCardDateRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    marginBottom: 16,
+    gap: 8,
   },
-  modalButtonTextSecondary: {
-    color: '#fff',
-    fontWeight: '600',
+  streakCardDate: {
+    fontSize: 14,
+    fontWeight: '400',
+    letterSpacing: 0.2,
+    color: 'rgba(255, 255, 255, 0.5)',
+  },
+  streakCardMotivation: {
     fontSize: 16,
+    fontWeight: '500',
+    marginBottom: 30,
+    lineHeight: 22,
+    color: 'rgba(255, 255, 255, 0.85)',
+  },
+  relapseButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    alignSelf: 'center',
+    width: '100%',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 65, 65, 0.15)',
+  },
+  relapseButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(255, 80, 80, 0.8)',
+    textAlign: 'center',
+  },
+  
+  // Modal styles
+  modalOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  datePickerContainer: {
+    width: width * 0.85,
+    borderRadius: 20,
+    padding: 20,
+    alignItems: 'center',
+  },
+  datePickerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 20,
+  },
+  datePickerActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginTop: 20,
+  },
+  datePickerButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    width: '48%',
+    alignItems: 'center',
+  },
+  quoteCardWrapper: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    marginBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 15,
+    elevation: 8,
+  },
+  quoteCardGradient: {
+    borderRadius: 20,
+    padding: 2,
+  },
+  quoteInnerBorder: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: 'rgba(25, 25, 30, 0.7)',
+    padding: 20,
+    alignItems: 'center',
+  },
+  quoteText: {
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontStyle: 'italic',
+    lineHeight: 24,
+    textAlign: 'center',
+    paddingHorizontal: 8,
+    marginBottom: 12,
+  },
+  quoteActionHint: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+    width: '100%',
+    alignItems: 'center',
+  },
+  quoteActionText: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.4)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  companionContainer: {
+    width: 42,
+    height: 42, 
+    marginRight: 4,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  companionIcon: {
+    width: 50,
+    height: 50,
   },
 });

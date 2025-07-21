@@ -1,59 +1,16 @@
-import React, { useState, useRef, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  Dimensions,
-  TouchableOpacity,
-  ScrollView,
-  FlatList,
-  Platform,
-  StatusBar,
-  ColorValue,
+  View, Text, StyleSheet, Dimensions, TouchableOpacity, 
+  FlatList, Animated, ColorValue, Platform, NativeSyntheticEvent, NativeScrollEvent
 } from 'react-native';
 import { useTheme } from '@/context/ThemeContext';
-import { 
-  ArrowRight, 
-  Clock, 
-  Book, 
-  Globe, 
-  Code, 
-  Activity, 
-  ChevronLeft,
-  ChevronRight,
-  Podcast,
-  FileText,
-  Monitor,
-  Music,
-  Smartphone,
-  Camera,
-  Coffee,
-  AlertTriangle
-} from 'lucide-react-native';
-import Animated, {
-  FadeIn,
-  FadeInUp,
-  FadeOut,
-  SlideInRight,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-  Easing,
-  interpolate,
-  withDelay,
-  withRepeat,
-  withSequence,
-  BounceIn,
-  SlideInUp,
-  ZoomIn,
-} from 'react-native-reanimated';
+import { ArrowRight, AlertTriangle, Code, Book, Dumbbell, Brush } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import MaskedView from '@react-native-masked-view/masked-view';
+import { BlurView } from 'expo-blur';
+import * as Haptics from 'expo-haptics';
 
 const { width, height } = Dimensions.get('window');
-const AnimatedLinearGradient = Animated.createAnimatedComponent(LinearGradient);
 
 interface TimeImpactScreenProps {
   riskLevel: 'Low Risk' | 'Medium Risk' | 'High Risk' | 'Urgent Risk' | 'Very High Risk';
@@ -61,655 +18,367 @@ interface TimeImpactScreenProps {
   onContinue: () => void;
 }
 
-interface AchievementCard {
-  id: string;
-  title: string;
-  subtitle: string;
-  hours: number;
-  icon: React.ReactNode;
-  gradient: [string, string];
-}
-
-// Pool of all possible achievements with varying time requirements
-const ALL_ACHIEVEMENTS: AchievementCard[] = [
-  // Small achievements (under 100 hours)
+const achievements = [
   {
-    id: 'blog',
-    title: 'Start a Blog – 40 Hours',
-    subtitle: 'Launch your own platform to share ideas',
-    hours: 40,
-    icon: <FileText size={24} color="#FFFFFF" />,
-    gradient: ['#FF6B6B', '#ee0979']
+    icon: <Code size={28} color="#fff" />,
+    title: 'Learn Basic Coding',
+    hours: '30 Hours',
+    description: 'Master HTML, CSS fundamentals',
+    gradient: ['#4361ee', '#3a0ca3'] as [string, string]
   },
   {
-    id: 'basic_coding',
-    title: 'Learn Basic Coding – 30 Hours',
-    subtitle: 'Master HTML, CSS fundamentals',
-    hours: 30,
-    icon: <Code size={24} color="#FFFFFF" />,
-    gradient: ['#4267B2', '#2b5876']
+    icon: <Book size={28} color="#fff" />,
+    title: 'Read a Trilogy',
+    hours: '25 Hours',
+    description: 'Get lost in a new world',
+    gradient: ['#f72585', '#7209b7'] as [string, string]
   },
   {
-    id: 'books',
-    title: 'Read 10 Books – 50 Hours',
-    subtitle: 'Expand your knowledge and perspective',
-    hours: 50,
-    icon: <Book size={24} color="#FFFFFF" />,
-    gradient: ['#FF9800', '#F7971E']
+    icon: <Dumbbell size={28} color="#fff" />,
+    title: 'Start a Fitness Habit',
+    hours: '20 Hours',
+    description: 'Build strength and endurance',
+    gradient: ['#4cc9f0', '#4361ee'] as [string, string]
   },
   {
-    id: 'website',
-    title: 'Design Your Website – 80 Hours',
-    subtitle: 'Create your personal professional site',
-    hours: 80,
-    icon: <Monitor size={24} color="#FFFFFF" />,
-    gradient: ['#9C27B0', '#673AB7']
-  },
-  {
-    id: 'podcast',
-    title: 'Launch a Podcast – 60 Hours',
-    subtitle: 'Share your voice with the world',
-    hours: 60,
-    icon: <Podcast size={24} color="#FFFFFF" />,
-    gradient: ['#E91E63', '#FC466B']
-  },
-  
-  // Medium achievements (100-200 hours)
-  {
-    id: 'simple_app',
-    title: 'Build a Simple App – 100 Hours',
-    subtitle: 'Create something useful people can download',
-    hours: 100,
-    icon: <Smartphone size={24} color="#FFFFFF" />,
-    gradient: ['#4CAF50', '#43a047']
-  },
-  {
-    id: 'photography',
-    title: 'Master Photography – 120 Hours',
-    subtitle: 'Learn professional techniques and editing',
-    hours: 120,
-    icon: <Camera size={24} color="#FFFFFF" />,
-    gradient: ['#607D8B', '#455a64']
-  },
-  {
-    id: 'facebook',
-    title: 'Built Facebook – 2 Weeks',
-    subtitle: 'Mark Zuckerberg created the first version at Harvard',
-    hours: 200,
-    icon: <Code size={24} color="#FFFFFF" />,
-    gradient: ['#4267B2', '#2b5876']
-  },
-  {
-    id: 'book',
-    title: 'Wrote a Book – 200 Hours',
-    subtitle: 'Draft a 100,000-word novel',
-    hours: 200,
-    icon: <Book size={24} color="#FFFFFF" />,
-    gradient: ['#FF6B6B', '#ee0979']
-  },
-  
-  // Larger achievements (over 200 hours)
-  {
-    id: 'coding',
-    title: 'Learned to Code – 300 Hours',
-    subtitle: 'Become proficient in JavaScript within 6-12 months',
-    hours: 300,
-    icon: <Code size={24} color="#FFFFFF" />,
-    gradient: ['#FF9800', '#F7971E']
-  },
-  {
-    id: 'coffee_shop',
-    title: 'Start a Coffee Shop – 350 Hours',
-    subtitle: 'From business plan to opening day',
-    hours: 350,
-    icon: <Coffee size={24} color="#FFFFFF" />,
-    gradient: ['#795548', '#5D4037']
-  },
-  {
-    id: 'marathon',
-    title: 'Trained for a Marathon – 400 Hours',
-    subtitle: '16-20 weeks of dedicated training',
-    hours: 400,
-    icon: <Activity size={24} color="#FFFFFF" />,
-    gradient: ['#2196F3', '#1565C0']
-  },
-  {
-    id: 'music_album',
-    title: 'Record a Music Album – 500 Hours',
-    subtitle: 'Write, record and produce your own songs',
-    hours: 500,
-    icon: <Music size={24} color="#FFFFFF" />,
-    gradient: ['#673AB7', '#512DA8']
-  },
-  {
-    id: 'language',
-    title: 'Learned a New Language – 600 Hours',
-    subtitle: 'Achieve conversational fluency in Spanish or French',
-    hours: 600,
-    icon: <Globe size={24} color="#FFFFFF" />,
-    gradient: ['#4CAF50', '#2E7D32']
-  },
+    icon: <Brush size={28} color="#fff" />,
+    title: 'Learn to Paint',
+    hours: '40 Hours',
+    description: 'Unleash your inner artist',
+    gradient: ['#fb8500', '#ffb703'] as [string, string]
+  }
 ];
 
-// Function to get humanized risk level text
-const getHumanizedRiskLevel = (riskLevel: string): string => {
-  switch (riskLevel) {
-    case 'Low Risk':
-      return "Moderate concern";
-    case 'Medium Risk':
-      return "Medium Risk";
-    case 'High Risk':
-      return "High Risk";
-    case 'Urgent Risk':
-    case 'Very High Risk':
-      return "Critical risk - immediate action required";
-    default:
-      return "Risk assessment needed";
-  }
-};
-
-const TimeImpactScreen: React.FC<TimeImpactScreenProps> = ({ 
-  riskLevel, 
-  weeklyHours,
-  onContinue 
-}) => {
+const TimeImpactScreen: React.FC<TimeImpactScreenProps> = ({ riskLevel, weeklyHours, onContinue }) => {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const flatListRef = useRef<FlatList>(null);
-  const [currentCardIndex, setCurrentCardIndex] = useState(0);
-  const swipeHintOpacity = useSharedValue(1);
-  const buttonScale = useSharedValue(1);
-  const riskPulse = useSharedValue(1);
-  const timeCardOpacity = useSharedValue(0);
+  const annualHours = Math.round(weeklyHours * 52);
+  const daysWasted = Math.round(annualHours / 24);
+  const scrollX = useRef(new Animated.Value(0)).current;
+  const animatedValue = useRef(new Animated.Value(0)).current;
+  const parallaxX = useRef(new Animated.Value(0)).current as Animated.Value; // Cast to Animated.Value type
+  
+  // Animation effect on component mount
+  React.useEffect(() => {
+    Animated.timing(animatedValue, {
+      toValue: 1,
+      duration: 1000,
+      useNativeDriver: true,
+    }).start();
+  }, []);
 
-  useEffect(() => {
-    StatusBar.setBarStyle('light-content');
-    
-    // Verify that onContinue is a function
-    if (typeof onContinue !== 'function') {
-      console.error('TimeImpactScreen: onContinue prop is not a function');
+  // Handle continue with haptic feedback
+  const handleContinue = useCallback(() => {
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
     
-    return () => {
-      StatusBar.setBarStyle('default');
-    };
+    // Animated button press effect
+    Animated.sequence([
+      Animated.timing(animatedValue, {
+        toValue: 0.97,
+        duration: 100,
+        useNativeDriver: true
+      }),
+      Animated.timing(animatedValue, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true
+      })
+    ]).start(() => onContinue());
   }, [onContinue]);
   
-  // Calculate annual hours
-  const annualHours = Math.round(weeklyHours * 52);
-  // Calculate days wasted
-  const daysWasted = Math.round(annualHours / 24);
+  // Handle card press with haptic feedback
+  const handleCardPress = useCallback(() => {
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  }, []);
+
+  // Update parallax effect on scroll
+  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const offsetX = event.nativeEvent.contentOffset.x;
+    scrollX.setValue(offsetX);
+  };
   
-  // Filter and select achievement cards based on user's annual time
-  const achievementCards = useMemo(() => {
-    // Allow up to 120% of the user's time to include "almost achievable" goals
-    const maxAllowedTime = annualHours * 1.2;
-    
-    // Filter achievements based on time criteria
-    let filteredAchievements = ALL_ACHIEVEMENTS.filter(achievement => {
-      // For low usage users (less than 150 hours/year), cap high-effort tasks
-      if (annualHours < 150 && achievement.hours > 200) {
-        return false;
-      }
-      
-      // Only include achievements that are achievable or almost achievable
-      return achievement.hours <= maxAllowedTime;
-    });
-    
-    // If no achievements match, include at least the smallest achievements
-    if (filteredAchievements.length === 0) {
-      filteredAchievements = ALL_ACHIEVEMENTS
-        .sort((a, b) => a.hours - b.hours)
-        .slice(0, 3);
-    }
-    
-    // Sort by hours required (ascending)
-    filteredAchievements.sort((a, b) => a.hours - b.hours);
-    
-    // Ensure we have at least one 100% achievable task
-    const hasAchievableTask = filteredAchievements.some(task => task.hours <= annualHours);
-    
-    if (!hasAchievableTask && ALL_ACHIEVEMENTS.some(task => task.hours <= annualHours)) {
-      // Find the most significant achievable task
-      const achievableTask = ALL_ACHIEVEMENTS
-        .filter(task => task.hours <= annualHours)
-        .sort((a, b) => b.hours - a.hours)[0];
-        
-      // Add it to the beginning of our list
-      filteredAchievements.unshift(achievableTask);
-    }
-    
-    // Limit to 5 achievements maximum
-    return filteredAchievements.slice(0, 5);
-  }, [annualHours]);
-
-  // Get risk level color
-  const getRiskLevelColor = () => {
-    switch (riskLevel) {
-      case 'Low Risk':
-        return ['#4CAF50', '#8BC34A'] as [string, string];
-      case 'Medium Risk':
-        return ['#FFC107', '#FFB300'] as [string, string];
-      case 'High Risk':
-        return ['#FF5722', '#E64A19'] as [string, string];
-      case 'Urgent Risk':
-      case 'Very High Risk':
-        return ['#F44336', '#C62828'] as [string, string];
-      default:
-        return ['#4CAF50', '#8BC34A'] as [string, string];
-    }
-  };
-
-  const getRiskGradient = () => {
-    switch (riskLevel) {
-      case 'Low Risk':
-        return ['rgba(76, 175, 80, 0.2)', 'rgba(76, 175, 80, 0)'] as [string, string];
-      case 'Medium Risk':
-        return ['rgba(255, 193, 7, 0.2)', 'rgba(255, 193, 7, 0)'] as [string, string];
-      case 'High Risk':
-        return ['rgba(255, 87, 34, 0.3)', 'rgba(255, 87, 34, 0)'] as [string, string];
-      case 'Urgent Risk':
-      case 'Very High Risk':
-        return ['rgba(244, 67, 54, 0.4)', 'rgba(244, 67, 54, 0)'] as [string, string];
-      default:
-        return ['rgba(76, 175, 80, 0.2)', 'rgba(76, 175, 80, 0)'] as [string, string];
-    }
-  };
-
-  // Animated effects
-  useEffect(() => {
-    // Pulsing animation for swipe hint
-    swipeHintOpacity.value = withRepeat(
-      withSequence(
-        withTiming(0.5, { duration: 800 }),
-        withTiming(1, { duration: 800 })
-      ),
-      3,
-      false
-    );
-
-    // Pulsing animation for risk level
-    riskPulse.value = withRepeat(
-      withSequence(
-        withTiming(1.05, { duration: 1000, easing: Easing.ease }),
-        withTiming(1, { duration: 1000, easing: Easing.ease })
-      ),
-      -1, // Loop indefinitely
-      true
-    );
-    
-    // Fade in time card
-    timeCardOpacity.value = withDelay(300, withTiming(1, { duration: 800 }));
-
-    // Scale button on press
-    buttonScale.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 2000 }),
-        withTiming(1.05, { duration: 400 }),
-        withTiming(1, { duration: 400 })
-      ),
-      -1, // Loop indefinitely
-      true
-    );
-  }, [currentCardIndex]);
-
-  // Get emotional time projection text
-  const getTimeProjectionText = () => {
-    if (daysWasted >= 30) {
-      const months = Math.floor(daysWasted / 30);
-      return `That's ${months} month${months > 1 ? 's' : ''} of your life`;
-    } else {
-      return `That's ${daysWasted} day${daysWasted !== 1 ? 's' : ''} of your life`;
-    }
-  };
-
-  // Get achievement feasibility message
-  const getAchievementFeasibilityMessage = (item: AchievementCard) => {
-    const percentComplete = Math.min(100, (annualHours / item.hours) * 100);
-    
-    if (annualHours >= item.hours) {
-      const timesAchievable = Math.floor(annualHours / item.hours);
-      
-      if (timesAchievable === 1) {
-        return "You already have the time for this";
-      } else if (timesAchievable === 2) {
-        return `You could do this twice in a year`;
-      } else {
-        return `You could do this ${timesAchievable}×`;
-      }
-    }
-    
-    // Not fully achievable with current time
-    if (percentComplete >= 80) {
-      return `So close! ${Math.round(percentComplete)}% there`;
-    } else if (percentComplete >= 50) {
-      return `Halfway to unlocking this: ${Math.round(percentComplete)}%`;
-    } else {
-      return `Only ${Math.round(percentComplete)}% = Just getting started`;
-    }
-  };
-
-  // Render achievement card
-  const renderAchievementCard = ({ item, index }: { item: AchievementCard, index: number }) => {
-    const isActive = index === currentCardIndex;
-    const percentComplete = Math.min(100, (annualHours / item.hours) * 100);
-    
-    return (
-      <Animated.View
-        entering={SlideInUp.delay(100 * index).springify()}
-        style={[
-          styles.achievementCard,
-          {
-            opacity: isActive ? 1 : 0.7,
-            transform: [{ scale: isActive ? 1 : 0.92 }],
-          }
-        ]}
-      >
-        <BlurView intensity={20} tint="dark" style={styles.achievementCardInner}>
-          <LinearGradient
-            colors={['rgba(255,255,255,0.05)', 'rgba(255,255,255,0.02)']}
-            style={StyleSheet.absoluteFill}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          />
-          
-          <View style={styles.achievementHeader}>
-            <LinearGradient
-              colors={item.gradient}
-              style={styles.achievementIconContainer}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
-              {item.icon}
-            </LinearGradient>
-            <View style={styles.achievementTitleContainer}>
-              <Text style={styles.achievementTitle}>{item.title}</Text>
-              <Text style={styles.achievementSubtitle}>{item.subtitle}</Text>
-            </View>
-          </View>
-          
-          <View style={styles.achievementTimeContainer}>
-            <Clock size={12} color="#FFFFFF" style={styles.timeIcon} />
-            <Text style={styles.achievementTimeText}>~{item.hours} hrs</Text>
-          </View>
-          
-          <View style={styles.comparisonContainer}>
-            <View style={styles.comparisonLine}>
-              <LinearGradient
-                colors={annualHours >= item.hours ? ['#4CAF50', '#8BC34A'] : ['#F44336', '#FF5722']}
-                style={[styles.comparisonFill, { width: `${percentComplete}%` }]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-              />
-            </View>
-            
-            <Text style={styles.comparisonText}>
-              {getAchievementFeasibilityMessage(item)}
-            </Text>
-          </View>
-        </BlurView>
-      </Animated.View>
-    );
-  };
-
-  // Handle slide change
-  const handleSlideChange = (index: number) => {
-    setCurrentCardIndex(index);
-  };
-
-  // Swipe hint animated style
-  const swipeHintStyle = useAnimatedStyle(() => {
-    return {
-      opacity: swipeHintOpacity.value
-    };
-  });
-
-  // Risk pulse animated style
-  const riskPulseStyle = useAnimatedStyle(() => {
+  // Background pattern parallax effect
+  const patternAnimatedStyle = React.useCallback(() => {
     return {
       transform: [
-        { scale: riskPulse.value }
+        { 
+          translateX: scrollX.interpolate({
+            inputRange: [0, width],
+            outputRange: [0, -20]
+          }) 
+        }
       ]
     };
-  });
-
-  // Button scale animated style
-  const buttonScaleStyle = useAnimatedStyle(() => {
-    return {
-      transform: [
-        { scale: buttonScale.value }
-      ]
-    };
-  });
-
-  // Time card animated style
-  const timeCardStyle = useAnimatedStyle(() => {
-    return {
-      opacity: timeCardOpacity.value,
-      transform: [
-        { translateY: interpolate(timeCardOpacity.value, [0, 1], [20, 0]) }
-      ]
-    };
-  });
+  }, [scrollX]);
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Background gradient */}
+    <View style={styles.container}>
       <LinearGradient
-        colors={['#161D3F', '#0C1429', '#060A18']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={StyleSheet.absoluteFill}
+        colors={['#0F172A', '#0B1120', '#030712'] as [string, string, string]} 
+        style={StyleSheet.absoluteFillObject}
       />
       
-      {/* Add a subtle glow effect based on risk level */}
-      <LinearGradient
-        colors={getRiskGradient()}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 0.3 }}
-        style={[StyleSheet.absoluteFill, { opacity: 0.7 }]}
-      />
-
-      {/* Background pattern */}
-      <View style={styles.patternContainer} pointerEvents="none">
-        {Array.from({ length: 40 }).map((_, index) => (
+      {/* Animated subtle background patterns */}
+      <Animated.View 
+        style={[
+          styles.patternOverlay, 
+          patternAnimatedStyle()
+        ]} 
+        pointerEvents="none"
+      >
+        {Array.from({ length: 80 }).map((_, i) => (
           <View
-            key={`dot-${index}`}
+            key={i}
             style={[
               styles.patternDot,
               {
-                left: Math.random() * width,
-                top: Math.random() * height,
-                opacity: Math.random() * 0.5 + 0.1,
+                left: Math.random() * width * 1.2,
+                top: Math.random() * height * 1.2,
                 width: Math.random() * 3 + 1,
                 height: Math.random() * 3 + 1,
+                opacity: Math.random() * 0.15 + 0.05,
               }
             ]}
           />
         ))}
-      </View>
+      </Animated.View>
       
-      <View 
-        style={[
+      <View style={[
           styles.contentContainer,
+        { paddingTop: insets.top + 10, paddingBottom: insets.bottom + 10 }
+      ]}>
+        <Animated.View style={[
+          styles.headerContainer,
           { 
-            paddingBottom: insets.bottom + 10,
-            paddingTop: insets.top + 10,
+            transform: [
+              { translateY: animatedValue.interpolate({
+                inputRange: [0, 1],
+                outputRange: [20, 0]
+              })},
+              { scale: animatedValue }
+            ],
+            opacity: animatedValue,
           }
-        ]}
-      >
-        {/* Warning Icon for High Risk */}
-        {(riskLevel === 'High Risk' || riskLevel === 'Urgent Risk' || riskLevel === 'Very High Risk') && (
-          <Animated.View
-            entering={ZoomIn.duration(600)}
-            style={[styles.warningIconContainer, riskPulseStyle]}
-          >
-            <AlertTriangle size={24} color={getRiskLevelColor()[0]} />
+        ]}>
+          <View style={styles.warningIcon}>
+            <AlertTriangle size={22} color="#FFFFFF" />
+          </View>
+          <Text style={styles.headerText}>High Risk</Text>
+          <Text style={styles.headerSubtext}>Time Impact Assessment</Text>
           </Animated.View>
-        )}
         
-        {/* Risk Level Header */}
-        <MaskedView
-          maskElement={
-            <Text style={styles.riskLevelTextMask}>
-              {getHumanizedRiskLevel(riskLevel)}
-            </Text>
+        <Animated.View style={[
+          styles.statsContainer,
+          {
+            opacity: animatedValue,
+            transform: [
+              { translateY: animatedValue.interpolate({
+                inputRange: [0, 1],
+                outputRange: [40, 0]
+              })},
+              { scale: animatedValue }
+            ],
           }
-        >
-          <LinearGradient 
-            colors={getRiskLevelColor()}
-            start={{x: 0, y: 0}}
-            end={{x: 1, y: 0}}
-            style={styles.gradientFill}
-          />
-        </MaskedView>
-        
-        {/* Time Impact Card */}
-        <Animated.View
-          style={[styles.timeCardContainer, timeCardStyle]}
-        >
-          <BlurView intensity={15} tint="dark" style={styles.timeCard}>
-            <LinearGradient
-              colors={['rgba(255,255,255,0.08)', 'rgba(255,255,255,0.03)']}
-              style={StyleSheet.absoluteFill}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            />
+        ]}>
+          <BlurView intensity={30} tint="dark" style={styles.statsBlur}>
+            <View style={styles.statBox}>
+              <Text style={styles.statLabel}>WEEKLY</Text>
+              <Text style={styles.statValue}>{weeklyHours.toFixed(1)}<Text style={styles.statUnit}> hrs</Text></Text>
+            </View>
             
-            <View style={styles.timeContent}>
-              <View style={styles.timeGroup}>
-                <Text style={styles.timeLabel}>Weekly Time</Text>
-                <View style={styles.timeValueContainer}>
-                  <Text style={styles.timeValue}>{weeklyHours}</Text>
-                  <Text style={styles.timeUnit}>hrs/week</Text>
-                </View>
-              </View>
-              
-              <View style={styles.divider} />
-              
-              <View style={styles.timeGroup}>
-                <Text style={styles.timeLabel}>Annual Projection</Text>
-                <View style={styles.timeValueContainer}>
-                  <Text style={styles.timeValue}>{annualHours}</Text>
-                  <Text style={styles.timeUnit}>hrs/year</Text>
-                </View>
-                <LinearGradient
-                  colors={['rgba(244, 67, 54, 0.7)', 'rgba(233, 30, 99, 0.7)']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.timeSublabelContainer}
-                >
-                  <Text style={styles.timeSublabel}>
-                    {getTimeProjectionText()}
-                  </Text>
-                </LinearGradient>
+            <View style={styles.statDivider} />
+            
+            <View style={styles.statBox}>
+              <Text style={styles.statLabel}>ANNUAL</Text>
+              <Text style={styles.statValue}>{annualHours}<Text style={styles.statUnit}> hrs</Text></Text>
+              <View style={styles.impactContainer}>
+                <Text style={styles.impactText}>{`${daysWasted} days lost`}</Text>
               </View>
             </View>
           </BlurView>
         </Animated.View>
         
-        {/* Achievements Slider Section */}
-        <Animated.View
-          entering={FadeInUp.duration(500).delay(200)}
-          style={styles.sectionContainer}
-        >
-          <View style={styles.sectionHeader}>
+        <Animated.View style={[
+          styles.creationSection,
+          {
+            opacity: animatedValue,
+            transform: [
+              { translateY: animatedValue.interpolate({
+                inputRange: [0, 1],
+                outputRange: [60, 0]
+              })},
+            ],
+          }
+        ]}>
             <View style={styles.sectionTitleContainer}>
-              <Text style={styles.sectionTitle}>What You Could Create Instead</Text>
-              <Text style={styles.sectionSubtitle}>Transform lost time into achievements</Text>
-            </View>
-            
-            <Animated.View style={[styles.swipeHintContainer, swipeHintStyle]}>
-              <ChevronLeft size={14} color="rgba(255, 255, 255, 0.7)" />
-              <Text style={styles.swipeHintText}>Swipe</Text>
-              <ChevronRight size={14} color="rgba(255, 255, 255, 0.7)" />
-            </Animated.View>
+            <Text style={styles.sectionTitle}>Better Alternatives</Text>
+            <Text style={styles.sectionSubtitle}>What you could create instead</Text>
           </View>
           
-          {/* Achievement Cards Slider */}
-          <View style={styles.achievementsContainer}>
             <FlatList
-              ref={flatListRef}
-              data={achievementCards}
-              renderItem={renderAchievementCard}
-              keyExtractor={(item) => item.id}
+            data={achievements}
               horizontal
               showsHorizontalScrollIndicator={false}
+            pagingEnabled
               snapToInterval={width * 0.85}
               decelerationRate="fast"
-              contentContainerStyle={styles.flatListContent}
-              onMomentumScrollEnd={(e) => {
-                const index = Math.round(e.nativeEvent.contentOffset.x / (width * 0.85));
-                handleSlideChange(index);
-              }}
-            />
-            
-            {/* Pagination dots */}
-            <View style={styles.paginationContainer}>
-              {achievementCards.map((_, index) => (
-                <View 
-                  key={index}
+            contentContainerStyle={styles.carouselContent}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            renderItem={({item, index}) => {
+              const inputRange = [
+                (index - 1) * width * 0.85,
+                index * width * 0.85,
+                (index + 1) * width * 0.85
+              ];
+              
+              const scale = scrollX.interpolate({
+                inputRange,
+                outputRange: [0.9, 1, 0.9],
+                extrapolate: 'clamp',
+              });
+              
+              const translateY = scrollX.interpolate({
+                inputRange,
+                outputRange: [30, 0, 30],
+                extrapolate: 'clamp',
+              });
+              
+              const opacity = scrollX.interpolate({
+                inputRange,
+                outputRange: [0.5, 1, 0.5],
+                extrapolate: 'clamp',
+              });
+              
+              return (
+                <Animated.View 
+                  style={[
+                    styles.cardWrapper, 
+                    { 
+                      transform: [
+                        { scale }, 
+                        { translateY }
+                      ],
+                      opacity 
+                    }
+                  ]}
+                >
+                  <TouchableOpacity 
+                    activeOpacity={0.95}
+                    onPress={handleCardPress}
+                    style={styles.cardTouchable}
+                  >
+                    <BlurView intensity={20} tint="dark" style={styles.cardBlur}>
+                      <LinearGradient
+                        colors={item.gradient}
+                        style={styles.cardGradient}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                      >
+                        <View style={styles.cardIconContainer}>
+                          {item.icon}
+                        </View>
+                        
+                        <View style={styles.cardContent}>
+                          <Text style={styles.cardTitle}>{item.title}</Text>
+                          <Text style={styles.cardHours}>{item.hours}</Text>
+                          <Text style={styles.cardDescription}>{item.description}</Text>
+                        </View>
+                      </LinearGradient>
+                    </BlurView>
+                    
+                    {/* Add card shadow overlay */}
+                    <LinearGradient
+                      colors={['rgba(0,0,0,0.2)', 'rgba(0,0,0,0)']} 
+                      style={styles.cardShadow}
+                    />
+                  </TouchableOpacity>
+                </Animated.View>
+              );
+            }}
+            keyExtractor={(item) => item.title}
+          />
+          
+          {/* Enhanced pagination indicators */}
+          <View style={styles.pagination}>
+            {achievements.map((_, i) => {
+              const inputRange = [
+                (i - 1) * width * 0.85,
+                i * width * 0.85,
+                (i + 1) * width * 0.85
+              ];
+              
+              const dotWidth = scrollX.interpolate({
+                inputRange,
+                outputRange: [8, 24, 8],
+                extrapolate: 'clamp',
+              });
+              
+              const dotOpacity = scrollX.interpolate({
+                inputRange,
+                outputRange: [0.4, 1, 0.4],
+                extrapolate: 'clamp',
+              });
+              
+              const dotScale = scrollX.interpolate({
+                inputRange,
+                outputRange: [1, 1.2, 1],
+                extrapolate: 'clamp',
+              });
+              
+              return (
+                <Animated.View 
+                  key={i} 
                   style={[
                     styles.paginationDot,
-                    currentCardIndex === index ? styles.paginationDotActive : {}
-                  ]}
+                    { 
+                      width: dotWidth, 
+                      opacity: dotOpacity,
+                      transform: [{ scale: dotScale }] 
+                    }
+                  ]} 
                 />
-              ))}
-            </View>
+              );
+            })}
           </View>
         </Animated.View>
         
-        {/* CTA Button Section */}
-        <Animated.View
-          entering={FadeInUp.duration(500).delay(300)}
-          style={styles.ctaContainer}
-        >
-          <Text style={styles.motivationalText}>Choose growth over guilt.</Text>
-          
-          <Animated.View style={buttonScaleStyle}>
+        <Animated.View style={[
+          styles.footer,
+          {
+            opacity: animatedValue,
+            transform: [
+              { translateY: animatedValue.interpolate({
+                inputRange: [0, 1],
+                outputRange: [30, 0]
+              })}
+            ]
+          }
+        ]}>
             <TouchableOpacity
               style={styles.button}
-              onPress={() => {
-                console.log("Continue button pressed");
-                // Make sure we handle the navigation callback correctly
-                if (typeof onContinue === 'function') {
-                  onContinue();
-                } else {
-                  console.error("onContinue is not a function");
-                }
-              }}
-              activeOpacity={0.7}
-              accessible={true}
-              accessibilityRole="button"
-              accessibilityLabel="Continue to next screen"
-              accessibilityHint="Navigates to the next screen in the onboarding process"
-              hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-            >
+            onPress={handleContinue}
+            activeOpacity={0.9}
+          >
+            <BlurView intensity={30} tint="dark" style={styles.buttonBlur}>
               <LinearGradient
-                colors={['#5E5CFF', '#4A40FF']}
+                colors={['#8B5CF6', '#6D28D9'] as [string, string]}
+                style={StyleSheet.absoluteFill}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
-                style={[StyleSheet.absoluteFill, { borderRadius: 16 }]}
               />
               <Text style={styles.buttonText}>I&apos;m Ready</Text>
-              <ArrowRight size={18} color="#FFFFFF" style={styles.buttonIcon} />
-            </TouchableOpacity>
-          </Animated.View>
-          
-          {/* Backup navigation option */}
-          <TouchableOpacity 
-            onPress={() => {
-              console.log("Backup navigation pressed");
-              if (typeof onContinue === 'function') {
-                onContinue();
-              }
-            }}
-            style={styles.backupNavigationContainer}
-          >
-            <Text style={styles.backupNavigationText}>
-              Tap here if button doesn&apos;t work
-            </Text>
+              <View style={styles.arrowContainer}>
+                <ArrowRight size={16} color="#fff" />
+              </View>
+            </BlurView>
           </TouchableOpacity>
+          
+          <Text style={styles.footerText}>Choose growth over guilt</Text>
         </Animated.View>
       </View>
     </View>
@@ -720,320 +389,251 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  contentContainer: {
-    flex: 1,
-    paddingHorizontal: 20,
-    justifyContent: 'space-between',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 20,
-  },
-  patternContainer: {
+  patternOverlay: {
     ...StyleSheet.absoluteFillObject,
     overflow: 'hidden',
   },
   patternDot: {
     position: 'absolute',
+    borderRadius: 1.5,
     backgroundColor: '#FFFFFF',
-    borderRadius: 50,
   },
-  warningIconContainer: {
-    alignItems: 'center',
-    marginBottom: 5,
-  },
-  riskLevelContainer: {
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  riskLevelText: {
-    fontSize: 32,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  riskLevelTextMask: {
-    fontSize: 32,
-    fontWeight: '800',
-    textAlign: 'center',
-    backgroundColor: 'transparent',
-    color: '#FFFFFF',
-    alignSelf: 'center',
-    marginBottom: 10,
-  },
-  gradientFill: {
-    height: 40,
-    width: width,
-  },
-  timeCardContainer: {
-    width: '100%',
-    borderRadius: 18,
-    overflow: 'hidden',
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  timeCard: {
-    borderRadius: 18,
-    backgroundColor: 'rgba(32, 35, 72, 0.5)',
-  },
-  timeContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 12,
-  },
-  timeGroup: {
-    alignItems: 'center',
-    paddingVertical: 5,
+  contentContainer: {
     flex: 1,
-  },
-  divider: {
-    width: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    marginHorizontal: 8,
-  },
-  timeLabel: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: 'rgba(255, 255, 255, 0.6)',
-    marginBottom: 5,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  timeValueContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    marginBottom: 4,
-  },
-  timeValue: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  timeUnit: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginLeft: 5,
-    marginBottom: 4,
-  },
-  timeSublabelContainer: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 10,
-    marginTop: 4,
-  },
-  timeSublabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    textAlign: 'center',
-  },
-  sectionContainer: {
-    flex: 1,
-    marginBottom: 10,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  sectionTitleContainer: {
-    flex: 1,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 2,
-  },
-  sectionSubtitle: {
-    fontSize: 12,
-    fontWeight: '400',
-    color: 'rgba(255, 255, 255, 0.7)',
-    lineHeight: 14,
-  },
-  swipeHintContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    padding: 4,
-    borderRadius: 12,
-  },
-  swipeHintText: {
-    fontSize: 11,
-    color: 'rgba(255, 255, 255, 0.7)',
-    marginHorizontal: 3,
-  },
-  achievementsContainer: {
-    flex: 1,
-    marginBottom: 5,
-  },
-  flatListContent: {
-    paddingRight: 20,
-  },
-  achievementCard: {
-    width: width * 0.85,
-    marginRight: 10,
-    marginVertical: 5,
-    borderRadius: 16,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 15,
-    elevation: 8,
-    height: Math.min(200, height * 0.28), // Restrict height to a percentage of screen height
-  },
-  achievementCardInner: {
-    padding: 12,
-    borderRadius: 16,
-    backgroundColor: 'rgba(32, 35, 72, 0.7)',
-    height: '100%',
+    paddingHorizontal: 20,
     justifyContent: 'space-between',
   },
-  achievementHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  achievementIconContainer: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  achievementTitleContainer: {
-    flex: 1,
-  },
-  achievementTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 2,
-  },
-  achievementSubtitle: {
-    fontSize: 12,
-    fontWeight: '400',
-    color: 'rgba(255, 255, 255, 0.7)',
-    lineHeight: 16,
-  },
-  achievementTimeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 10,
-    alignSelf: 'flex-start',
-  },
-  timeIcon: {
-    marginRight: 4,
-  },
-  achievementTimeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  comparisonContainer: {
-    marginTop: 4,
-  },
-  comparisonLine: {
-    height: 6,
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    borderRadius: 3,
-    marginBottom: 6,
-    overflow: 'hidden',
-  },
-  comparisonFill: {
-    height: '100%',
-    borderRadius: 3,
-  },
-  comparisonText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: 'rgba(255, 255, 255, 0.9)',
-  },
-  paginationContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
+  headerContainer: {
     alignItems: 'center',
     marginTop: 5,
   },
-  paginationDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    marginHorizontal: 3,
+  warningIcon: {
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+    borderWidth: 0.5,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
   },
-  paginationDotActive: {
-    backgroundColor: '#FFFFFF',
-    width: 18,
+  headerText: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
   },
-  ctaContainer: {
-    marginTop: 8,
-    marginBottom: 10,
-  },
-  motivationalText: {
+  headerSubtext: {
     fontSize: 14,
-    fontWeight: '600',
-    color: 'rgba(255, 255, 255, 0.8)',
-    textAlign: 'center',
-    marginBottom: 10,
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginTop: 6,
+    fontWeight: '500',
     letterSpacing: 0.3,
   },
+  statsContainer: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    marginVertical: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  statsBlur: {
+    flexDirection: 'row',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    overflow: 'hidden',
+  },
+  statBox: {
+    flex: 1,
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statDivider: {
+    width: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  statLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255, 255, 255, 0.6)',
+    letterSpacing: 1.2,
+    marginBottom: 6,
+  },
+  statValue: {
+    fontSize: 36,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
+  },
+  statUnit: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontWeight: '500',
+  },
+  impactContainer: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    marginTop: 8,
+    borderWidth: 0.5,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  impactText: {
+    color: '#F87171',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+  },
+  creationSection: {
+    marginVertical: 15,
+  },
+  sectionTitleContainer: {
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 4,
+    letterSpacing: -0.2,
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontWeight: '500',
+  },
+  carouselContent: {
+    paddingVertical: 10,
+  },
+  cardWrapper: {
+    width: width * 0.85,
+    height: height * 0.18,  // Reduced height
+    marginHorizontal: width * 0.075 / 2,
+  },
+  cardTouchable: {
+    flex: 1,
+    borderRadius: 20,  // Reduced radius
+    overflow: 'hidden',
+  },
+  cardBlur: {
+    flex: 1,
+    borderRadius: 20,  // Reduced radius
+    overflow: 'hidden',
+  },
+  cardGradient: {
+    flex: 1,
+    flexDirection: 'row',
+    padding: 16,
+    alignItems: 'center',
+  },
+  cardIconContainer: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 14,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  cardContent: {
+    flex: 1,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 3,
+    letterSpacing: -0.2,
+  },
+  cardHours: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'rgba(255, 255, 255, 0.9)',
+    marginBottom: 6,
+  },
+  cardDescription: {
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontWeight: '500',
+  },
+  cardShadow: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    height: 30,
+    borderTopLeftRadius: 20,  // Reduced radius
+    borderTopRightRadius: 20,  // Reduced radius
+  },
+  pagination: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  paginationDot: {
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 3,
+  },
+  footer: {
+    alignItems: 'center',
+    marginVertical: 15,
+  },
   button: {
+    borderRadius: 26,
+    width: '100%',
+    marginBottom: 12,
+    overflow: 'hidden',
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+  buttonBlur: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 16,
-    borderRadius: 16,
-    shadowColor: '#5E5CFF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
-    marginHorizontal: 20,
-    minHeight: 52,
-    zIndex: 100,
+    borderRadius: 26,
+    overflow: 'hidden',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   buttonText: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: 0.4,
+    fontWeight: '600',
+    marginRight: 10,
+    letterSpacing: -0.2,
   },
-  buttonIcon: {
-    marginLeft: 10,
+  arrowContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
-  backupNavigationContainer: {
-    marginTop: 8,
-    padding: 6,
-  },
-  backupNavigationText: {
+  footerText: {
     color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: 12,
-    textAlign: 'center',
-    textDecorationLine: 'underline',
+    fontSize: 13,
+    fontWeight: '500',
+    letterSpacing: 0.2,
   },
 });
 

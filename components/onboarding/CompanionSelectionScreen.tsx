@@ -77,6 +77,7 @@ const CompanionSelectionScreen: React.FC<CompanionSelectionScreenProps> = ({ onS
   };
 
   const handleSelect = (companion: CompanionChoice) => {
+    console.log(`CompanionSelectionScreen: Selected companion: ${companion}`);
     setSelectedCompanion(companion);
     onSelect(companion);
     
@@ -95,7 +96,7 @@ const CompanionSelectionScreen: React.FC<CompanionSelectionScreenProps> = ({ onS
         evolutions: [
           { 
             level: 2, 
-            name: 'Stripes',
+            name: selectedData.name, // Use same name for consistency
             xpRequired: EVOLUTION_THRESHOLDS.STAGE_2,
             bondRequired: BOND_THRESHOLDS.LEVEL_2
           },
@@ -108,13 +109,30 @@ const CompanionSelectionScreen: React.FC<CompanionSelectionScreenProps> = ({ onS
         ]
       };
       
-      // Set the companion in the context
+      // Log for debugging
+      console.log(`CompanionSelectionScreen: Creating companion object - ID: ${companionObj.id}, Type: ${companionObj.type}, Name: ${companionObj.name}`);
+      
+      // Set the companion in the context and directly in storage
       setCompanion(companionObj);
       
-      // Complete onboarding after a short delay
-      setTimeout(() => {
-        onComplete();
-      }, 500);
+      // Save directly to storage as a backup to ensure persistence
+      import('@/utils/storage').then(storage => {
+        console.log('Directly saving companion to storage as backup');
+        storage.storeData(storage.STORAGE_KEYS.COMPANION_DATA, {
+          ...companionObj,
+          lastInteraction: Date.now(),
+          lastCheckIn: Date.now(),
+          happinessLevel: 100,
+          isEvolutionReady: false,
+          bondLevel: 10,
+          feedingHistory: [],
+          unlockedSnacks: 1,
+          creationTime: Date.now(),
+          isNewUser: true
+        });
+      });
+      
+      // We're no longer calling onComplete here because it's handled in onboarding.tsx
     }
   };
 
