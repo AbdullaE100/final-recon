@@ -4,7 +4,7 @@ export default {
   expo: {
     name: "Pledge",
     slug: "clearmind",
-    version: "1.2.0",
+    version: "1.0.2",
     orientation: "portrait",
     icon: "./assets/images/newlogo.png",
     scheme: "myapp",
