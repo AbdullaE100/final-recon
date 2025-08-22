@@ -2,15 +2,15 @@ import 'dotenv/config';
 
 export default {
   expo: {
-    name: "ClearMind",
+    name: "Pledge",
     slug: "clearmind",
     version: "1.1.0",
     orientation: "portrait",
-    icon: "./assets/images/logo.png",
+    icon: "./assets/images/newlogo.png",
     scheme: "myapp",
     userInterfaceStyle: "automatic",
     splash: {
-      image: "./assets/images/logo.png", // Updated to use the new logo
+      image: "./assets/images/newlogo.png", // Updated to use the new logo
       resizeMode: "contain",
       backgroundColor: "#ffffff"
     },
@@ -32,14 +32,14 @@ export default {
     },
     android: {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/logo.png",
+        "foregroundImage": "./assets/images/newlogo.png",
         "backgroundColor": "#FFFFFF"
       }
     },
     web: {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/logo.png"
+      "favicon": "./assets/images/favicon.png"
     },
     plugins: [
       "expo-router",

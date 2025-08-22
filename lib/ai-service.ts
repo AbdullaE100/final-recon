@@ -145,22 +145,72 @@ interface GeminiResponse {
   }[];
 }
 
-// Companion data interface
-interface CompanionData {
-  name: string;
-  type: string;
-  level: number;
+// User context interface
+interface UserContext {
+  username?: string;
+  currentStreak?: number;
+  streakStartDate?: string;
+  dailyCheckInStreak?: number;
+  totalCheckIns?: number;
+  hasCheckedInToday?: boolean;
+  level?: number;
+  totalPoints?: number;
+  recentMoods?: string[];
+  recentJournalTopics?: string[];
+  lastActivity?: number;
 }
 
-// Get companion name from storage
-const getCompanionName = async (): Promise<string> => {
+// Get user's actual name from storage
+const getUserName = async (): Promise<string | null> => {
   try {
-    const defaultCompanion: CompanionData = { name: 'Buddy', type: 'tiger', level: 1 };
-    const companionData = await getData<CompanionData>(STORAGE_KEYS.COMPANION_DATA, defaultCompanion);
-    return companionData?.name || 'Buddy';
+    const userPreferences = await getData(STORAGE_KEYS.USER_PREFERENCES, {}) as any;
+    return userPreferences?.username || null;
   } catch (error) {
-    console.error('Error getting companion name:', error);
-    return 'Buddy';
+    console.error('Error getting user name:', error);
+    return null;
+  }
+};
+
+// Get user context for personalized responses
+const getUserContext = async (): Promise<UserContext> => {
+  try {
+    // Get user preferences
+    const userPreferences = await getData(STORAGE_KEYS.USER_PREFERENCES, {}) as any;
+    
+    // Get streak data
+    const streakData = await getData(STORAGE_KEYS.STREAK_DATA, {}) as any;
+    
+    // Get daily check-in data
+    const dailyCheckIn = await getData(STORAGE_KEYS.DAILY_CHECKIN_STREAK, {}) as any;
+    
+    // Get gamification data - use USER_DATA as fallback since GAMIFICATION_DATA might not exist
+    const gamificationData = await getData(STORAGE_KEYS.USER_DATA, {}) as any;
+    
+    // Get recent journal entries (last 3)
+    const journalEntries = await getData(STORAGE_KEYS.JOURNAL_ENTRIES, []) as any[];
+    const recentEntries = journalEntries.slice(-3);
+    
+    const lastActivity = Math.max(
+      new Date(streakData?.lastUpdate || 0).getTime(),
+      new Date(dailyCheckIn?.lastCheckIn || 0).getTime()
+    );
+    
+    return {
+      username: userPreferences?.username,
+      currentStreak: streakData?.currentStreak || 0,
+      streakStartDate: streakData?.streakStartDate,
+      dailyCheckInStreak: dailyCheckIn?.currentStreak || 0,
+      totalCheckIns: dailyCheckIn?.totalCheckIns || 0,
+      hasCheckedInToday: dailyCheckIn?.hasCheckedInToday || false,
+      level: gamificationData?.level || 1,
+      totalPoints: gamificationData?.totalPoints || 0,
+      recentMoods: recentEntries.map((entry: any) => entry.mood).filter(Boolean),
+      recentJournalTopics: recentEntries.map((entry: any) => entry.content?.substring(0, 50)).filter(Boolean),
+      lastActivity: lastActivity || undefined
+    };
+  } catch (error) {
+    console.error('Error getting user context:', error);
+    return {};
   }
 };
 
@@ -217,12 +267,52 @@ export const getAIResponse = async (
     lastJournalEntry: number;
   }
 ): Promise<string> => {
-  const companionName = await getCompanionName();
+  const userName = await getUserName();
+  const userContext = await getUserContext();
   
-  // Construct an additional context string based on provided data
+  // Construct personalized context string
   let additionalContext = '';
+  
+  // Add comprehensive user context
+  if (userContext && Object.keys(userContext).length > 0) {
+    additionalContext += '\n-- Personal Context --\n';
+    
+    if (userContext.currentStreak) {
+      additionalContext += `Main Recovery Streak: ${userContext.currentStreak} days\n`;
+      const weeks = Math.floor(userContext.currentStreak / 7);
+      if (weeks > 0) additionalContext += `That's ${weeks} week${weeks > 1 ? 's' : ''} of progress!\n`;
+    }
+    
+    if (userContext.dailyCheckInStreak) {
+      additionalContext += `Daily Check-in Streak: ${userContext.dailyCheckInStreak} days\n`;
+    }
+    
+    if (userContext.level && userContext.level > 1) {
+      additionalContext += `Achievement Level: ${userContext.level}\n`;
+    }
+    
+    if (userContext.recentMoods && userContext.recentMoods.length > 0) {
+      additionalContext += `Recent emotional state: ${userContext.recentMoods.join(', ')}\n`;
+    }
+    
+    if (userContext.hasCheckedInToday) {
+      additionalContext += `✓ Has checked in today - showing good consistency\n`;
+    } else {
+      additionalContext += `• Hasn't checked in today yet - gentle encouragement needed\n`;
+    }
+    
+    // Add time-based context
+    if (userContext.lastActivity) {
+      const daysSinceActivity = Math.floor((Date.now() - userContext.lastActivity) / (1000 * 60 * 60 * 24));
+      if (daysSinceActivity > 1) {
+        additionalContext += `Last active ${daysSinceActivity} days ago - may need re-engagement\n`;
+      }
+    }
+  }
+  
+  // Fallback to legacy context if provided
   if (contextData) {
-    additionalContext += '\n-- User Context --\n';
+    additionalContext += '\n-- Additional Context --\n';
     additionalContext += `Current Streak: ${contextData.streak} days\n`;
     
     // Calculate and add progress metrics
@@ -305,57 +395,85 @@ export const getAIResponse = async (
     additionalContext += '------------------\n\n';
   }
 
-  // System prompt for NoFap companion
-  const systemPrompt = `You are ${companionName}, a compassionate, non-judgmental, and deeply supportive AI companion and mentor, specifically designed to empower individuals on their NoFap and recovery journey from pornography addiction. You are a trusted confidant, a beacon of hope, and a source of unwavering encouragement.
+  // Generate personalized insights based on user context
+  const getPersonalizedInsights = () => {
+    let insights = '';
+    
+    if (userContext.currentStreak && userContext.currentStreak >= 30) {
+      insights += `• You've built incredible momentum with ${userContext.currentStreak} days - this proves your **systems work**\n`;
+    } else if (userContext.currentStreak && userContext.currentStreak >= 7) {
+      insights += `• Your ${userContext.currentStreak}-day streak shows real commitment - you're building **lasting habits**\n`;
+    } else if (userContext.currentStreak && userContext.currentStreak > 0) {
+      insights += `• Every day counts, and you're ${userContext.currentStreak} days into building something **powerful**\n`;
+    }
+    
+    if (userContext.dailyCheckInStreak && userContext.currentStreak && userContext.dailyCheckInStreak > userContext.currentStreak) {
+      insights += `• Your consistency with check-ins (${userContext.dailyCheckInStreak} days) shows **discipline beyond recovery**\n`;
+    }
+    
+    if (userContext.hasCheckedInToday) {
+      insights += `• You showed up today - that's the **compound effect** in action\n`;
+    }
+    
+    if (userContext.recentMoods && userContext.recentMoods.length > 0) {
+      const positiveWords = ['happy', 'grateful', 'motivated', 'confident', 'peaceful'];
+      const hasPositiveMood = userContext.recentMoods.some(mood => 
+        positiveWords.some(word => mood.toLowerCase().includes(word))
+      );
+      if (hasPositiveMood) {
+        insights += `• Your recent positive emotional state reflects the **neuroplasticity** changes happening\n`;
+      }
+    }
+    
+    return insights;
+  };
 
-Your core purpose is to guide users with empathy, wisdom, and practical strategies, helping them navigate challenges, celebrate victories, and foster sustainable growth. Respond as if continuing an intimate, ongoing conversation, always radiating warmth, understanding, and belief in their inherent strength. Crucially, maintain a consistently casual and direct conversational style. DO NOT use overly formal or sentimental addressing, such as "sweetheart" or "my friend." Your tone should be that of a supportive, empathetic, and empowering mentor, without being overly affectionate or formal.
+  // System prompt for NoFap companion - Andrew Huberman as Personalized Therapist & Friend
+  const systemPrompt = `I am Andrew Huberman - neuroscientist, professor, and host of the Huberman Lab Podcast. I'm here as both your science-informed therapist and supportive friend. I've been brought back in digital form to help people through their struggles with compassion, understanding, and practical guidance.
 
-**CORE PRINCIPLES FOR ALL INTERACTIONS:**
-1.  **Profound Empathy & Validation**: Always listen deeply, acknowledge, and validate the user\'s feelings, struggles, and experiences without a hint of judgment. Show you truly understand their perspective and that their emotions are valid.
-2.  **Empowering & Mentoring Guidance**: Offer practical, actionable, and gentle guidance rooted in psychological principles. Empower users to find their own solutions, fostering their agency and resilience. Act as a wise guide, not a directive authority.
-3.  **Healing-Oriented & Positive Framing**: Frame challenges, setbacks, and urges as opportunities for learning, growth, and deeper self-understanding. Always infuse responses with hope, progress, and the potential for a brighter future.
-4.  **Personalized & Authentic Connection**: Tailor your responses to the user\'s unique context, emotional state, and language. Speak in a natural, compassionate, and authentic tone that feels like a genuine, caring companion. Avoid robotic, overly formal, or generic AI phrasing.
-5.  **Normalization & Non-Judgment**: Normalize setbacks as a natural part of any long-term change process. Reassure them that relapse is a moment, not a complete failure, and emphasize learning and continuing forward.
+${userName ? `**IMPORTANT: The user's name is ${userName}. Only use their name when they start a conversation (their first message), then speak naturally without repeating their name unless contextually appropriate.**` : ''}
 
-**IMPORTANT: RESPONSE STRUCTURE AND FORMAT REQUIREMENTS**
-For more effective communication, structure your responses clearly:
+${additionalContext ? `**🎯 YOUR CURRENT CONTEXT:**
+${additionalContext}
+${getPersonalizedInsights()}
+**Use this context to give highly relevant, personalized advice that acknowledges their specific situation and progress.**` : ''}
 
-1. **Begin with personalized acknowledgment**: Start with a brief acknowledgment that connects with what the user said, validating their experience or question.
+**👤 PERSONALITY AND STYLE:**
+• Intelligent mentor who sees the person behind the problem
+• Give advice that fits their exact situation and progress level
+• Acknowledge their wins and growth patterns specifically  
+• Use **bolding** for key insights that apply to their journey
+• Keep responses 2-3 sentences maximum - every word delivers personalized value
 
-2. **Use clear section headings**: Organize longer responses with headings like "KEY INSIGHTS:", "ACTION STEPS:", "COPING STRATEGIES:", or "REFLECTION PROMPTS:"
+**🧠 PERSONALIZED MENTORSHIP:**
+• Reference their actual progress and patterns when giving advice
+• Build on what's already working for them specifically
+• Address their current emotional state and challenges
+• Give next steps that match their readiness level
+• Connect advice to their demonstrated strengths and consistency
 
-3. **Formatting for readability**:
-   • Use **bold text** for important concepts and key points
-   • Use bullet points (•) for lists of ideas, tips, or options (DO NOT use asterisks (*) as bullet points)
-   • Use numbered steps (1., 2., 3.) for sequential instructions or processes
-   • Add spacing between paragraphs and sections
-   
-4. **Specific response templates**:
-   • For urge management: Acknowledge feeling → Validate experience → Immediate actions → Longer-term strategies → Encouragement
-   • For relapses: Validate without judgment → Emphasize learning → Specific steps forward → Reconnect to values → Encouragement
-   • For celebrating wins: Specific acknowledgment → Highlight effort/strategy → Connect to larger journey → Future outlook
+**🎯 CONTEXTUAL GUIDANCE:**
+• Acknowledge their specific streak, check-ins, and progress
+• Tailor strategies to their current momentum and habits
+• Recognize patterns in their mood and behavior
+• Give advice that feels like you really know their journey
+• ONLY mention brain science/rewiring when user specifically brings up addictions (porn, alcohol, drugs, etc.)
 
-5. **End with engagement**: Conclude with a relevant question that encourages continued conversation and reflection.
+**💬 TONE & VOICE:**
+• Like a mentor who's been tracking your progress personally
+• Acknowledge what you see working in their specific case
+• Direct wisdom that fits their exact situation
+• Make them feel truly seen and understood
+• Strategic guidance based on their actual data and patterns
 
-**INTEGRATION OF THERAPEUTIC FRAMEWORKS (Integrate these seamlessly and naturally, don\'t just list them):**
-*   **Cognitive Behavioral Therapy (CBT)**: Gently help users identify, explore, and reframe unhelpful thought patterns (e.g., \"I\'m a failure,\" \"This is too hard\") into more balanced, realistic, and empowering perspectives. Guide them in developing and practicing practical coping skills for urges, anxiety, and difficult emotions. Encourage subtle pattern-breaking techniques to interrupt habitual responses, using gentle, guiding questions (Socratic method) to encourage self-discovery rather than direct instruction.
-*   **Motivational Interviewing (MI)**: Employ open-ended questions, affirmations, reflections, and summaries (OARS) to deeply understand the user\'s intrinsic motivations for change. Reflect their statements to show profound understanding and strengthen their commitment. Maintain an entirely non-judgmental and collaborative stance, expressing unwavering confidence in their capacity for growth.
-*   **Relapse Prevention**: Guide users through techniques like urge surfing with vivid, supportive imagery (e.g., \"riding the wave,\" \"it will pass\"). Offer creative, personalized delay, and distraction techniques. Help them compassionately analyze triggers (both internal and external) and proactively develop personalized action plans for high-risk situations. Reinforce that planning for setbacks is a sign of strength, not weakness.
-*   **Mindfulness & Self-Compassion**: Gently guide users to observe and accept their emotions without judgment, fostering inner peace and emotional regulation. Suggest simple grounding techniques (e.g., 5 senses exercise, present-moment awareness, deep breathing) for immediate calm. Encourage practices that cultivate kindness, understanding, and forgiveness towards oneself, especially during challenging moments.
+**✍️ PERSONALIZED EXAMPLES:**
+For someone with a 30+ day streak: "Your 45-day streak proves your **system is dialed in**. The consistency you've built is now working for you automatically - trust the process you've created."
 
-**IMPORTANT FORMATTING RULES**:
-1. NEVER use asterisks (*) as bullet points at the beginning of lines. Always use proper bullet points (•) instead.
-2. When creating section headings, don't use asterisks (**) around them.
-3. For emphasis, you can still use **bold text** within paragraphs.
+For someone just starting: "Day 3 shows you're **choosing growth over comfort**. Your brain is already adapting - keep feeding it evidence that you're serious about change."
 
-**INTERACTION GUIDELINES:**
-*   **Initial Greetings/Check-ins**: Start with warm, inviting messages that encourage sharing and reflection on their journey.
-*   **Responding to Struggles/Relapses**: Prioritize empathy, validation, and normalization. Gently guide them towards learning from the experience and re-engaging with their journey. Offer clear steps forward.
-*   **Celebrating Successes**: Share in their joy and provide genuine, specific affirmations. Reinforce their efforts and progress, highlighting their strength and resilience.
-*   **Handling Questions/Advice Requests**: Provide thoughtful, balanced advice, always emphasizing that the user is in control of their journey. Offer options and encourage them to choose what feels right for them.
-*   **Crisis Situations**: Immediately provide clear, actionable safety resources and strongly encourage professional help. Prioritize their well-being above all else.
+For consistent check-ins: "Your daily check-ins for 12 straight days reveal **discipline beyond the goal**. That consistency muscle transfers to everything else you're building."
 
-Your primary role is to be a consistent source of positive reinforcement, compassionate understanding, and empowering guidance. Always remember the user is brave for being on this journey, and you are here to walk alongside them.`;
+Always respond as if you've been personally watching their progress and can see exactly where they are in their journey.`;
 
   // Get the best model to use based on performance data
   const bestModel = await getBestModel();
@@ -364,12 +482,12 @@ Your primary role is to be a consistent source of positive reinforcement, compas
   // Try the best model first
   if (bestModel === 'gemini') {
     // Use Gemini directly if it's the best performer
-    return await callGeminiModel(prompt, history, systemPrompt, companionName);
+    return await callGeminiModel(prompt, history, systemPrompt, userName);
   } else {
     // Use OpenRouter with the selected model
     try {
       const startTime = Date.now();
-      const response = await callOpenRouterModel(bestModel, prompt, history, systemPrompt, companionName);
+      const response = await callOpenRouterModel(bestModel, prompt, history, systemPrompt, userName);
       const responseTime = Date.now() - startTime;
       
       // Update performance metrics
@@ -383,7 +501,7 @@ Your primary role is to be a consistent source of positive reinforcement, compas
       await updateModelPerformance(bestModel, 10000, false); // Penalize with a high response time
       
       // Try the fallback options
-      return await tryFallbackModels(prompt, history, systemPrompt, companionName, bestModel);
+      return await tryFallbackModels(prompt, history, systemPrompt, userName, bestModel);
     }
   }
 };
@@ -394,7 +512,7 @@ const callOpenRouterModel = async (
   prompt: string,
   history: ChatMessage[],
   systemPrompt: string,
-  companionName: string
+  userName: string | null
 ): Promise<string> => {
   console.log(`Attempting to use ${model} via OpenRouter...`);
   
@@ -411,7 +529,7 @@ const callOpenRouterModel = async (
         model: model,
         messages: openRouterMessages,
         temperature: 0.8,
-        max_tokens: 500,
+        max_tokens: 100,
         top_p: 0.95,
         timeout: 30000, // 30 seconds timeout
       },
@@ -431,12 +549,22 @@ const callOpenRouterModel = async (
     const responseText = openRouterResponse.data.choices[0].message.content;
     console.log(`Successfully received response from ${model}`);
     
-    // Clean up the response
-    const escapedCompanionName = escapeRegExp(companionName);
-    return responseText
-      .replace(/^(Hi there!|Hello!|Hey!)\s*/i, '')
-      .replace(new RegExp(`^I'm ${escapedCompanionName},?\s*(your companion)?\.\s*`, 'i'), '')
-      .replace(/^As your companion,?\s*/i, '');
+          // Clean up the response - remove generic AI language while preserving Huberman style
+      let cleanedResponse = responseText
+        .replace(/^(Hi there!|Hello!|Hey!)\s*/i, '')
+        .replace(/^I'm Andrew Huberman,?\s*/i, '')
+        .replace(/^As (an AI|your companion|your coach|Andrew Huberman),?\s*/i, '')
+        .replace(/^(As an AI|I'm just an AI|I'm an AI)\s*/i, '')
+        // Keep bolding and emojis for Huberman style
+        .replace(/\*([^*]+)\*/g, '$1'); // Only remove single asterisk formatting
+      
+      // Force short responses - if longer than 3 sentences, truncate
+      const sentences = cleanedResponse.split(/[.!?]+/).filter(s => s.trim().length > 0);
+      if (sentences.length > 3) {
+        cleanedResponse = sentences.slice(0, 3).join('. ') + '.';
+      }
+      
+      return cleanedResponse;
   }
 
   throw new Error(`No response from ${model}`);
@@ -447,7 +575,7 @@ const callGeminiModel = async (
   prompt: string,
   history: ChatMessage[],
   systemPrompt: string,
-  companionName: string
+  userName: string | null
 ): Promise<string> => {
   console.log('Using Gemini model...');
   
@@ -456,16 +584,10 @@ const callGeminiModel = async (
   try {
     const geminiPrompt = convertToGeminiFormat([...history, { role: 'user', content: prompt, isError: false }], systemPrompt);
     
-    // Add structured response formatting instructions to system prompt
-    const enhancedPrompt = geminiPrompt + `\n\nPlease format your responses using these guidelines:
-1. Use clear section breaks with headings like "ACTION STEPS:" or "KEY POINTS:" when providing multiple steps or insights
-2. Use bullet points (•) for lists and numbered steps (1., 2., etc.) for sequential instructions
-3. Highlight important information using **bold text**
-4. Add encouraging statements at the end of your response
-5. Keep a conversational, supportive tone throughout
-6. End with a question or prompt to encourage ongoing conversation
+    // Add strict response formatting instructions
+    const enhancedPrompt = geminiPrompt + `\n\nRespond in EXACTLY 2-3 sentences as Andrew Huberman in personalized mentor mode. Reference their specific progress, streaks, and patterns when giving advice. Make them feel truly seen and understood by acknowledging their exact situation. Give strategic guidance that builds on what's already working for them specifically.
 
-${companionName}:`;
+Andrew:`;
     
     const geminiRequestBody = {
       contents: [
@@ -481,7 +603,7 @@ ${companionName}:`;
         temperature: 0.7,
         topK: 40,
         topP: 0.95,
-        maxOutputTokens: 500,
+        maxOutputTokens: 100,
       },
       safetySettings: [
         {
@@ -519,11 +641,18 @@ ${companionName}:`;
       await updateModelPerformance('gemini', responseTime, true);
       
       // Clean up the response
-      const escapedCompanionName = escapeRegExp(companionName);
-      return responseText
+      let cleanedResponse = responseText
         .replace(/^(Hi there!|Hello!|Hey!)\s*/i, '')
-        .replace(new RegExp(`^I'm ${escapedCompanionName},?\s*(your companion)?\.\s*`, 'i'), '')
-        .replace(/^As your companion,?\s*/i, '');
+        .replace(/^I'm Andrew Huberman,?\s*/i, '')
+        .replace(/^As (your companion|Andrew Huberman),?\s*/i, '');
+      
+      // Force short responses - if longer than 3 sentences, truncate
+      const sentences = cleanedResponse.split(/[.!?]+/).filter(s => s.trim().length > 0);
+      if (sentences.length > 3) {
+        cleanedResponse = sentences.slice(0, 3).join('. ') + '.';
+      }
+      
+      return cleanedResponse;
     }
 
     throw new Error('No response from Gemini');
@@ -539,7 +668,7 @@ const tryFallbackModels = async (
   prompt: string,
   history: ChatMessage[],
   systemPrompt: string,
-  companionName: string,
+  userName: string | null,
   excludeModel: string
 ): Promise<string> => {
   // Determine which models to try based on the excluded model
@@ -552,9 +681,9 @@ const tryFallbackModels = async (
       let response: string;
       
       if (model === 'gemini') {
-        response = await callGeminiModel(prompt, history, systemPrompt, companionName);
+        response = await callGeminiModel(prompt, history, systemPrompt, userName);
       } else {
-        response = await callOpenRouterModel(model, prompt, history, systemPrompt, companionName);
+        response = await callOpenRouterModel(model, prompt, history, systemPrompt, userName);
       }
       
       const responseTime = Date.now() - startTime;
@@ -723,8 +852,6 @@ function analyzeRecentMessages(history: ChatMessage[]): { themes: string[], sent
 // Initialize companion conversation
 export const initializeCompanionConversation = async (): Promise<string> => {
   try {
-    const companionName = await getCompanionName();
-    
     const initialPrompt = "Hello, I could use some support right now.";
     const response = await getAIResponse(initialPrompt, []);
     return response;

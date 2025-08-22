@@ -36,30 +36,30 @@ interface ThemeContextType {
 }
 
 const darkColors: ThemeColors = {
-  background: '#121212',
-  card: '#1E1E1E',
-  cardAlt: '#2A2A2A',
+  background: '#0B0B1A', // Deep purple-black to match logo
+  card: '#1A1A2E', // Rich dark purple
+  cardAlt: '#16213E', // Darker blue-purple
   text: '#FFFFFF',
-  secondaryText: '#B0B0B0',
-  border: '#3A3A3A',
-  primary: '#6366F1',
-  secondary: '#22D3EE',
-  accent: '#F472B6',
-  success: '#22C55E',
+  secondaryText: '#C1C7D0',
+  border: '#2A2D3A',
+  primary: '#8B5CF6', // Purple from logo
+  secondary: '#06B6D4', // Cyan from logo  
+  accent: '#EF4444', // Red from logo
+  success: '#10B981',
   warning: '#F59E0B',
   error: '#EF4444',
   errorLight: 'rgba(239, 68, 68, 0.15)',
-  progressTrack: '#2A2A2A',
+  progressTrack: '#1A1A2E',
   progressTrunk: '#8B5A2B',
-  progressLeaves: '#3F9142',
-  progressGround: '#3A3A3A',
-  switchTrackOff: '#3A3A3A',
+  progressLeaves: '#10B981',
+  progressGround: '#2A2D3A',
+  switchTrackOff: '#2A2D3A',
   switchThumb: '#F3F4F6',
   white: '#FFFFFF',
   placeholder: '#6B7280',
-  inputBackground: '#2A2A2A',
-  gradientStart: '#6366F1',
-  gradientEnd: '#F472B6',
+  inputBackground: '#1A1A2E',
+  gradientStart: '#8B5CF6', // Purple from logo
+  gradientEnd: '#06B6D4', // Cyan from logo
 };
 
 // Light mode colors kept for reference but not used

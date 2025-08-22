@@ -323,12 +323,8 @@ export default function JournalScreen() {
   
   // Render entry form
   const renderEntryForm = () => (
-    <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.formContainer}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
-    >
-      <LinearGradient colors={['#121212', '#000000']} style={StyleSheet.absoluteFillObject} />
+    <View style={styles.formContainer}>
+      <LinearGradient colors={['#0B0B1A', '#1A1A2E']} style={StyleSheet.absoluteFillObject} />
         <View style={[styles.formHeader, { borderBottomColor: 'rgba(255, 255, 255, 0.1)' }]}>
           <TouchableOpacity 
             style={styles.headerButton} 
@@ -350,102 +346,119 @@ export default function JournalScreen() {
           </TouchableOpacity>
         </View>
         
-        <ScrollView 
-          style={styles.formScrollView} 
-          contentContainerStyle={{ paddingVertical: 20 }}
-          keyboardShouldPersistTaps="handled"
-          bounces={false}
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
-          <JournalPrompts onSelectPrompt={setSelectedPrompt} selectedPrompt={selectedPrompt} />
-          
-          <BlurView intensity={10} tint="dark" style={[styles.inputContainer, { borderColor: 'rgba(255, 255, 255, 0.1)' }]}>
-            <TextInput
-              style={[styles.input, { color: '#FFFFFF', backgroundColor: 'transparent' }]}
-              placeholder="What's on your mind?"
-              placeholderTextColor="rgba(255, 255, 255, 0.5)"
-              multiline
-              value={entryText}
-              onChangeText={setEntryText}
-              autoFocus
-            />
-          </BlurView>
-          
-          <Text style={styles.sectionTitle}>How are you feeling?</Text>
-          <View style={styles.moodSelector}>
-            {MOOD_OPTIONS.map((mood) => {
-              const MoodIcon = mood.icon;
-              const isSelected = selectedMood === mood.key;
-              
-              return (
-                <TouchableOpacity
-                  key={mood.key}
-                  style={[
-                    styles.moodButton,
-                    { 
-                      backgroundColor: isSelected ? `${mood.color}30` : 'rgba(255, 255, 255, 0.05)',
-                      borderWidth: 1,
-                      borderColor: isSelected ? mood.color : 'transparent'
-                    }
-                  ]}
-                  onPress={() => selectMood(mood.key)}
-                  activeOpacity={0.7}
-                >
-                  <MoodIcon size={24} color={mood.color} />
-                  <Text style={[styles.moodLabel, { color: isSelected ? mood.color : '#AAAAAA' }]}>
-                    {mood.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-          
-          <View style={styles.tagSelector}>
-            <View style={styles.tagHeader}>
-              <Tag size={20} color="#6366F1" />
-              <Text style={[styles.tagTitle, { color: '#FFFFFF' }]}>Tags</Text>
-            </View>
-            
-            <View style={styles.tagContainer}>
-              {JOURNAL_TAGS.map((tag) => (
-                <TouchableOpacity
-                  key={tag}
-                  style={[
-                    styles.tag,
-                    { 
-                      backgroundColor: selectedTags.includes(tag) ? '#6366F130' : 'rgba(255, 255, 255, 0.05)',
-                      borderColor: selectedTags.includes(tag) ? '#6366F1' : 'rgba(255, 255, 255, 0.1)'
-                    }
-                  ]}
-                  onPress={() => toggleTag(tag)}
-                  activeOpacity={0.7}
-                >
-                  <Text 
-                    style={{ 
-                      color: selectedTags.includes(tag) ? '#6366F1' : '#AAAAAA',
-                      fontWeight: '600'
-                    }}
-                  >
-                    {tag}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        </ScrollView>
-        
-        <View style={styles.saveButtonContainer}>
-          <TouchableOpacity
-            style={[styles.saveButton, { opacity: entryText.trim().length > 0 || selectedMood ? 1 : 0.5 }]}
-            onPress={handleAddEntry}
-            disabled={!entryText.trim().length && !selectedMood}
-            activeOpacity={0.7}
+          <ScrollView 
+            style={styles.formScrollView} 
+            contentContainerStyle={{ paddingVertical: 15, paddingBottom: 100 }}
+            keyboardShouldPersistTaps="handled"
+            bounces={false}
+            showsVerticalScrollIndicator={false}
           >
-            <LinearGradient colors={['#6366F1', '#4F46E5']} style={styles.saveButtonGradient}>
-              <Text style={styles.saveButtonText}>Save Entry</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
-    </KeyboardAvoidingView>
+            <JournalPrompts onSelectPrompt={setSelectedPrompt} selectedPrompt={selectedPrompt} />
+            
+            <BlurView intensity={10} tint="dark" style={[styles.inputContainer, { borderColor: 'rgba(255, 255, 255, 0.1)' }]}>
+              <TextInput
+                style={[styles.input, styles.compactInput, { color: '#FFFFFF', backgroundColor: 'transparent' }]}
+                placeholder="What's on your mind?"
+                placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                multiline
+                value={entryText}
+                onChangeText={setEntryText}
+                autoFocus
+                maxHeight={120}
+                textAlignVertical="top"
+              />
+            </BlurView>
+            
+            <Text style={styles.sectionTitle}>How are you feeling?</Text>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              style={styles.moodSelectorScrollView}
+              contentContainerStyle={styles.moodSelectorContent}
+            >
+              {MOOD_OPTIONS.map((mood) => {
+                const MoodIcon = mood.icon;
+                const isSelected = selectedMood === mood.key;
+                
+                return (
+                  <TouchableOpacity
+                    key={mood.key}
+                    style={[
+                      styles.moodButton,
+                      styles.compactMoodButton,
+                      { 
+                        backgroundColor: isSelected ? `${mood.color}30` : 'rgba(255, 255, 255, 0.05)',
+                        borderWidth: 1,
+                        borderColor: isSelected ? mood.color : 'transparent'
+                      }
+                    ]}
+                    onPress={() => selectMood(mood.key)}
+                    activeOpacity={0.7}
+                  >
+                    <MoodIcon size={20} color={mood.color} />
+                    <Text style={[styles.moodLabel, styles.compactMoodLabel, { color: isSelected ? mood.color : '#AAAAAA' }]}>
+                      {mood.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            
+            <View style={styles.tagSelector}>
+              <View style={styles.tagHeader}>
+                <Tag size={18} color="#6366F1" />
+                <Text style={[styles.tagTitle, { color: '#FFFFFF', fontSize: 16 }]}>Tags</Text>
+              </View>
+              
+              <View style={styles.tagContainer}>
+                {JOURNAL_TAGS.map((tag) => (
+                  <TouchableOpacity
+                    key={tag}
+                    style={[
+                      styles.tag,
+                      styles.compactTag,
+                      { 
+                        backgroundColor: selectedTags.includes(tag) ? '#6366F130' : 'rgba(255, 255, 255, 0.05)',
+                        borderColor: selectedTags.includes(tag) ? '#6366F1' : 'rgba(255, 255, 255, 0.1)'
+                      }
+                    ]}
+                    onPress={() => toggleTag(tag)}
+                    activeOpacity={0.7}
+                  >
+                    <Text 
+                      style={{ 
+                        color: selectedTags.includes(tag) ? '#6366F1' : '#AAAAAA',
+                        fontWeight: '600',
+                        fontSize: 12
+                      }}
+                    >
+                      {tag}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </ScrollView>
+          
+          <View style={styles.saveButtonContainer}>
+            <TouchableOpacity
+              style={[styles.saveButton, { opacity: entryText.trim().length > 0 || selectedMood ? 1 : 0.5 }]}
+              onPress={handleAddEntry}
+              disabled={!entryText.trim().length && !selectedMood}
+              activeOpacity={0.7}
+            >
+              <LinearGradient colors={['#8B5CF6', '#06B6D4']} style={styles.saveButtonGradient}>
+                <Text style={styles.saveButtonText}>Save Entry</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+    </View>
   );
   
   // Render filter modal
@@ -573,7 +586,7 @@ export default function JournalScreen() {
     <View style={styles.container}>
       <StatusBar style="light" />
       <LinearGradient
-        colors={['#0A0A0A', '#1A1A1A', '#0A0A0A']}
+        colors={['#0B0B1A', '#1A1A2E', '#0B0B1A']}
         style={StyleSheet.absoluteFillObject}
       />
       <SafeAreaView style={{ flex: 1 }}>
@@ -777,11 +790,12 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     marginBottom: 15,
   },
-  moodSelector: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
+  moodSelectorScrollView: {
     marginBottom: 20,
+  },
+  moodSelectorContent: {
+    paddingHorizontal: 5,
+    flexDirection: 'row',
   },
   moodButton: {
     flexDirection: 'row',
@@ -888,5 +902,24 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  // Compact styles for better keyboard handling
+  compactInput: {
+    minHeight: 80,
+    maxHeight: 120,
+  },
+  compactMoodButton: {
+    width: 'auto',
+    marginRight: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  compactMoodLabel: {
+    marginLeft: 8,
+    fontSize: 14,
+  },
+  compactTag: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
   },
 });

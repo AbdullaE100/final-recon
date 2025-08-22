@@ -428,4 +428,6 @@ export const STORAGE_KEYS = {
   RELAPSE_HISTORY: 'clearmind:relapse-history',
   INTENTIONAL_RELAPSE: 'clearmind:intentional-relapse',
   DEVICE_ID: 'clearmind:device-id',
+  NOTIFICATION_SETTINGS: 'clearmind:notification-settings',
+  DAILY_CHECKIN_STREAK: 'clearmind:daily-checkin-streak',
 };

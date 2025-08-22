@@ -129,7 +129,7 @@ export default function HighRiskScreen() {
 
   return (
     <LinearGradient
-      colors={['#2A2A3A', '#1A1A2A']}
+      colors={['#0B0B1A', '#1A1A2E', '#16213E']}
       style={styles.container}
     >
       <StatusBar barStyle="light-content" />

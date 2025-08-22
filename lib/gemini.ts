@@ -15,16 +15,15 @@ interface CompanionData {
   level: number;
 }
 
-// Get companion name from storage
-const getCompanionName = async (): Promise<string> => {
+// Get user's actual name from storage
+const getUserName = async (): Promise<string | null> => {
   try {
-    const defaultCompanion: CompanionData = { name: 'Buddy', type: 'tiger', level: 1 };
-    const companionData = await getData<CompanionData>(STORAGE_KEYS.COMPANION_DATA, defaultCompanion);
-    return companionData?.name || 'Buddy';
+    const userPreferences = await getData(STORAGE_KEYS.USER_PREFERENCES, {});
+    return userPreferences?.username || null;
   } catch (error) {
-    console.error('Error getting companion name:', error);
-    return 'Buddy';
-    }
+    console.error('Error getting user name:', error);
+    return null;
+  }
 };
 
 // Detect conversation type based on user input
@@ -86,8 +85,6 @@ const detectConversationType = (prompt: string): string => {
 // Helper functions for specific conversation types
 export const createDailyCheckIn = async (dayCount?: number): Promise<string> => {
   try {
-    const companionName = await getCompanionName();
-    
     let prompt = "Let's do a daily check-in. ";
     if (dayCount) {
       prompt += `Today is day ${dayCount} of my NoFap journey. `;
@@ -97,7 +94,7 @@ export const createDailyCheckIn = async (dayCount?: number): Promise<string> => 
     return await getAIResponse(prompt, []);
   } catch (error) {
     console.error('Error creating daily check-in:', error);
-    return "Let's check in on how you're doing today. On a scale of 1-10, how are you feeling about your progress? Have you experienced any urges today? Remember, every day is a step forward in your journey.";
+    return "Tracking progress is **systems thinking** - you're measuring what matters. Identify your highest-leverage daily actions and double down on those. Consistency in the right areas compounds exponentially.";
     }
 };
 
@@ -107,7 +104,7 @@ export const createUrgeManagementResponse = async (prompt: string): Promise<stri
     return await getAIResponse(urgePrompt, []);
   } catch (error) {
     console.error('Error creating urge management response:', error);
-    return "I understand you're experiencing an urge right now. That's completely normal and shows your brain is healing. Let's work through this together. First, can you rate this urge from 1-10? Then choose: 1) Urge surfing (mindfulness technique) or 2) Distraction plan (shift focus activities). Which feels right for you?";
+    return "Urges are **decision points** - you're either reinforcing the old pattern or building a new one. Use the 10-minute rule: commit to waiting 10 minutes while doing something physical. Most urges peak and fade in that window.";
   }
 };
 
@@ -117,7 +114,7 @@ export const createUrgeSurfingFlow = async (prompt: string): Promise<string> => 
     return await getAIResponse(surfingPrompt, []);
   } catch (error) {
     console.error('Error creating urge surfing flow:', error);
-    return "Perfect choice. Urge surfing is like riding a wave - urges rise, peak, and naturally fall. Find a comfortable position and breathe deeply. Notice the urge without fighting it. Imagine it as a wave you're surfing - you're not the wave, you're the surfer. Feel it building, acknowledge it, and watch it start to fade. This usually takes 10-20 minutes. How does the urge feel now?";
+    return "Sitting with discomfort is **antifragility training** - you're building resilience through controlled stress. Use the 4-4-8 breathing pattern to activate your parasympathetic nervous system. This rewires your response to future challenges.";
   }
 };
 
@@ -127,7 +124,7 @@ export const createDistractionPlanFlow = async (prompt: string): Promise<string>
     return await getAIResponse(distractionPrompt, []);
   } catch (error) {
     console.error('Error creating distraction plan flow:', error);
-    return "Great strategy! Here are some quick distraction options: 1) Physical: 20 push-ups, cold shower, or walk outside 2) Mental: Call a friend, play a game, or watch something funny 3) Creative: Draw, write, or play music 4) Productive: Clean your space, organize, or work on a project. Pick one that feels doable right now and commit to 15 minutes. Which one calls to you?";
+    return "Energy redirection is **leverage** - you're using the urge's power against itself. Physical movement shifts your biochemistry and breaks the mental loop. Channel that energy into building something valuable.";
       }
 };
 
@@ -137,7 +134,7 @@ export const createRelapseResponse = async (prompt: string): Promise<string> => 
     return await getAIResponse(relapsePrompt, []);
   } catch (error) {
     console.error('Error creating relapse response:', error);
-    return "First, thank you for sharing this with me - that takes real courage. A relapse doesn't erase your progress or make you a failure. It's data about what triggers to watch for next time. Your brain is still healing from all the days you've been clean. What matters most is what you do next. Can you identify what led to this moment? Let's use this as fuel for an even stronger comeback.";
+    return "Failure is **data collection** - analyze the trigger patterns and system failures that led here. Build specific protocols for those exact scenarios. Your comeback strategy matters more than the setback itself.";
       }
 };
 
@@ -147,7 +144,7 @@ export const createCognitiveReframeResponse = async (prompt: string): Promise<st
     return await getAIResponse(reframePrompt, []);
   } catch (error) {
     console.error('Error creating cognitive reframe response:', error);
-    return "I hear those harsh thoughts, and I want you to know they're not facts - they're just thoughts. Let's challenge them together. Instead of 'I'm a failure,' try 'I'm learning and growing.' Instead of 'I can't do this,' try 'This is challenging, and I'm getting stronger.' What would you say to a good friend going through the same thing? Treat yourself with that same kindness.";
+    return "Negative thought loops are **mental habits** running on autopilot. Interrupt the pattern by asking: 'Is this thought helping me move forward?' Then redirect to your next strategic action. Control your focus, control your outcomes.";
   }
 };
 
@@ -157,13 +154,12 @@ export const createStrugglingResponse = async (prompt: string): Promise<string> 
     return await getAIResponse(strugglingPrompt, []);
   } catch (error) {
     console.error('Error creating struggling response:', error);
-    return "I can hear that you're going through a tough time, and that's completely understandable. Recovery isn't linear - it has ups and downs. The fact that you're here asking for help shows incredible strength. What specific part feels most challenging right now? Let's break it down into smaller, manageable pieces and create a plan that feels doable for you.";
+    return "Struggle indicates you're at the **edge of your comfort zone** - exactly where growth happens. Identify the smallest meaningful action that builds momentum. Momentum creates confidence, confidence enables bigger actions.";
   }
 };
 
 // Crisis response function
 const getCrisisResponse = async (): Promise<string> => {
-  const companionName = await getCompanionName();
   
   return `I'm really concerned about you right now. Your safety is the most important thing. Please reach out to someone who can help immediately:
 

@@ -86,10 +86,14 @@ export default function JournalEntry({ entry, onDelete }: JournalEntryProps) {
       <View style={styles.header}>
             <View style={styles.headerLeft}>
             {MoodIcon && <MoodIcon size={20} color={Mood.color} />}
-            <Text style={[styles.date, { marginLeft: MoodIcon ? 8 : 0 }]}>
-              {relativeTime}
-              {Mood.name && ` · Feeling ${Mood.name}`}
-        </Text>
+            <View style={{ marginLeft: MoodIcon ? 8 : 0 }}>
+              <Text style={styles.date}>
+                {fullDate}
+              </Text>
+              <Text style={styles.relativeTime}>
+                {relativeTime}{Mood.name && ` · Feeling ${Mood.name}`}
+              </Text>
+            </View>
             </View>
           <ChevronDown size={20} color="rgba(255, 255, 255, 0.6)" style={{ transform: [{ rotate: expanded ? '180deg' : '0deg' }] }} />
       </View>
@@ -194,8 +198,14 @@ const styles = StyleSheet.create({
   },
   date: {
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '600',
     color: '#FFFFFF',
+  },
+  relativeTime: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginTop: 2,
   },
   content: {
     fontSize: 15,

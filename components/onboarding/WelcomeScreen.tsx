@@ -69,9 +69,9 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onContinue }) => {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
       
-      {/* Refined gradient background with sophisticated color theory */}
+      {/* Refined gradient background matching Pledge logo */}
       <LinearGradient
-        colors={['#0A0B1A', '#151B33', '#1A2140']}
+        colors={['#0B0B1A', '#2D1B69', '#1E3A8A']}
         style={StyleSheet.absoluteFillObject}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}

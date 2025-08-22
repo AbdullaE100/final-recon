@@ -225,7 +225,7 @@ export default function ChallengeCard({
 
   return (
     <LinearGradient
-      colors={['#1F2937', '#111827']}
+      colors={['#1A1A2E', '#16213E']}
       style={styles.container}
     >
       <View style={styles.headerRow}>

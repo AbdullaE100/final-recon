@@ -48,6 +48,8 @@ import { CompanionChatProvider } from '@/context/CompanionChatContext';
 import { useAuth } from '@/context/AuthContext';
 import { format, addDays, differenceInDays, startOfToday, isBefore, parseISO } from 'date-fns';
 import StreakCardNew from '@/components/home/StreakCardNew';
+import DailyCheckInStreak from '@/components/home/DailyCheckInStreak';
+
 
 const { width, height } = Dimensions.get('window');
 
@@ -288,6 +290,13 @@ export default function HomeScreen() {
 
         <StreakCardNew />
         
+        <DailyCheckInStreak 
+          onCheckIn={(streak) => {
+            console.log('Daily check-in completed! Streak:', streak);
+            // Could trigger additional rewards or notifications here
+          }}
+        />
+        
         <CompanionChatPrompt />
         
         <BrainMetrics />
@@ -295,6 +304,8 @@ export default function HomeScreen() {
         <RecoveryCalendar />
         
         <DailyQuote />
+
+
 
       </ScrollView>
     </KeyboardAvoidingView>
@@ -514,4 +525,5 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
   },
+
 });

@@ -81,7 +81,8 @@ const CompanionChat = () => {
     getTriggers,
     lastMessageFailed
   } = useCompanionChat();
-  const { companion, getCompanionStage, achievements, streak, addJournalEntry } = useGamification();
+  const gamificationContext = useGamification();
+  const { companion, achievements } = gamificationContext || {};
   const router = useRouter();
   const insets = useSafeAreaInsets();
   
@@ -101,7 +102,7 @@ const CompanionChat = () => {
   const inputRef = useRef<TextInput>(null);
   
   /** Get companion stage directly from badge count */
-  const unlockedBadgesCount = achievements.filter(badge => badge.unlocked).length;
+  const unlockedBadgesCount = achievements?.filter((badge: any) => badge.unlocked).length || 0;
   const companionStage = unlockedBadgesCount >= 30 ? 3 : unlockedBadgesCount >= 15 ? 2 : 1;
   const companionType = companion?.type || 'water';
   
@@ -176,12 +177,38 @@ const CompanionChat = () => {
     };
   }, []);
   
-  /** Scroll to bottom when new messages appear */
+  /** Scroll to bottom when new messages appear - but only for new messages, not when loading existing ones */
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+  const [previousMessageCount, setPreviousMessageCount] = useState(0);
+  const [shouldScrollToEnd, setShouldScrollToEnd] = useState(false);
+  
   useEffect(() => {
-    if (messages.length > 0) {
+    if (messages.length > 0 && !initialLoadComplete) {
+      // First load - scroll to bottom after a short delay to ensure FlatList is rendered
+      setInitialLoadComplete(true);
+      setPreviousMessageCount(messages.length);
+      setShouldScrollToEnd(true);
+    } else if (messages.length > previousMessageCount && initialLoadComplete) {
+      // New message added - scroll to bottom
       scrollToBottom();
+      setPreviousMessageCount(messages.length);
+    } else if (messages.length !== previousMessageCount) {
+      // Message count changed but not increased (e.g., messages cleared)
+      setPreviousMessageCount(messages.length);
     }
-  }, [messages]);
+  }, [messages, initialLoadComplete, previousMessageCount]);
+  
+  // Scroll to end on initial load
+  useEffect(() => {
+    if (shouldScrollToEnd && messages.length > 0) {
+      const timer = setTimeout(() => {
+        scrollToBottom();
+        setShouldScrollToEnd(false);
+      }, 100); // Small delay to ensure FlatList is fully rendered
+      
+      return () => clearTimeout(timer);
+    }
+  }, [shouldScrollToEnd, messages.length]);
   
   /** Scroll to bottom of the chat */
   const scrollToBottom = () => {
@@ -843,7 +870,7 @@ const CompanionChat = () => {
               onPress={handleOptOut}
               activeOpacity={0.7}
             >
-              <Text style={[styles.optOutText, { color: colors.secondaryText }]}>Don't show again</Text>
+              <Text style={[styles.optOutText, { color: colors.secondaryText }]}>Don&apos;t show again</Text>
             </TouchableOpacity>
             
             <TouchableOpacity
@@ -1019,6 +1046,8 @@ const CompanionChat = () => {
     </Modal>
   );
   
+
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: '#000000' }]}>
       <LinearGradient colors={['#121212', '#000000']} style={StyleSheet.absoluteFillObject} />
@@ -1066,10 +1095,42 @@ const CompanionChat = () => {
           ]}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={renderEmptyState}
-          onContentSizeChange={scrollToBottom}
         />
+        {/* Subtle AI typing indicator */}
+        {isLoading && (
+          <View style={[styles.messageContainer, styles.companionContainer]}>
+            <View style={styles.avatarContainer}>
+              <LinearGradient
+                colors={['#6366F1', '#4F46E5']}
+                style={styles.avatarBackground}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <View style={styles.avatarAnimationContainer}>
+                  <LottieView
+                    source={getCompanionSource()}
+                    autoPlay
+                    loop
+                    style={styles.avatarAnimation}
+                  />
+                </View>
+              </LinearGradient>
+            </View>
+            <View style={[styles.messageBubble, styles.companionBubble, { backgroundColor: '#1F2937', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', opacity: 0.7 }]}> 
+              <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: '#FFFFFF', marginRight: 4, opacity: 0.6 }} />
+                  <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: '#FFFFFF', marginRight: 4, opacity: 0.6 }} />
+                  <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: '#FFFFFF', opacity: 0.6 }} />
+                </View>
+              </View>
+            </View>
+          </View>
+        )}
         </View>
           
+
+
           <View style={styles.inputWrapper}>
           <TouchableOpacity 
             style={styles.quickActionsToggle} 

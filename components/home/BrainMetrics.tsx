@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Dimensions } from 'react-native';
 import { useTheme } from '@/context/ThemeContext';
-import { useGamification } from '@/context/GamificationContext';
+import { useStreak } from '@/context/StreakContext';
 import Svg, { Circle, G, Text as SvgText } from 'react-native-svg';
 import { Brain, TrendingUp, Zap, Focus, HeartPulse } from 'lucide-react-native';
 
@@ -131,7 +131,7 @@ const calculateProgress = (dataArray: MetricDataPoint[], streak: number): number
 // Simple BrainMetrics component without complex animations
 export default function BrainMetrics() {
   const { colors } = useTheme();
-  const { streak } = useGamification();
+  const { streak } = useStreak();
   const [selectedCategory, setSelectedCategory] = useState('dopamine');
   
   // Safely get the selected category

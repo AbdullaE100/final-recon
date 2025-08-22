@@ -15,6 +15,7 @@ import { supabase } from '@/utils/supabaseClient';
 import { initializeHermesGuard } from '@/utils/hermesguard';
 import { StreakProvider } from '@/context/StreakContext';
 import { fixNewUserStreak, fix30DayBug } from '@/utils/resetStreakData';
+import NotificationService from '@/utils/notificationService';
 
 // Initialize Hermes compatibility guard immediately
 initializeHermesGuard();
@@ -69,6 +70,14 @@ export default function RootLayout() {
         // Step 4: Check if onboarding is completed
         const isOnboardingCompleted = await getData(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
         setOnboardingCompleted(isOnboardingCompleted);
+        
+        // Step 5: Initialize notification service
+        try {
+          await NotificationService.getInstance().initialize();
+          console.log('Notification service initialized');
+        } catch (notificationError) {
+          console.warn('Failed to initialize notification service:', notificationError);
+        }
         
         // If onboarding is not completed, check if Supabase is available to 
         // enable data recovery option
